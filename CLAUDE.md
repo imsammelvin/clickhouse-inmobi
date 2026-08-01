@@ -5,12 +5,12 @@ destroy someone else's work.
 
 Before doing anything, read in this order:
 
-1. **[AGENTS.md](AGENTS.md)** — the operating rules. Non-negotiable. Covers branch discipline, file
-   ownership, how to claim work, and how to communicate.
-2. **[goal.md](goal.md)** — what we are building.
-3. **[TASKS.md](TASKS.md)** — the shared task board. Claim a task here before you write code.
+1. **[context/AGENTS.md](context/AGENTS.md)** — the operating rules. Non-negotiable. Covers branch
+   discipline, file ownership, how to claim work, and how to communicate.
+2. **[context/goal.md](context/goal.md)** — what we are building.
+3. **[context/TASKS.md](context/TASKS.md)** — the shared task board. Claim a task here before you write code.
 4. `git log --oneline -30` — what the other three have done recently.
-5. `coordination/journal/<your-handle>.md` — your own notes from last session.
+5. `context/journal/<your-handle>.md` — your own notes from last session.
 
 Hard rules, repeated here because they matter most:
 

@@ -25,7 +25,7 @@ them costs nothing.
 | **§1 Plain**    | Revenue manager, demo, deck      | **Now**                         |
 | **§2 Receipts** | Judges, anyone auditing a figure | When the narrator lands (T-019) |
 
-> ⚠ **What we actually print today is neither.** `backend/render.ts` emits something in between —
+> ⚠ **What we actually print today is neither.** `backend/engine/render.ts` emits something in between —
 > `-35.17pp on 9.6% of traffic`, `0.7837` — readable to us, not to a revenue manager. Writing the
 > §1 renderer is the next piece of work, and it is presentation only: no engine change, and the
 > grounding check keeps working because it verifies whatever string we print.

@@ -1,2 +1,4 @@
 dist/
 node_modules/
+# Frozen exhibit -- a captured snapshot of one investigation's output, not authored source.
+pitch/example-report/

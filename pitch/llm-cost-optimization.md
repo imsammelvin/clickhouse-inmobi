@@ -13,7 +13,7 @@ Each entry: what we found → what we changed → how we verified it → the num
 
 **Found:** Pulling real observations via the Langfuse MCP tools (`listObservations`, `getObservation`),
 two individual `getObservation` calls came back at 184,994, 185,519, and 300,334 characters — large
-enough to hit the tool's own max-output-size limit. Tracing this to source: `mcp/tools.ts`'s
+enough to hit the tool's own max-output-size limit. Tracing this to source: `backend/mcp/tools.ts`'s
 `investigate` tool handler returned the full `inv.ruledOut` array — every segment the pipeline checked
 and excluded — as raw JSON in the tool payload. On a real incident this array can hold 800+ entries,
 each restating segment name, delta%, and residual.
@@ -107,7 +107,7 @@ ask a fresh question through LibreChat and check that the resulting observation'
 non-zero (was unconditionally `$0` before this change).
 
 **Why this matters for the pitch:** without this, we could observe token _counts_ growing but never
-translate that into a dollar figure — cost attribution (`mcp/cost.ts`) already does this rigorously for
+translate that into a dollar figure — cost attribution (`backend/mcp/cost.ts`) already does this rigorously for
 ClickHouse compute; this closes the same gap on the LLM side.
 
 **Confirmed live** (2026-08-01, ~30 min after registering the model): 20 real generations,
@@ -141,7 +141,7 @@ session-hygiene issue on the client side, not a bug in our MCP/backend code — 
 (BROADCAST, 2026-08-01) rather than fixed here, since it isn't ours to change.
 
 **Still open, ours to act on if we want to shave the cold-start further:** our own MCP tool schema
-definitions (`mcp/tools.ts`, 10 tools with parameter descriptions) are part of that same uncached
+definitions (`backend/mcp/tools.ts`, 10 tools with parameter descriptions) are part of that same uncached
 first-call payload every session. We chose descriptive, information-dense tool/parameter descriptions
 deliberately (they're what stops the model from re-deriving or mis-averaging a number — see the
 `get_metric`/`compare_periods` caveats) and caching already amortizes their cost after turn one, so
@@ -152,14 +152,14 @@ real problem at higher session volume.
 
 ## 4. `describe_data` re-scanned the dataset on every call, even mid-session (FIXED)
 
-**Found:** `describe_data` (`mcp/tools.ts`) runs one real ClickHouse aggregate over the whole
+**Found:** `describe_data` (`backend/mcp/tools.ts`) runs one real ClickHouse aggregate over the whole
 `ad_events_enriched` window — a full-table scan for min/max date, row counts, sums. Its own tool
 description tells the model to "call it once at the start of a conversation," but nothing enforced
 that: a multi-turn agent loop (see §3's 15-round-trip pattern) can call it again mid-session, and
 every repeat call paid for the same scan to get back the exact same, unchanging answer — the loaded
 dataset never changes mid-session.
 
-**Fix:** memoized on the `Session` object (`mcp/trace.ts`), the same pattern already used for
+**Fix:** memoized on the `Session` object (`backend/mcp/trace.ts`), the same pattern already used for
 `ensureDatasetBounds` (`private bounds?`) — a `getOverview()` method with a `private overview?`
 cache slot, generic rather than tied to one result type so any other pure per-session read can reuse
 the same slot later:
