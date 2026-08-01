@@ -268,3 +268,30 @@ before-number that makes T-013's rollup a measured delta instead of a paragraph.
 4. `diagnose` takes 91s, dominated by 6 sequential investigations. Investigating in parallel is the
    easy win if Day-2 time pressure matters.
 5. Still open: plain-English renderer (T-045), `bun install` drift.
+
+---
+
+## 2026-08-02 · branch hygiene after reviewing the rollup
+
+Reviewed `dev/samarth/rollup-mv` and approved it — every gate green, no number moved, and his bench
+totals (213.6M rows read -> 3.69M, 884 MiB peak -> 40.5 MiB) are the direct answer to the rows-read gap
+I raised. Details in BROADCAST.
+
+**Two of my commits ended up on samarth's branch, and one of them has to stay there.**
+
+- `2025a41 fix(rollup)` edits `clickhouse/rollup.ts`, which exists ONLY on his branch. It cannot be
+  separated and its correct home is the branch that introduces the file it changes. Carries
+  `Crosses-lane: samarth` and a BROADCAST entry with the red-test output.
+- `0274d77 fix(synth)` touches only `mcp/synth/*`, all of which are already on main, so it had no
+  business living on his branch. Cherry-picked onto **`dev/sam/synth-fingerprint`** off `origin/main`,
+  where it can merge independently of the rollup.
+
+**What I did not do:** rewrite `dev/samarth/rollup-mv`. It is already pushed — `origin` is at `2025a41`
+— so removing my commits would mean force-pushing a shared branch I do not own, which AGENTS.md § 7
+forbids outright and which is exactly how someone else's afternoon disappears. The duplicate content is
+harmless: if both merge, the second is an empty diff.
+
+**Lesson, and it is the third variant of the same one this session.** I did the work while sitting on
+another person's branch without checking `git rev-parse --abbrev-ref HEAD` first. Earlier I committed
+straight to `main` for the same reason. **Check the branch before the first commit, not after the
+fifth** — by then the only fixes left are the ones you are not allowed to make.
