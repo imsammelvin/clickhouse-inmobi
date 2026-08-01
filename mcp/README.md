@@ -16,6 +16,9 @@ LibreChat ──MCP/JSON-RPC──▶ mcp/server.ts ──▶ mcp/tools.ts ─�
 ## Run it
 
 ```bash
+bun run verify              # EVERY gate: typecheck, criteria, accuracy, rollup==raw, unseen data
+bun run verify -- --quick   # skip the two slow ones (~3 min instead of ~5.5)
+
 bun install                 # required on a fresh clone
 bun run diagnose            # THE unattended path: sweep -> rank -> investigate -> report
 bun run mcp:http            # LibreChat and anything else with a URL -> :3333/mcp
