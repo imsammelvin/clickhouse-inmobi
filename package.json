@@ -9,6 +9,7 @@
     "ch:load": "bun run scripts/load.ts",
     "ch:verify": "bun run scripts/verify.ts",
     "ch:setup": "bun run ch:schema && bun run ch:load && bun run ch:verify",
+    "langfuse:trace": "bun run backend/langfuse/trace-stub.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
@@ -18,6 +19,10 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "@clickhouse/client": "^1.23.1"
+    "@clickhouse/client": "^1.23.1",
+    "@anthropic-ai/sdk": "^0.32.0",
+    "@langfuse/tracing": "^5.10.0",
+    "@langfuse/otel": "^5.10.0",
+    "@opentelemetry/sdk-node": "^0.221.0"
   }
 }

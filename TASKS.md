@@ -38,7 +38,7 @@
 | T-017 | Statistical significance gate (sample-size floor for rates, min-volume floor for absolutes) | Lane A | — | todo | — | T-016 | Failing segments logged as "ruled out: insufficient volume," not dropped silently. |
 | T-018 | Contribution-to-delta ranking + simple explainable confidence score | Lane A | — | todo | — | T-016, T-017 | Rank by share of total delta, not raw %. |
 | T-019 | LLM narration prompt: JSON-in only, forbid any number not present in input | Lane A | — | todo | — | T-018 | The single-worst scoring outcome is one fabricated number — guard this hard. |
-| T-020 | Langfuse tracing: one trace per investigation, Stage 0–6 as nested spans | Lane A | — | todo | — | T-015 | This is the direct "traceability" judging criterion. |
+| T-020 | Langfuse tracing: one trace per investigation, Stage 0–6 as nested spans | Lane A | loges | review | dev/loges/langfuse-tracing | T-015 | Standalone proof-of-concept done against mock data (no engine yet) -- verified end-to-end via langfuse-cli. Real stage outputs replace MOCK_* once T-015/T-016 land. |
 | T-021 | ClickHouse MCP server wired to the drill-down/detection queries | Lane B | — | todo | — | T-016 | Handbook's own starting point — should be quick. |
 | T-022 | ClickStack instrumentation of the investigation backend (per-stage latency, errors, traces) | Lane C | — | todo | — | T-009 | Produces the evidence for "diagnosed in seconds." |
 | T-023 | LibreChat: render investigation JSON as a formatted diagnosis chat message | Lane D | — | todo | — | T-018 | Mock against a sample JSON payload per `goal.md` § 8 — don't block on Lane A's API. |
