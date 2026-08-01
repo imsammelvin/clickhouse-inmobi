@@ -317,7 +317,6 @@ change it without risking a regression elsewhere. `investigate()` on the exact h
 (Jun 19-22) already gets this right today (confirmed: `mcp:eval` C-finance-ecpm passes 100%). Flagging
 for whoever has time before the freeze to confirm whether the European-interstitial pattern is real.
 
-
 ---
 
 ## 2026-08-01 — T-013 landed: rollup MVs live. One decision-log correction, one cross-lane export, one patch offered to Lane A. — samarth (Lane B)
@@ -354,7 +353,7 @@ at a time, occasionally two.
 What shipped instead: long format `(bucket, dim, val)`, carrying 11 single dimensions and **all 36
 pairs of the 9 low-cardinality ones** — 4,221 segments, 148k daily rows. Entity dimensions (`app_id`,
 `advertiser_id`) are carried singly but never paired: `app_id x os_version` alone is 529k daily rows,
-more than every other pair combined. Cost grows with *cardinality x time*, not with events, which is
+more than every other pair combined. Cost grows with _cardinality x time_, not with events, which is
 the petabyte answer § 3 promises.
 
 § 7 is LOCKED, so this is a **proposal, not an edit**. loges: please add D-020 to § 11 and correct the
@@ -372,15 +371,15 @@ the symptom would be two sweeps disagreeing about whether an incident happened. 
 `find_incidents` went from ~40% of a `diagnose` run's rows read to **0.7%**. Everything left is engine
 stages, from that run's own `query_log` attribution:
 
-| stage | queries | rows read | share | rollup-servable? |
-| --- | --- | --- | --- | --- |
-| residualize | 25 | 121,770,166 | 36.7% | partly — single-exclusion x small-dim target only |
-| detect | 12 | 72,561,654 | 21.9% | **yes, fully** |
-| confirm (calls `detect`) | 16 | 66,008,845 | 19.9% | **yes, fully** |
-| localize | 5 | 21,722,112 | 6.5% | unmasked pass yes; masked needs the pair |
-| decompose | 10 | 21,722,107 | 6.5% | **yes** |
-| classify | 4 | 15,775,802 | 4.8% | no — `uniqExact` on advertisers is not a sum |
-| find_incidents | 10 | 2,286,280 | 0.7% | done |
+| stage                    | queries | rows read   | share | rollup-servable?                                  |
+| ------------------------ | ------- | ----------- | ----- | ------------------------------------------------- |
+| residualize              | 25      | 121,770,166 | 36.7% | partly — single-exclusion x small-dim target only |
+| detect                   | 12      | 72,561,654  | 21.9% | **yes, fully**                                    |
+| confirm (calls `detect`) | 16      | 66,008,845  | 19.9% | **yes, fully**                                    |
+| localize                 | 5       | 21,722,112  | 6.5%  | unmasked pass yes; masked needs the pair          |
+| decompose                | 10      | 21,722,107  | 6.5%  | **yes**                                           |
+| classify                 | 4       | 15,775,802  | 4.8%  | no — `uniqExact` on advertisers is not a sum      |
+| find_incidents           | 10      | 2,286,280   | 0.7%  | done                                              |
 
 **Start with `detect`. 41.8% of the remaining rows for a three-line change.** Its query is one
 `GROUP BY event_date` over a mask, i.e. 0-2 dimensions — exactly what the rollup serves:
@@ -389,7 +388,8 @@ stages, from that run's own `query_log` attribution:
 // backend/stages/detect.ts
 import { planRollup, RAW_SOURCE } from "../../clickhouse/rollup";
 
-const src = planRollup({ dims: mask.dims ?? [], grain: "daily", expressions: [expr] }) ?? RAW_SOURCE;
+const src =
+  planRollup({ dims: mask.dims ?? [], grain: "daily", expressions: [expr] }) ?? RAW_SOURCE;
 const sql = `
 SELECT toString(event_date) AS d, ${src.expr(expr)} AS v
 FROM ${src.from}
@@ -404,9 +404,9 @@ them, so `planRollup` cannot be asked. A `dims?: readonly string[]` field popula
 still the 21.9% row.
 
 Two rules if you take this: **(1) list EVERY dimension the query mentions, filters included** — a filter
-costs a cut just as a group-by does, and forgetting one returns the *unfiltered* number, which is
+costs a cut just as a group-by does, and forgetting one returns the _unfiltered_ number, which is
 plausible and wrong. **(2) Add your case to `scripts/verify-rollup.ts`.** It runs the real query path
-twice, rollup off then on, and asserts both the numbers and *which surface served them* — a probe that
+twice, rollup off then on, and asserts both the numbers and _which surface served them_ — a probe that
 silently fell back would otherwise pass by comparing raw against itself.
 
 `backend/scan.ts` (`bun run scan`) also still uses the raw sweep; `mcp/sweep.ts` exports
@@ -416,7 +416,7 @@ the one-line swap.
 ### Everyone: two hazards worth knowing about, because both are silent
 
 1. **`DROP PARTITION` does not cascade into a materialized view's target.** The loader now drops
-   `DERIVED_TABLES` partitions alongside the fact partition. Without that, a re-load makes the MV *add*
+   `DERIVED_TABLES` partitions alongside the fact partition. Without that, a re-load makes the MV _add_
    a second copy of the day and every rollup-served figure comes back **exactly doubled**, with the fact
    table's row-count assertion still passing. **If you ever add a table fed by an MV, add it to
    `DERIVED_TABLES` in `enums/index.ts` or you will silently double-count on the next reload.**
