@@ -29,10 +29,14 @@ short, lowercase, no spaces.
 
 | Slot | Name | Handle | Lane | Primary directories |
 |---|---|---|---|---|
-| 1 | _TBD_ | `dev-1` | Lane A — _TBD_ | `_TBD_/` |
-| 2 | _TBD_ | `dev-2` | Lane B — _TBD_ | `_TBD_/` |
-| 3 | _TBD_ | `dev-3` | Lane C — _TBD_ | `_TBD_/` |
-| 4 | _TBD_ | `dev-4` | Lane D — _TBD_ | `_TBD_/` |
+| 1 | Loges | `loges` | Lane A — Orchestrator, backend API, Langfuse, LLM narration | `backend/` |
+| 2 | _TBD_ (fill your name) | `dev-2` | Lane B — ClickHouse schema/ingest + MCP server | `clickhouse/`, `mcp/` |
+| 3 | _TBD_ (fill your name) | `dev-3` | Lane C — ClickStack observability | `clickstack/` |
+| 4 | _TBD_ (fill your name) | `dev-4` | Lane D — LibreChat integration | `librechat/` |
+
+Lanes/directories drafted by loges from the pre-event plan (see `goal.md` § 11 decision log) — this
+corrects an earlier draft that had dev-3/dev-4 swapped (ClickStack vs LibreChat). Each person: fill in
+your own Name cell, don't touch anyone else's row.
 
 When you fill this in, rename `coordination/journal/dev-N.md` to `coordination/journal/<handle>.md`.
 
@@ -171,7 +175,7 @@ Agent: <handle>
 | `Agent:` | always | `Agent: dev-2` |
 | `Crosses-lane:` | you touched another lane's file | `Crosses-lane: dev-3` |
 | `Breaking:` | you changed a shared contract or schema | `Breaking: events table now has session_id` |
-| `Needs:` | you are blocked on someone | `Needs: dev-1 to expose /api/query` |
+| `Needs:` | you are blocked on someone | `Needs: loges to expose /api/query` |
 
 Anything with `Breaking:` or `Crosses-lane:` **must** also get a BROADCAST entry. Agents: grep for
 these when you start a session —
