@@ -33,7 +33,7 @@ import {
   RETRY_ATTEMPTS,
 } from "../constants";
 import * as Q from "../constants/queries";
-import { DataFormat, Dictionary, LoadFlag, Table } from "../enums";
+import { DataFormat, DERIVED_TABLES, Dictionary, LoadFlag, Table } from "../enums";
 import type { CountRow, DayChunk, LoadOptions, PartitionRow, VersionRow } from "../interfaces";
 import {
   assertDuckdb,
@@ -240,6 +240,16 @@ const loadDay = async (client: ClickHouseClient, chunk: DayChunk): Promise<void>
       await exec(client, Q.dropPartition(chunk.partition), {
         alter_sync: "2",
       });
+
+      // The rollup tables get the same treatment, and this is not optional. A materialized view
+      // fires on INSERT and knows nothing about the DROP that preceded it, so leaving yesterday's
+      // rollup rows in place and re-inserting the day makes the MV *add* a second copy: every
+      // rollup-served figure for that day comes back exactly doubled, with the fact table's own
+      // row-count assertion still passing. The property D-014 bought -- "a reload can never
+      // double-count revenue" -- has to be bought again for every derived table.
+      for (const table of DERIVED_TABLES) {
+        await exec(client, Q.dropDerivedPartition(table, chunk.partition), { alter_sync: "2" });
+      }
 
       await insert(client, Table.AdEvents, createReadStream(chunk.path), DataFormat.Parquet);
 

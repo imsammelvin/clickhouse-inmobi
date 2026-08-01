@@ -35,6 +35,45 @@ export const dropPartition = (partition: string): string =>
   `ALTER TABLE ${Table.AdEvents} DROP PARTITION ${partition}`;
 
 /**
+ * The same drop, against a table a materialized view writes into.
+ *
+ * Needed because DROP PARTITION does not cascade. `ad_events` losing partition 20260621 leaves
+ * `rollup_segment_hourly` holding that day's rows, and the re-INSERT then makes the MV add a second
+ * copy -- so every rollup-served number for that day comes back exactly doubled, with no error and
+ * no row-count mismatch on the fact table to notice. The loader drops the derived partitions in the
+ * same retried unit as the fact partition, before the insert.
+ */
+export const dropDerivedPartition = (table: Table, partition: string): string =>
+  `ALTER TABLE ${table} DROP PARTITION ${partition}`;
+
+/**
+ * Does the rollup agree with the fact table about how many events exist?
+ *
+ * Cheap enough to run at every entry point: `count()` on a MergeTree is metadata, and summing the
+ * rollup's `ad_format` rows touches ~175 rows. Any single dimension's rows sum to the platform
+ * total, so this is a complete check rather than a spot check -- one row missing from a day, one day
+ * double-counted, or a rollup never backfilled all show up here as a mismatch.
+ */
+export const rollupCoverage = `
+  SELECT (SELECT count() FROM ${Table.AdEvents})                        AS fact_events,
+         (SELECT sum(events) FROM ${Table.RollupDaily} WHERE dim = 'ad_format') AS rollup_events,
+         (SELECT count() FROM ${Table.RollupDaily})                     AS rollup_rows,
+         (SELECT count() FROM ${Table.RollupHourly})                    AS rollup_hourly_rows`;
+
+/** Rows currently in one derived partition -- the post-backfill assertion. */
+export const derivedPartitionRows = (table: Table, partition: string): string => `
+  SELECT count() AS n
+    FROM ${table}
+   WHERE toYYYYMMDD(event_date) = ${partition}
+   SETTINGS select_sequential_consistency = 1`;
+
+export const derivedPartitionCounts = (database: string, table: Table): string => `
+  SELECT partition, sum(rows) AS rows
+    FROM system.parts
+   WHERE database = '${database}' AND table = '${table}' AND active
+   GROUP BY partition`;
+
+/**
  * Rows currently in one partition, read from the table itself rather than system.parts.
  * system.parts is replica-local metadata and lags a fresh insert on ClickHouse Cloud, which makes
  * it useless as a post-insert assertion. Sequential consistency gives us read-your-writes.

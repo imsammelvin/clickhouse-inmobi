@@ -10,6 +10,17 @@
 --   2. dictionaries      (dict_*)                          -- in-memory lookups over the dims
 --   3. fact table        (ad_events)                       -- 9M rows, daily partitions
 --   4. ad_events_enriched VIEW                             -- THE query interface for other lanes
+--   5. rollup tables + MVs (rollup_segment_hourly/_daily)  -- GENERATED, see clickhouse/rollup.ts
+--
+-- Section 5 is NOT in this file. The two rollup targets and the two materialized views that
+-- maintain them are generated from the dimension registry in `clickhouse/rollup.ts`, because the
+-- insert-time fan-out is 47 expressions that must agree exactly with what the query planner
+-- believes exists -- maintaining that list in two places is how you get a planner reading a `dim`
+-- the MV never wrote, which returns no rows and looks like a real zero. `bun run ch:schema` applies
+-- this file and then those statements, in that order. Read rollup.ts for the grain and its
+-- justification; the short version is that goal.md's proposed
+-- (hour, app_id, geo_device_id, advertiser_id, ad_format) grain was measured and compresses
+-- nothing -- 9M events land on ~9M keys -- so the rollup is long-format (bucket, dim, val) instead.
 
 -- ---------------------------------------------------------------------------
 -- 1. Dimensions

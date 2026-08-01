@@ -9,11 +9,36 @@ export enum Table {
   Apps = "apps",
   Advertisers = "advertisers",
   GeoDevice = "geo_device",
+  /**
+   * Rollup targets, written by the materialized views below. Long format -- one row per
+   * (bucket, dim, val) -- see clickhouse/rollup.ts for the grain and why it is not the one
+   * goal.md § 7 proposed.
+   */
+  RollupHourly = "rollup_segment_hourly",
+  RollupDaily = "rollup_segment_daily",
 }
+
+/**
+ * Tables whose partitions must be dropped alongside a fact partition on reload.
+ *
+ * DROP PARTITION on `ad_events` does NOT cascade into a materialized view's target, so a re-run of
+ * the loader would insert a day's rollup rows a second time on top of the first. Every metric read
+ * from the rollup would then be exactly double, silently, on a re-run that exists precisely to be
+ * safe (D-014). This list is what stops that.
+ */
+export const DERIVED_TABLES = [Table.RollupHourly, Table.RollupDaily] as const;
 
 /** Views. `AdEventsEnriched` is the query interface every other lane should use. */
 export enum View {
   AdEventsEnriched = "ad_events_enriched",
+}
+
+/** Materialized views. Incremental -- they fire on every insert into their source table. */
+export enum MaterializedView {
+  /** ad_events -> rollup_segment_hourly, with the 47-way dimension fan-out. */
+  RollupHourly = "mv_rollup_segment_hourly",
+  /** rollup_segment_hourly -> rollup_segment_daily, cascaded so daily cannot disagree with hourly. */
+  RollupDaily = "mv_rollup_segment_daily",
 }
 
 /** In-memory dictionaries backing the enriched view. LIFETIME(0) -- reload explicitly. */
