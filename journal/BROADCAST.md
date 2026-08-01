@@ -85,3 +85,24 @@ independent co-occurring causes need the loop to run to convergence rather than 
 that is handled, but it is the part most likely to be wrong, and it is worth a test.
 
 **Commit:** branch `dev/sam/biz-specs`
+
+### 2026-08-01 18:20 — samarth — four relevance fixes in backend/ (Lane A files)
+**What changed:** `backend/stages/decompose.ts`, `backend/stages/classify.ts`,
+`backend/orchestrate.ts` on branch `dev/samarth/relevance-fixes` (`4e8a318`). All four defects were
+the same shape — arithmetic correct, sentence wrong — which grounding cannot catch by design.
+(1) decompose compared a 4-day window against a 9-day baseline pool with a different weekday mix;
+baseline is now aligned day-for-day on weekday with a median across days. (2) classify received the
+platform decomposition for a segment finding; classify and price now share one cause-scoped
+decomposition. (3) `uniqExact` pooled over an N-day baseline inflated advertiser counts and
+manufactured demand-change on any narrow segment; now per-day medians. (4) the headline joined the
+scope's delta to a platform-wide cause with "driven by".
+**Who is affected:** Lane A (`loges`) — these are your files, please review. Lane D — diagnosis
+channels changed for two incidents, so any fixtures keyed on them need regenerating.
+**What you must do:** `bun install` before running anything (`@opentelemetry/api` is missing on a
+fresh clone). Channels through the product path are now A technical_break, B not_localizable,
+C demand_change, D technical_break, decoy supply_change. All four criteria pass.
+**Still open:** the decoy states the platform verdict first and prices at $1.24/day but still emits
+a channel and an owner. Suppressing it needs a materiality rule; dollars alone cannot separate it
+from incident D ($1.50/day), share of traffic can (1.7% vs 9.8%). I deliberately did not ship a
+threshold tuned to split those two.
+**Commit:** `4e8a318` on `dev/samarth/relevance-fixes`
