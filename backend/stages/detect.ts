@@ -16,6 +16,8 @@ import {
   trendAwareBaseline,
 } from "../baseline";
 import { type Mask, NO_MASK } from "../types";
+import { withSpan } from "../../utils/telemetryUtils";
+import type { Span } from "@opentelemetry/api";
 
 export interface Detection {
   metric: string;
@@ -50,6 +52,32 @@ export async function detect(
   from: string,
   to: string,
   mask: Mask = NO_MASK,
+): Promise<Detection> {
+  return withSpan(
+    "stage.detect",
+    {
+      "app.stage": "detect",
+      "app.metric": metric,
+      "app.window.from": from,
+      "app.window.to": to,
+      "app.mask": mask.description,
+    },
+    (span) => detectInner(ledger, metric, from, to, mask, span),
+  );
+}
+
+/**
+ * The stage body. Split out so the span wrapper above stays readable; the verdict is stamped onto
+ * the span on the way out, which is what makes "which stage decided nothing happened?" answerable
+ * from a trace search rather than from the console output of a run nobody kept.
+ */
+async function detectInner(
+  ledger: Ledger,
+  metric: string,
+  from: string,
+  to: string,
+  mask: Mask,
+  span: Span,
 ): Promise<Detection> {
   const def = METRICS[metric];
   if (!def)
@@ -177,6 +205,11 @@ ORDER BY event_date`.trim();
 
   // Refusing is a legitimate output. Better than a confident answer off two observations.
   if (baseVals.length < MIN_BASELINE_DAYS) {
+    span.setAttributes({
+      "app.detect.anomalous": false,
+      "app.detect.baseline_days": baseVals.length,
+      "app.detect.refused": true,
+    });
     return {
       metric,
       from,
@@ -202,6 +235,14 @@ ORDER BY event_date`.trim();
   const reason = anomalous
     ? `${deltaPct.toFixed(1)}% move at ${sigma.toFixed(1)} sigma against ${baseVals.length} same-weekday days.`
     : `Within band: ${deltaPct.toFixed(1)}% (gate ${MIN_ABS_PCT}%), ${sigma.toFixed(1)} sigma (gate ${MIN_SIGMA}).`;
+
+  span.setAttributes({
+    "app.detect.anomalous": anomalous,
+    "app.detect.baseline_days": baseVals.length,
+    "app.detect.delta_pct": Number(deltaPct.toFixed(4)),
+    "app.detect.sigma": Number(sigma.toFixed(3)),
+    "app.detect.refused": false,
+  });
 
   return {
     metric,

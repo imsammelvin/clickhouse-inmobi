@@ -7,7 +7,7 @@
 import { Ledger } from "./ledger";
 import { investigate } from "./orchestrate";
 import { renderFull } from "./render";
-import { log } from "../utils/telemetryUtils";
+import { initObservability, log, shutdownObservability, withSpan } from "../utils/telemetryUtils";
 
 function arg(name: string, fallback?: string): string {
   const i = process.argv.indexOf(`--${name}`);
@@ -17,6 +17,15 @@ function arg(name: string, fallback?: string): string {
 }
 
 async function main(): Promise<void> {
+  initObservability();
+  try {
+    await withSpan("cli.explain", {}, () => run());
+  } finally {
+    await shutdownObservability();
+  }
+}
+
+async function run(): Promise<void> {
   const metric = arg("metric", "revenue");
   const from = arg("from");
   const to = arg("to", from);

@@ -6,6 +6,7 @@ import { DATA_DIR, FLOAT_TOLERANCE, REPO_ROOT, retryBackoffMs } from "../constan
 import { srcParquetFileMeta } from "../constants/queries";
 import type { SourceFile } from "../enums";
 import type { ParquetFileMeta } from "../interfaces";
+import { withSpan } from "./telemetryUtils";
 
 // ---------------------------------------------------------------------------
 // paths
@@ -48,23 +49,35 @@ export const withRetry = async <T>(
   attempts: number,
   fn: () => Promise<T>,
 ): Promise<T> => {
-  let lastError: unknown;
+  // Spanned around the whole retry sequence, not around each attempt: the individual attempts
+  // already open their own spans (they are `exec`/`insert` calls), and what is invisible without
+  // this is that a step which "succeeded" actually took four goes to do it.
+  return withSpan(
+    "retry",
+    { "app.retry.what": what, "app.retry.max_attempts": attempts },
+    async (span) => {
+      let lastError: unknown;
 
-  for (let attempt = 1; attempt <= attempts; attempt++) {
-    try {
-      return await fn();
-    } catch (error) {
-      lastError = error;
-      if (attempt === attempts) break;
+      for (let attempt = 1; attempt <= attempts; attempt++) {
+        try {
+          const value = await fn();
+          span.setAttribute("app.retry.attempts_used", attempt);
+          return value;
+        } catch (error) {
+          lastError = error;
+          if (attempt === attempts) break;
 
-      const backoff = retryBackoffMs(attempt);
-      console.warn(`  ! ${what} failed (attempt ${attempt}/${attempts}): ${asMessage(error)}`);
-      console.warn(`    retrying in ${backoff}ms`);
-      await sleep(backoff);
-    }
-  }
+          const backoff = retryBackoffMs(attempt);
+          console.warn(`  ! ${what} failed (attempt ${attempt}/${attempts}): ${asMessage(error)}`);
+          console.warn(`    retrying in ${backoff}ms`);
+          await sleep(backoff);
+        }
+      }
 
-  throw lastError;
+      span.setAttribute("app.retry.attempts_used", attempts);
+      throw lastError;
+    },
+  );
 };
 
 /** Run `fn` over `items` with at most `limit` in flight. Rejects on the first failure. */
@@ -99,21 +112,37 @@ export const asMessage = (error: unknown): string =>
 // prove nothing, so the cross-check has to come from a different engine.
 // ---------------------------------------------------------------------------
 
-/** Run SQL through the duckdb CLI and return raw stdout. */
+/**
+ * Run SQL through the duckdb CLI and return raw stdout.
+ *
+ * Spanned for the same reason the ClickHouse calls are: this is the other engine we depend on, and
+ * a slow day-split shows up here or nowhere. `db.system` distinguishes it from the ClickHouse
+ * spans, so the two engines are separable in the UI.
+ */
 export const duckdb = async (sql: string): Promise<string> => {
-  const proc = Bun.spawn(["duckdb", "-json", "-c", sql], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
+  return withSpan(
+    "duckdb.query",
+    {
+      "db.system": "duckdb",
+      "db.query.text": sql.length > 500 ? `${sql.slice(0, 500)}...` : sql,
+    },
+    async (span) => {
+      const proc = Bun.spawn(["duckdb", "-json", "-c", sql], {
+        stdout: "pipe",
+        stderr: "pipe",
+      });
 
-  const [stdout, stderr, code] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
+      const [stdout, stderr, code] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ]);
 
-  if (code !== 0) throw new Error(`duckdb failed (exit ${code}):\n${stderr || stdout}`);
-  return stdout;
+      span.setAttribute("process.exit_code", code);
+      if (code !== 0) throw new Error(`duckdb failed (exit ${code}):\n${stderr || stdout}`);
+      return stdout;
+    },
+  );
 };
 
 /** Run SQL through the duckdb CLI and parse the JSON result. */

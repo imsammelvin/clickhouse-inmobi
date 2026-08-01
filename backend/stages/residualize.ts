@@ -19,6 +19,7 @@
 import type { Ledger } from "../ledger";
 import { type Candidate, localize } from "./localize";
 import { type Mask, NO_MASK, andMask, segmentExclusion } from "../types";
+import { withSpan } from "../../utils/telemetryUtils";
 
 export interface ResidualizeResult {
   causes: Candidate[];
@@ -115,6 +116,48 @@ export async function residualize(
   maxIterations = 4,
   /** The platform-level move for the same metric and window; segments are judged against it. */
   platformDelta = 0,
+): Promise<ResidualizeResult> {
+  return withSpan(
+    "stage.residualize",
+    {
+      "app.stage": "residualize",
+      "app.metric": metric,
+      "app.window.from": from,
+      "app.window.to": to,
+      "app.residualize.initial_candidates": initial.length,
+      "app.residualize.max_iterations": maxIterations,
+      "app.residualize.platform_delta": Number(platformDelta.toFixed(4)),
+    },
+    async (span) => {
+      const result = await residualizeInner(
+        ledger,
+        metric,
+        from,
+        to,
+        initial,
+        maxIterations,
+        platformDelta,
+      );
+      // The deflation loop's whole claim is "N raw candidates reduced to M causes". Both halves on
+      // the span, so the reduction is visible in a trace without reading the console.
+      span.setAttributes({
+        "app.residualize.causes": result.causes.length,
+        "app.residualize.contamination": result.contamination.length,
+        "app.residualize.uniform": result.uniform,
+      });
+      return result;
+    },
+  );
+}
+
+async function residualizeInner(
+  ledger: Ledger,
+  metric: string,
+  from: string,
+  to: string,
+  initial: Candidate[],
+  maxIterations: number,
+  platformDelta: number,
 ): Promise<ResidualizeResult> {
   const uniformity = isUniform(initial);
   if (uniformity.uniform) {
