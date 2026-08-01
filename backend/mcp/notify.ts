@@ -13,8 +13,66 @@
  */
 export interface Delivery {
   sent: boolean;
-  via: "smtp" | "log";
+  via: "webhook" | "resend" | "smtp" | "log";
   reason?: string;
+}
+
+/**
+ * Three ways out, tried in order of how little setup they need.
+ *
+ * The server cannot simply mail you itself. Delivering straight to a recipient's MX needs outbound
+ * port 25 — blocked on this machine, and blocked by most ISPs and cloud providers — and even when it
+ * is open, mail from an address with no SPF, DKIM or reverse DNS is rejected or binned by every large
+ * provider. Something has to vouch for the sender, so the only real choice is WHICH thing.
+ *
+ *   WATCH_WEBHOOK_URL   a Slack or Discord incoming webhook. Paste one URL, no account to verify, no
+ *                       deliverability to worry about. The most reliable option for a demo.
+ *   RESEND_API_KEY      real email via HTTPS. One key, no host/port/TLS/app-password.
+ *   EMAIL_*             SMTP, reusing LibreChat's existing variables.
+ *
+ * Whichever is configured first wins, and the runner prints which one it used.
+ */
+async function sendWebhook(subject: string, text: string): Promise<Delivery | null> {
+  const url = process.env.WATCH_WEBHOOK_URL;
+  if (!url) return null;
+  try {
+    const body = `*${subject}*\n${text}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      // Slack reads `text`, Discord reads `content`. Both ignore the key they do not know, so one
+      // payload serves either without asking the operator which they configured.
+      body: JSON.stringify({ text: body, content: body }),
+    });
+    return res.ok
+      ? { sent: true, via: "webhook" }
+      : { sent: false, via: "log", reason: `webhook returned ${res.status}` };
+  } catch (error) {
+    return { sent: false, via: "log", reason: `webhook failed: ${(error as Error).message}` };
+  }
+}
+
+async function sendResend(to: string, subject: string, text: string): Promise<Delivery | null> {
+  const key = process.env.RESEND_API_KEY;
+  if (!key) return null;
+  if (!to.includes("@")) return { sent: false, via: "log", reason: `no email address ("${to}")` };
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        from: process.env.EMAIL_FROM || "watchman@resend.dev",
+        to,
+        subject,
+        text,
+      }),
+    });
+    return res.ok
+      ? { sent: true, via: "resend" }
+      : { sent: false, via: "log", reason: `resend returned ${res.status}: ${(await res.text()).slice(0, 120)}` };
+  } catch (error) {
+    return { sent: false, via: "log", reason: `resend failed: ${(error as Error).message}` };
+  }
 }
 
 interface SmtpConfig {
@@ -47,7 +105,7 @@ export function smtpConfig(): SmtpConfig | { missing: string[] } {
   };
 }
 
-export async function sendEmail(to: string, subject: string, text: string): Promise<Delivery> {
+async function sendSmtp(to: string, subject: string, text: string): Promise<Delivery> {
   const cfg = smtpConfig();
   if ("missing" in cfg) {
     return { sent: false, via: "log", reason: `SMTP not configured (missing ${cfg.missing.join(", ")})` };
@@ -80,10 +138,21 @@ export async function sendEmail(to: string, subject: string, text: string): Prom
   }
 }
 
-/** One-line description of where mail would go, for the runner's banner. */
+/** Try each sink in order of setup cost; the first configured one wins. */
+export async function sendNotification(to: string, subject: string, text: string): Promise<Delivery> {
+  return (
+    (await sendWebhook(subject, text)) ??
+    (await sendResend(to, subject, text)) ??
+    (await sendSmtp(to, subject, text))
+  );
+}
+
+/** One-line description of where a notification would go, printed on every run. */
 export function deliveryStatus(): string {
+  if (process.env.WATCH_WEBHOOK_URL) return `webhook (${new URL(process.env.WATCH_WEBHOOK_URL).host})`;
+  if (process.env.RESEND_API_KEY) return "email via Resend";
   const cfg = smtpConfig();
   return "missing" in cfg
-    ? `log only — SMTP not configured (missing ${cfg.missing.join(", ")})`
+    ? `log only — set WATCH_WEBHOOK_URL (easiest), RESEND_API_KEY, or EMAIL_HOST/USERNAME/PASSWORD`
     : `SMTP ${cfg.host}:${cfg.port} as ${cfg.user}`;
 }
