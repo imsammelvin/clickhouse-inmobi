@@ -10,7 +10,25 @@ import type { Ledger } from "../ledger";
 import { DIMENSION_PAIRS, METRICS, dimensionsFor, metricExpr } from "../metrics";
 import { baselineDates, datesBetween, sqlDateList } from "../baseline";
 import { type Mask, NO_MASK } from "../types";
+import { ROLLUP_DIM_KEYS, ROLLUP_TABLES, rollupHealth, toRollupExpr } from "../../clickhouse/rollup";
 import { withSpan } from "../../utils/telemetryUtils";
+
+/**
+ * The rollup keys corresponding to the cuts this sweep makes.
+ *
+ * Intersected with `ROLLUP_DIM_KEYS` rather than assumed: if the sweep gains a dimension the rollup
+ * does not store, the intersection silently narrows and the sweep would report fewer candidates than
+ * the raw path — so `localize` refuses the rollup entirely unless every key it needs is present.
+ */
+function sweptRollupKeys(metric: string): string[] {
+  const dims = dimensionsFor(metric);
+  const wanted = [
+    ...dims,
+    ...DIMENSION_PAIRS.filter(([a, b]) => dims.includes(a) && dims.includes(b)).map(([a, b]) => `${a}|${b}`),
+  ];
+  const available = new Set(ROLLUP_DIM_KEYS);
+  return wanted.every((k) => available.has(k)) ? wanted : [];
+}
 
 export interface Candidate {
   dimension: string;
@@ -110,21 +128,35 @@ async function localizeInner(
   // filtering on delta would hide exactly the rows the differentiator depends on.
   const minRequests = 150;
 
-  const sql = `
-SELECT
-  dim,
-  val,
-  arrayReduce('median', base_days) AS base_v,
-  inc_v,
-  inc_reqs,
-  (SELECT count() FROM ad_events_enriched
-    WHERE event_date BETWEEN '${from}' AND '${to}') AS total_reqs
-FROM (
-  SELECT dim, val,
-         groupArrayIf(day_v, is_base)                       AS base_days,
-         ${perDay ? "sumIf(day_v, is_inc) / countIf(is_inc)" : "avgIf(day_v, is_inc)"} AS inc_v,
-         sumIf(day_reqs, is_inc)                            AS inc_reqs
-  FROM (
+  /**
+   * The rollup already IS this fan-out, so on the unmasked path there is nothing to fan out.
+   *
+   * `arrayJoin` exists here to turn one event row into one row per (dimension, value). The rollup
+   * stores exactly that shape, keyed by `dim`/`val`, so the sweep becomes a read of ~150k
+   * pre-aggregated rows instead of a 14-way explosion of 6.6M events.
+   *
+   * MASKED CALLS STAY ON RAW, and that is not a temporary shortcut. A mask constrains a dimension by
+   * name (`os_version = 'Android 15'`), and the rollup projection for a single-dimension key has no
+   * such column — the rows already summed that dimension away. Serving it from the rollup would need
+   * the matching PAIR key and a sum over the complement, per swept dimension, which is a different
+   * query shape (see BROADCAST). Falling back is exact; guessing would not be.
+   */
+  const keys = sweptRollupKeys(metric);
+  const unmasked = mask.sql === "1";
+  const useRollup = unmasked && keys.length > 0 && rollupHealth()?.ready === true;
+
+  const rollupSource = `
+    SELECT dim, val, event_date AS d,
+           ${toRollupExpr(expr)}       AS day_v,
+           ${toRollupExpr("count()")}  AS day_reqs,
+           event_date BETWEEN toDate('${from}') AND toDate('${to}') AS is_inc,
+           event_date IN (${sqlDateList(base)})                     AS is_base
+    FROM ${ROLLUP_TABLES.daily}
+    WHERE dim IN (${keys.map((k) => `'${k}'`).join(", ")})
+      AND (event_date BETWEEN '${from}' AND '${to}' OR event_date IN (${sqlDateList(base)}))
+    GROUP BY dim, val, event_date`;
+
+  const rawSource = `
     SELECT dim, val, d,
            ${expr}  AS day_v,
            count()  AS day_reqs,
@@ -137,7 +169,31 @@ FROM (
       WHERE (${mask.sql})
         AND (event_date BETWEEN '${from}' AND '${to}' OR event_date IN (${sqlDateList(base)}))
     )
-    GROUP BY dim, val, d
+    GROUP BY dim, val, d`;
+
+  // Share of platform traffic must come from the same surface, or the denominator disagrees with the
+  // numerator by whatever the two surfaces differ by.
+  const totalReqs = useRollup
+    ? `(SELECT ${toRollupExpr("count()")} FROM ${ROLLUP_TABLES.daily}
+        WHERE dim = 'ad_format' AND event_date BETWEEN '${from}' AND '${to}')`
+    : `(SELECT count() FROM ad_events_enriched
+        WHERE event_date BETWEEN '${from}' AND '${to}')`;
+
+  const sql = `
+SELECT
+  dim,
+  val,
+  arrayReduce('median', base_days) AS base_v,
+  inc_v,
+  inc_reqs,
+  ${totalReqs} AS total_reqs
+FROM (
+  SELECT dim, val,
+         groupArrayIf(day_v, is_base)                       AS base_days,
+         ${perDay ? "sumIf(day_v, is_inc) / countIf(is_inc)" : "avgIf(day_v, is_inc)"} AS inc_v,
+         sumIf(day_reqs, is_inc)                            AS inc_reqs
+  FROM (
+    ${useRollup ? rollupSource : rawSource}
   )
   GROUP BY dim, val
   HAVING length(base_days) > 0 AND inc_reqs >= ${minRequests}
