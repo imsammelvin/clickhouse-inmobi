@@ -169,5 +169,38 @@ snapshot test written against either run would have ratified whichever ordering 
    fires per block. Harmless — every read is a `sum()` and the event totals reconcile exactly — and it
    collapses on merge. Worth an `OPTIMIZE FINAL` before the demo if anyone wants the tidy number.
 
+**Post-merge check (after pulling sam's synth harness) — two gaps found, both closed.**
+
+1. **`mcp/synth/generate.ts` applied `schema.sql` but not the rollup**, because the rollup DDL is
+   generated in `clickhouse/rollup.ts`. So `rca_synth` had the fact table and no rollup, and that does
+   not crash — `ensureRollupReady` falls back to raw, so **the harness would have kept scoring green
+   while exercising the path production no longer uses.** A scorer that tests different code than it
+   ships is worth less than no scorer. Fixed; also truncates the rollup alongside `ad_events`, because
+   TRUNCATE does not cascade into an MV target either (same trap as DROP PARTITION, one layer over).
+   Verified: 9,627,421 events, both rollups sum to exactly 9,627,421 across all 47 dim keys, built
+   entirely by the MV with no backfill. `synth:verify` 5/5 planted found and localized, 0 gated
+   failures.
+2. **My own gate only tested the hourly rollup for platform totals.** Two tables = two chances to be
+   wrong, and `granularity: "hour"` with a *dimension* was never checked — a mis-projected column or
+   mis-split pair in `rollup_segment_hourly` would have passed. Now every cut runs at both grains and
+   each probe asserts the grain it was served from: an `hour` request landing on the daily table would
+   return rows that are 24x wrong on a table that reads correctly. 272 probes, 257 rollup-served, PASS.
+
+Also: `describe_data` and `list_dimension_values` were rollup-served but did not report `servedFrom`,
+which reads as two tools that were missed. Both report it now.
+
+**Unused objects audit (asked for before merge): nothing of ours to drop.** `ad_events_enriched` is
+load-bearing — it is the fallback for 3+ dimension cuts, entity pairs and `geo_device_id`, and all of
+`backend/` still reads it. The three dictionaries feed both it and the rollup MV. Both rollup tables
+and both MVs are used (hourly for per-hour questions, daily for everything else plus the sweep). The
+only empty objects in the service are four ClickStack tables — `hyperdx_sessions`,
+`otel_metrics_exponential_histogram`, `otel_metrics_gauge`, `otel_metrics_summary`, 0 rows each — and
+they are Lane C's, part of HyperDX's own fixed schema. HyperDX queries them by name, so dropping them
+would break the next signal type that arrives. They occupy 0 bytes. Left alone; flagged to Lane C.
+
+**All gates green after the merge:** `typecheck` clean, `ch:verify-rollup` 272/272, `mcp:eval` 16/16 /
+60/60 gated, `criteria` 4/4, `synth:verify` 5/5 with 0 gated failures.
+
 **Branches left open**
-- `dev/samarth/rollup-mv` — not pushed yet.
+- `dev/samarth/rollup-mv` — merged `origin/main` in (merge, not rebase, at the human's instruction;
+  AGENTS.md § 3 prefers rebase). Not pushed yet.

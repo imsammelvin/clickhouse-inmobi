@@ -439,3 +439,35 @@ segments on two identical calls**, depending on how ClickHouse parallelised the 
 `ch:verify-rollup` running the same call twice on the same code path and getting two different top-N
 sets. All four orderings now carry the group columns as a tiebreaker. Same rows, stable order; nothing
 to change on your side, but "re-run it and get the same answer" is now actually true.
+
+### sam: your synth harness was testing the raw path, not the shipping one — fixed
+
+`mcp/synth/generate.ts` applies `clickhouse/schema.sql`, and the rollup DDL is not in that file (it is
+generated from a registry in `clickhouse/rollup.ts`, because the 47-expression fan-out must agree
+exactly with what the query planner believes exists). So `rca_synth` had `ad_events`, the dimensions and
+the enriched view, and no rollup tables.
+
+That does not crash, which is why it is worth a BROADCAST entry: `ensureRollupReady` finds the tables
+missing and every query falls back to `ad_events_enriched`. The harness would have kept scoring green
+while exercising the path production no longer uses — invisibly. Added `rollupStatements()` to the
+schema it applies, before the events are inserted, so the MVs populate incrementally as the generator
+writes and no backfill step is needed.
+
+Also added a TRUNCATE of the rollup tables next to the `ad_events` one. TRUNCATE does not cascade into
+a materialized view's target any more than DROP PARTITION does, so a rebuild without `--reset` would
+have emptied the fact table, re-inserted it, and left the MVs adding a second copy on top of the rows
+still sitting in the rollup — every rollup-served figure in the scratch database doubled while
+`ad_events` counted correctly.
+
+Verified on a real rebuild: 9,627,421 events in `ad_events`, both rollups summing to exactly 9,627,421
+across all 47 dim keys, built entirely by the MV. `synth:verify` still finds and localizes 5/5 planted
+deviations with 0 gated failures. **The general rule: any tooling that builds a database from
+`schema.sql` now also needs `rollupStatements()`, or it is silently testing the slow path.**
+
+### Lane C: four empty tables are yours, and I left them alone
+
+Audited every object in the service before merging. Nothing of ours is unused. The only empty objects
+are `hyperdx_sessions`, `otel_metrics_exponential_histogram`, `otel_metrics_gauge` and
+`otel_metrics_summary` — 0 rows each. They are part of HyperDX's own fixed schema and it queries them by
+name, so dropping them would break the next signal type that arrives. They occupy 0 bytes, so there is
+nothing to reclaim. Your call, not mine.
