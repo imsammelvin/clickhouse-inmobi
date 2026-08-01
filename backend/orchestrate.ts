@@ -7,6 +7,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { Ledger } from "./ledger";
+import { ensureDatasetBounds } from "./baseline";
 import { METRICS } from "./metrics";
 import { detect } from "./stages/detect";
 import { decompose } from "./stages/decompose";
@@ -83,6 +84,8 @@ async function investigateInner(opts: InvestigateOptions): Promise<Investigation
   const { metric, from, to } = opts;
   const ledger = opts.ledger ?? new Ledger();
   const traceId = randomUUID();
+  // Same reason as scanAll: bounds feed WHERE clauses downstream.
+  await ensureDatasetBounds((sql) => ledger.run(sql));
   const findings: Finding[] = [];
   const ruledOut: Finding[] = [];
 
@@ -216,6 +219,73 @@ async function investigateInner(opts: InvestigateOptions): Promise<Investigation
       : `${raw.length} raw candidate(s) reduced to ${res.causes.length} cause(s); ` +
           `${res.contamination.length} cleared as contamination.`,
   );
+
+  // ---- Stage 3b: confirm ---------------------------------------------------------------
+  //
+  // A segment must clear the SAME two gates the platform is held to, against its OWN history.
+  //
+  // Everything upstream ranks a candidate on the size of its move and its share of traffic. Neither
+  // asks the question detection asks of the platform: is this move large relative to what this
+  // particular segment normally does? Small segments are naturally noisier, so an absolute
+  // threshold quietly holds them to a laxer standard than the platform.
+  //
+  // That is what kept the seasonality decoy alive. Measured, each against its own same-weekday
+  // history:
+  //
+  //     decoy  region|os_version='EU|iOS 17.5'  requests   +13.0%     1.4 sigma   <- normal
+  //     D      os_version='iOS 18.1'            fill_rate  -11.6%   -18.1 sigma
+  //     C      app_category='finance'           ecpm       -35.0%   -70.1 sigma
+  //     A      os_version='Android 15'          fill_rate  -44.8%   -89.5 sigma
+  //
+  // A 13x gap between the decoy and the weakest real incident, using MIN_SIGMA = 2.5 -- the gate
+  // already in use for platform detection. Nothing here is tuned to make these two land on
+  // opposite sides; the decoy fails because +13% on a segment that routinely swings that much is
+  // not news. Dollars could never have separated them: the decoy prices at $1.24/day and incident
+  // D at $1.50/day, so any dollar floor that silences one silences the other.
+  //
+  // Cleared segments are reported, not dropped -- "checked and found within its own range" is the
+  // ruled-out evidence the rubric asks for.
+  ledger.beginStage("confirm");
+  const confirmed: typeof res.causes = [];
+  const insignificant: Array<{ cause: (typeof res.causes)[number]; sigma: number; pct: number }> =
+    [];
+
+  for (const c of res.causes) {
+    const segDet = await detect(ledger, sweepMetric, from, to, {
+      sql: segmentPredicate(c.dimension, c.value),
+      description: `${c.dimension}='${c.value}'`,
+    });
+    if (segDet.anomalous) confirmed.push(c);
+    else insignificant.push({ cause: c, sigma: segDet.sigma, pct: segDet.deltaPct });
+  }
+
+  ledger.endStage(
+    `${confirmed.length} of ${res.causes.length} cause(s) significant against their own history; ` +
+      `${insignificant.length} within their own normal range.`,
+  );
+
+  for (const { cause: c, sigma, pct } of insignificant) {
+    ruledOut.push({
+      channel: "no_anomaly",
+      segment: { dimension: c.dimension, value: c.value },
+      metric: sweepMetric,
+      deltaAbs: c.deltaAbs,
+      deltaPct: c.deltaPct,
+      deltaPp: c.deltaPp,
+      revenueImpactUsd: null,
+      significanceSigma: sigma,
+      status: "cleared_as_normal",
+      segmentSharePct: c.sharePct,
+      evidenceIds: [],
+      note:
+        `moved ${pct >= 0 ? "+" : ""}${pct.toFixed(1)}% but only ${sigma.toFixed(1)} sigma against ` +
+        `its own same-weekday history — within this segment's normal range.`,
+    });
+  }
+
+  // Replace the cause list with the confirmed one for every downstream stage.
+  res.causes.length = 0;
+  res.causes.push(...confirmed);
 
   // ---- Stage 4: classify + price -------------------------------------------------------
   //
@@ -434,7 +504,22 @@ async function investigateInner(opts: InvestigateOptions): Promise<Investigation
         : `${metric} moved ${det.deltaPct.toFixed(1)}% over ${from}..${to}, driven by ` +
           `${cause.dimension} = '${cause.value}' (${fmtDelta(cause.deltaPp, cause.deltaPct)} on ` +
           `${cause.sharePct.toFixed(1)}% of traffic). Worth ${fmtUsd(revPerDay)}/day.`
-      : `${metric} moved ${det.deltaPct.toFixed(1)}% but no segment cleared the significance gates.`;
+      : platformInBand
+        ? `no segment moved beyond its own normal range.`
+        : `${metric} moved ${det.deltaPct.toFixed(1)}% but no segment cleared the significance gates.`;
+
+  // Nothing survived Stage 3b, so there is no cause to own. What that MEANS depends entirely on
+  // whether the platform itself moved.
+  //
+  //   platform inside its own band -> nothing happened. "No action." This is the decoy's path.
+  //   platform genuinely moved      -> something happened and we could not attribute it. That is
+  //                                    `not_localizable`, and it is owned by platform/on-call.
+  //
+  // Collapsing both into `no_anomaly` reported ctr on 2026-06-23 -- a real -8.8% platform move --
+  // as "No action.", which is a miss dressed as an all-clear. Failing to localize is not the same
+  // as finding nothing, and only one of the two is safe to stay quiet about.
+  const noCause = !res.uniform && res.causes.length === 0;
+  const channel = noCause ? (platformInBand ? "no_anomaly" : "not_localizable") : cls.channel;
 
   if (platformInBand) {
     // The platform verdict is itself a finding, and it is the one that keeps the seasonality decoy
@@ -459,7 +544,7 @@ async function investigateInner(opts: InvestigateOptions): Promise<Investigation
 
   return {
     request: { metric, from, to },
-    primaryChannel: cls.channel,
+    primaryChannel: channel,
     headline: scopeNote + headline,
     findings,
     ruledOut,

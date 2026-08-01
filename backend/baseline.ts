@@ -7,8 +7,52 @@
  * which means a judge reading the trace can see exactly what we compared against.
  */
 
-export const DATASET_START = "2026-06-01";
-export const DATASET_END = "2026-07-05";
+/**
+ * Bounds of the loaded dataset. Defaults describe the training slice; `ensureDatasetBounds`
+ * replaces them with whatever is actually in ClickHouse.
+ *
+ * These are `let` on purpose -- ESM live bindings mean every importer sees the resolved values
+ * without threading them through a dozen signatures.
+ *
+ * Why this is not a constant: the unseen incident is a *fresh slice of the same universe*, and
+ * nothing guarantees it covers 2026-06-01..2026-07-05. These bounds are pasted straight into the
+ * WHERE clause of the detection sweep (`scan.ts`) and the segment sweep (`segments.ts`). Hardcoded
+ * against a slice that starts anywhere else, both queries match zero rows and the system reports
+ * "no incidents found" — on the one dataset that carries the most weight, with no error, no empty
+ * result to notice, and a trace that looks exactly like a clean run.
+ */
+export let DATASET_START = "2026-06-01";
+export let DATASET_END = "2026-07-05";
+
+let boundsResolved = false;
+
+/**
+ * Read the real bounds from the data. Idempotent; safe to call at the top of every entry point.
+ *
+ * Takes a `run` callback rather than a client so this module stays dependency-free and cannot
+ * introduce an import cycle with the ledger.
+ */
+export async function ensureDatasetBounds(
+  run: <T>(sql: string) => Promise<T[]>,
+): Promise<{ start: string; end: string }> {
+  if (!boundsResolved) {
+    const [row] = await run<{ lo: string; hi: string }>(
+      `SELECT toString(min(event_date)) AS lo, toString(max(event_date)) AS hi
+         FROM ad_events_enriched`,
+    );
+    if (row?.lo && row?.hi && row.lo !== "1970-01-01") {
+      DATASET_START = row.lo;
+      DATASET_END = row.hi;
+    }
+    boundsResolved = true;
+  }
+  return { start: DATASET_START, end: DATASET_END };
+}
+
+/** Test hook: forget the resolved bounds so the next call re-reads them. */
+export function resetDatasetBounds(): void {
+  boundsResolved = false;
+}
 
 /** Trailing weeks to look back. Only ~5 weeks of data exist, so 4 is the practical ceiling. */
 export const BASELINE_WEEKS = 4;

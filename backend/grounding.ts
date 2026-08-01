@@ -40,8 +40,16 @@ const TRACE_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g
  * `'Android 15'` contain digits that are part of a name. Stripping them prevents both a false
  * failure (54 is not a claim) and, more importantly, a false *pass* — 15 happening to coincide
  * with some evidence value would otherwise mark an identifier as "grounded" and hide a real gap.
+ *
+ * The `\n` exclusion is load-bearing. An apostrophe in ordinary prose — "within this segment's
+ * normal range" — is an unmatched quote, and with `[^']*` the pairing desynchronises from there
+ * on: the stripper pairs the apostrophe with the *opening* quote of the next line's identifier and
+ * swallows everything between. The real identifier is then left bare, so `'LATAM|iPhone 14'` leaks
+ * a `14` that reads as a claim. Refusing to cross a line boundary confines a stray apostrophe to
+ * its own line and makes the false-pass direction — a swallowed span hiding an ungrounded figure —
+ * impossible rather than merely unlikely.
  */
-const QUOTED_IDENTIFIER_RE = /'[^']*'/g;
+const QUOTED_IDENTIFIER_RE = /'[^'\n]*'/g;
 
 /** Matches -$1.47, 35.04pp, +7.8%, 0.7837, 126,052 */
 const NUMERAL_RE = /-?\$?\d[\d,]*\.?\d*/g;
