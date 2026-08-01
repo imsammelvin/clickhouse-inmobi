@@ -25,6 +25,7 @@ import type { ClickHouseClient } from "@clickhouse/client";
 import { makeClient } from "../clickhouse/client";
 import { Ledger } from "../backend/ledger";
 import { ensureDatasetBounds } from "../backend/baseline";
+import { ensureRollupReady } from "../clickhouse/rollup";
 import type { Evidence } from "../backend/types";
 import { trySpan } from "../utils/telemetryUtils";
 
@@ -94,11 +95,23 @@ export class Session {
    * left to the entry point so it cannot be forgotten by a new caller (the CLI, the eval, a test).
    */
   private ready(): Promise<unknown> {
-    this.bounds ??= ensureDatasetBounds((sql) => {
-      const bootstrap = new Ledger(this.client, `${this.runId}-bounds`);
-      bootstrap.beginStage("bounds");
-      return bootstrap.run(sql);
-    });
+    this.bounds ??= (async () => {
+      const bootstrap = <T>(sql: string): Promise<T[]> => {
+        const ledger = new Ledger(this.client, `${this.runId}-bounds`);
+        ledger.beginStage("bounds");
+        return ledger.run<T>(sql);
+      };
+      const bounds = await ensureDatasetBounds(bootstrap);
+
+      // Same argument as the bounds check above, applied to the rollup: a derived table's failure
+      // mode is being BEHIND its source, and behind does not throw — it returns fewer rows, which
+      // reads as a quiet day. So the rollup is proven to account for every event in `ad_events`
+      // before anything is allowed to read it; if it cannot, every query falls back to the raw view
+      // and the only thing that changes is latency.
+      const health = await ensureRollupReady(bootstrap);
+      this.append({ type: "rollup_health", ...health });
+      return bounds;
+    })();
     return this.bounds;
   }
 

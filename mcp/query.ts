@@ -38,6 +38,13 @@ import {
   estimateWeeklyGrowth,
   sqlDateList,
 } from "../backend/baseline";
+import {
+  type Grain,
+  type RollupPlan,
+  RAW_SOURCE,
+  planRollup,
+  sourceLabel,
+} from "../clickhouse/rollup";
 
 /**
  * Longest window any single tool call may span.
@@ -286,6 +293,43 @@ function reliability(
 const num = (v: unknown): number => Number(v ?? 0);
 
 // ---------------------------------------------------------------------------------------------
+// where a query reads from
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Pick the row source for one query: the rollup when it can answer exactly, the raw view otherwise.
+ *
+ * Every tool below builds its SQL against `src.from` and wraps its aggregates in `src.expr`, and
+ * that is the entire integration. The shape of the query — its WHERE, GROUP BY, window functions,
+ * floors, ordering — is identical on both paths, so there is one query per tool to reason about
+ * rather than two, and the fast path cannot quietly diverge from the correct one.
+ *
+ * `dims` must list EVERY dimension the query mentions, filters included. A filter costs a cut just
+ * as a group-by does: answering "fill rate by region for Android 15" from the `region` rollup alone
+ * is impossible, because those rows have already summed the OS away. Forgetting a filter dimension
+ * here would return the unfiltered number, which is the one bug in this design that would be both
+ * silent and serious — hence `scripts/verify-rollup.ts` exercising filtered cuts specifically.
+ */
+function source(
+  metric: MetricDef,
+  dims: readonly string[],
+  grain: Grain = "daily",
+): { from: string; expr: (e: string) => string; label: string; plan: RollupPlan | null } {
+  const plan = planRollup({
+    dims,
+    grain,
+    // Planning fails if any of the metric's own formulas cannot be translated, so an unknown metric
+    // added later degrades to the raw scan instead of reading columns the rollup never summed.
+    expressions: [metricExpr(metric), metric.numerator, metric.denominator],
+  });
+  const chosen = plan ?? RAW_SOURCE;
+  return { from: chosen.from, expr: chosen.expr, label: sourceLabel(plan), plan };
+}
+
+/** Dimensions a scope filters on — these count towards the rollup's two-dimension budget. */
+const scopeDims = (scope: Scope): string[] => Object.keys(scope.filters);
+
+// ---------------------------------------------------------------------------------------------
 // measure
 // ---------------------------------------------------------------------------------------------
 
@@ -321,6 +365,14 @@ export interface MeasureResult {
   rows: MeasureRow[];
   truncated: boolean;
   sqlHash: string;
+  /**
+   * Which surface answered: `rollup:<grain>:<dim>` or `raw`.
+   *
+   * Reported rather than hidden because it is the perf claim in the response envelope — the same
+   * reason `trace.elapsedMs` is there. It is also what `scripts/verify-rollup.ts` asserts on, so a
+   * test cannot pass by accidentally comparing the raw path against itself.
+   */
+  servedFrom: string;
 }
 
 function granularityColumn(g: Granularity | undefined): { expr: string; name: string } | null {
@@ -365,20 +417,40 @@ export async function measure(ledger: Ledger, args: MeasureArgs): Promise<Measur
     names.push(d);
   }
 
+  // Per-hour answers need the hourly rollup; everything else reads the daily one, which is 20x
+  // smaller. `granularity: "day"` groups the daily rollup by its own `event_date`, no hours needed.
+  const src = source(def, [...groupDims, ...scopeDims(scope)], gran?.name === "hour" ? "hourly" : "daily");
+  const reqs = src.expr("count()");
+
+  /**
+   * The group columns are a TIEBREAKER on every ordering in this file, not decoration.
+   *
+   * `ORDER BY requests DESC` alone is not a total order, and the result is then truncated by LIMIT.
+   * Grouping by `app_id` produces 2,000 rows of which 25 are returned, and app traffic is even
+   * enough that the rows at the cut-off routinely tie — so two identical calls could return
+   * different segments, depending on how ClickHouse happened to parallelise the aggregation. Found
+   * by `ch:verify-rollup`, which ran the same call twice and got two different top-N sets on the
+   * *same* code path.
+   *
+   * That is a reproducibility bug in a product whose entire claim is that a judge can re-run a
+   * number and get it back. Adding the group columns costs nothing — they are already grouped — and
+   * makes every answer here deterministic.
+   */
+
   const sql = `
 SELECT ${[
     ...selectCols,
-    `${metricExpr(def)} AS value`,
-    "count() AS requests",
-    `${def.numerator} AS numerator`,
-    `${def.denominator} AS denominator`,
-    "count() * 100.0 / nullIf(sum(count()) OVER (), 0) AS share_pct",
+    `${src.expr(metricExpr(def))} AS value`,
+    `${reqs} AS requests`,
+    `${src.expr(def.numerator)} AS numerator`,
+    `${src.expr(def.denominator)} AS denominator`,
+    `${reqs} * 100.0 / nullIf(sum(${reqs}) OVER (), 0) AS share_pct`,
   ].join(",\n       ")}
-FROM ad_events_enriched
+FROM ${src.from}
 WHERE event_date BETWEEN '${window.from}' AND '${window.to}'
   AND (${scope.sql})
 ${groupCols.length ? `GROUP BY ${groupCols.join(", ")}` : ""}
-ORDER BY ${groupCols.length ? (gran ? `${gran.name}` : "requests DESC") : "1"}
+ORDER BY ${groupCols.length ? `${gran ? gran.name : "requests DESC"}, ${groupCols.join(", ")}` : "1"}
 LIMIT ${limit + 1}`.trim();
 
   const raw = await ledger.run<Record<string, unknown>>(sql);
@@ -421,6 +493,7 @@ LIMIT ${limit + 1}`.trim();
     rows,
     truncated,
     sqlHash: ledger.get(rows[0]?.evidenceId ?? "")?.sqlHash ?? "",
+    servedFrom: src.label,
   };
 }
 
@@ -463,6 +536,7 @@ export interface CompareResult {
   scope: string;
   rows: CompareRow[];
   truncated: boolean;
+  servedFrom: string;
 }
 
 /**
@@ -527,6 +601,8 @@ export async function comparePeriods(ledger: Ledger, args: CompareArgs): Promise
       ? `${side}_num / nullIf(${side}_den, 0)${def.scale !== 1 ? ` * ${def.scale}` : ""}`
       : `${side}_num`;
 
+  const src = source(def, [...groupDims, ...scopeDims(scope)]);
+
   const sql = `
 SELECT ${[
     ...groupDims,
@@ -552,13 +628,13 @@ FROM (
     SELECT ${[
       ...groupDims,
       "event_date AS d",
-      `${def.numerator} AS num_d`,
-      `${def.denominator} AS den_d`,
-      "count() AS reqs_d",
+      `${src.expr(def.numerator)} AS num_d`,
+      `${src.expr(def.denominator)} AS den_d`,
+      `${src.expr("count()")} AS reqs_d`,
       `(${isCur}) AS is_cur`,
       `(${isBase}) AS is_base`,
     ].join(",\n           ")}
-    FROM ad_events_enriched
+    FROM ${src.from}
     WHERE (${isCur} OR ${isBase})
       AND (${scope.sql})
     GROUP BY ${[...groupDims, "event_date"].join(", ")}
@@ -566,7 +642,7 @@ FROM (
   ${groupDims.length ? `GROUP BY ${groupDims.join(", ")}` : ""}
   ${groupDims.length ? "HAVING requests > 0" : ""}
 )
-ORDER BY ${groupDims.length ? "abs(cur_v - base_v) * requests DESC" : "1"}
+ORDER BY ${groupDims.length ? `abs(cur_v - base_v) * requests DESC, ${groupDims.join(", ")}` : "1"}
 LIMIT ${limit + 1}`.trim();
 
   const raw = await ledger.run<Record<string, unknown>>(sql);
@@ -621,6 +697,7 @@ LIMIT ${limit + 1}`.trim();
     scope: scope.description,
     rows,
     truncated,
+    servedFrom: src.label,
   };
 }
 
@@ -648,6 +725,7 @@ export interface RankResult {
   /** Stated, not silent: what the volume floor excluded from the ranking. */
   floorNote: string;
   rows: MeasureRow[];
+  servedFrom: string;
 }
 
 /**
@@ -666,7 +744,10 @@ export async function rankSegments(ledger: Ledger, args: RankArgs): Promise<Rank
   const limit = clampLimit(args.limit);
   const order = args.order ?? "worst";
 
-  const floors = ["count() >= 150", "value IS NOT NULL"];
+  const src = source(def, [dimension, ...scopeDims(scope)]);
+  const reqs = src.expr("count()");
+
+  const floors = [`${reqs} >= 150`, "value IS NOT NULL"];
   if (def.minNumerator) floors.push(`numerator >= ${def.minNumerator}`);
   if (def.minDenominator) floors.push(`denominator >= ${def.minDenominator}`);
 
@@ -679,18 +760,18 @@ export async function rankSegments(ledger: Ledger, args: RankArgs): Promise<Rank
   const sql = `
 SELECT ${[
     dimension,
-    `${metricExpr(def)} AS value`,
-    "count() AS requests",
-    `${def.numerator} AS numerator`,
-    `${def.denominator} AS denominator`,
-    "count() * 100.0 / nullIf(sum(count()) OVER (), 0) AS share_pct",
+    `${src.expr(metricExpr(def))} AS value`,
+    `${reqs} AS requests`,
+    `${src.expr(def.numerator)} AS numerator`,
+    `${src.expr(def.denominator)} AS denominator`,
+    `${reqs} * 100.0 / nullIf(sum(${reqs}) OVER (), 0) AS share_pct`,
   ].join(",\n       ")}
-FROM ad_events_enriched
+FROM ${src.from}
 WHERE event_date BETWEEN '${window.from}' AND '${window.to}'
   AND (${scope.sql})
 GROUP BY ${dimension}
 HAVING ${floors.join(" AND ")}
-ORDER BY ${direction}
+ORDER BY ${direction}, ${dimension}
 LIMIT ${limit}`.trim();
 
   const raw = await ledger.run<Record<string, unknown>>(sql);
@@ -733,6 +814,7 @@ LIMIT ${limit}`.trim();
       `values below ${floorParts.join(" / ")} were excluded from this ranking — a rate on a ` +
       `handful of events would otherwise top it. Use get_metric to measure a specific value anyway.`,
     rows,
+    servedFrom: src.label,
   };
 }
 
@@ -762,15 +844,17 @@ export async function dimensionValues(
 ): Promise<DimensionValue[]> {
   const def = resolveMetric(metricName);
   const dim = assertDimension(dimension, def);
+  const src = source(def, [dim]);
+  const reqs = src.expr("count()");
   const rows = await ledger.run<Record<string, unknown>>(
     `
 SELECT ${dim} AS value,
-       count() AS requests,
-       count() * 100.0 / nullIf(sum(count()) OVER (), 0) AS share_pct
-FROM ad_events_enriched
+       ${reqs} AS requests,
+       ${reqs} * 100.0 / nullIf(sum(${reqs}) OVER (), 0) AS share_pct
+FROM ${src.from}
 WHERE event_date BETWEEN '${window.from}' AND '${window.to}'
 GROUP BY ${dim}
-ORDER BY requests DESC
+ORDER BY requests DESC, value
 LIMIT ${Math.min(Math.max(1, Math.floor(limit)), MAX_ROWS)}`.trim(),
   );
   return rows.map((r) => ({
@@ -783,10 +867,11 @@ LIMIT ${Math.min(Math.max(1, Math.floor(limit)), MAX_ROWS)}`.trim(),
 /** Daily series for one metric across the whole dataset — the input to the growth estimate. */
 export async function dailySeries(ledger: Ledger, metricName: string): Promise<Map<string, number>> {
   const def = resolveMetric(metricName);
+  const src = source(def, []);
   const rows = await ledger.run<{ d: string; v: number | null }>(
     `
-SELECT toString(event_date) AS d, ${metricExpr(def)} AS v
-FROM ad_events_enriched
+SELECT toString(event_date) AS d, ${src.expr(metricExpr(def))} AS v
+FROM ${src.from}
 WHERE event_date BETWEEN '${DATASET_START}' AND '${DATASET_END}'
 GROUP BY event_date
 ORDER BY event_date`.trim(),
@@ -811,17 +896,18 @@ export interface DatasetOverview {
 }
 
 export async function datasetOverview(ledger: Ledger): Promise<DatasetOverview> {
+  const src = source(METRICS.revenue!, []);
   const [row] = await ledger.run<Record<string, unknown>>(
     `
 SELECT toString(min(event_date)) AS from_d,
        toString(max(event_date)) AS to_d,
        uniqExact(event_date)     AS days,
-       count()                   AS requests,
-       sum(is_filled)            AS filled,
-       sum(is_impression)        AS impressions,
-       sum(is_click)             AS clicks,
-       sum(revenue)              AS revenue
-FROM ad_events_enriched
+       ${src.expr("count()")}             AS requests,
+       ${src.expr("sum(is_filled)")}      AS filled,
+       ${src.expr("sum(is_impression)")}  AS impressions,
+       ${src.expr("sum(is_click)")}       AS clicks,
+       ${src.expr("sum(revenue)")}        AS revenue
+FROM ${src.from}
 WHERE event_date BETWEEN '${DATASET_START}' AND '${DATASET_END}'`.trim(),
   );
   if (!row) throw new QueryError("describe_data: the events table returned no rows.");
