@@ -24,6 +24,7 @@ import type { Span } from "@opentelemetry/api";
 import type { ClickHouseClient } from "@clickhouse/client";
 import { makeClient } from "../clickhouse/client";
 import { Ledger } from "../backend/ledger";
+import { ensureDatasetBounds } from "../backend/baseline";
 import type { Evidence } from "../backend/types";
 import { trySpan } from "../utils/telemetryUtils";
 
@@ -71,6 +72,8 @@ export class Session {
   private readonly evidence = new Map<string, Evidence & { callId: string; tool: string }>();
   private seq = 0;
   private readonly tracePath: string;
+  /** Memoized dataset-bounds resolution — see `ready()`. */
+  private bounds?: Promise<unknown>;
 
   constructor(client?: ClickHouseClient, runId?: string) {
     this.client = client ?? makeClient();
@@ -78,6 +81,25 @@ export class Session {
     mkdirSync(TRACE_DIR, { recursive: true });
     this.tracePath = join(TRACE_DIR, `session-${this.runId}.jsonl`);
     this.append({ type: "session_start", runId: this.runId, startedAt: this.startedAt });
+  }
+
+  /**
+   * Resolve the real dataset bounds before the first tool call, once per session.
+   *
+   * Not optional, and the reason is the unseen incident. `DATASET_START`/`DATASET_END` default to the
+   * training slice, and this server pastes them into window validation and into the sweep's WHERE
+   * clause. Against a Day-2 slice that starts anywhere else, every window a judge asks about is
+   * rejected as "outside the loaded data" and the sweep matches zero rows — no error, no empty
+   * result to notice, and a trace that looks like a clean run. Awaited inside `run()` rather than
+   * left to the entry point so it cannot be forgotten by a new caller (the CLI, the eval, a test).
+   */
+  private ready(): Promise<unknown> {
+    this.bounds ??= ensureDatasetBounds((sql) => {
+      const bootstrap = new Ledger(this.client, `${this.runId}-bounds`);
+      bootstrap.beginStage("bounds");
+      return bootstrap.run(sql);
+    });
+    return this.bounds;
   }
 
   private append(line: unknown): void {
@@ -101,6 +123,7 @@ export class Session {
     args: unknown,
     handler: (ledger: Ledger, callId: string) => Promise<ToolOutcome>,
   ): Promise<{ ok: boolean; payload: unknown; record: ToolCallRecord }> {
+    await this.ready();
     const callId = `c${++this.seq}`;
     const ledger = new Ledger(this.client, `${this.runId}-${callId}`);
     ledger.beginStage(tool);
@@ -163,6 +186,13 @@ export class Session {
     return undefined;
   }
 
+  /** Full evidence rows produced by one call, for the report's receipts table. */
+  evidenceFor(callId: string): Array<Evidence & { qualifiedId: string }> {
+    return [...this.evidence.entries()]
+      .filter(([, e]) => e.callId === callId)
+      .map(([id, e]) => ({ ...e, qualifiedId: id }));
+  }
+
   evidenceIndex(): Array<{ id: string; label: string; value: number | null; unit: string }> {
     return [...this.evidence.entries()].map(([id, e]) => ({
       id,
@@ -196,6 +226,17 @@ export class Session {
 
   get traceFile(): string {
     return this.tracePath;
+  }
+
+  /**
+   * A ledger for out-of-band queries that are not tool calls — currently only the `system.query_log`
+   * cost read. Kept separate so it cannot distort a tool's own query count or evidence, and tagged
+   * `stage=cost` so it is identifiable in the log it is reading.
+   */
+  costLedger(): Ledger {
+    const ledger = new Ledger(this.client, `${this.runId}-cost`);
+    ledger.beginStage("cost");
+    return ledger;
   }
 
   async close(): Promise<void> {

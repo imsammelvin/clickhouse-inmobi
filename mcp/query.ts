@@ -39,8 +39,18 @@ import {
   sqlDateList,
 } from "../backend/baseline";
 
-/** Longest window any single tool call may span. The dataset itself is 35 days. */
-const MAX_WINDOW_DAYS = 35;
+/**
+ * Longest window any single tool call may span.
+ *
+ * Derived from the loaded data rather than fixed, so a full-range question on a Day-2 slice longer
+ * than the 35-day training window is not rejected as too large. The cap exists to stop an unbounded
+ * scan, not to encode the size of the slice we happened to develop against.
+ */
+const maxWindowDays = (): number =>
+  Math.max(
+    35,
+    Math.round((Date.parse(DATASET_END) - Date.parse(DATASET_START)) / 86_400_000) + 1,
+  );
 
 /** Cap on rows any tool returns. Criterion 3 is about analysis staying in the database. */
 export const MAX_ROWS = 200;
@@ -102,8 +112,9 @@ export function assertWindow(from: unknown, to: unknown): Window {
     );
   }
   const days = Math.round((Date.parse(end) - Date.parse(from)) / 86_400_000) + 1;
-  if (days > MAX_WINDOW_DAYS) {
-    throw new QueryError(`Window is ${days} days; the maximum per call is ${MAX_WINDOW_DAYS}.`);
+  const cap = maxWindowDays();
+  if (days > cap) {
+    throw new QueryError(`Window is ${days} days; the maximum per call is ${cap}.`);
   }
   return { from, to: end };
 }
