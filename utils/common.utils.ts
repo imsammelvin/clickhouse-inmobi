@@ -43,11 +43,11 @@ export const closeEnough = (a: number, b: number, tolerance = FLOAT_TOLERANCE): 
  * Retry with exponential backoff. Ingest runs over the public internet against a cloud service;
  * a transient 503 or socket reset should cost a few seconds, not the whole load.
  */
-export async function withRetry<T>(
+export const withRetry = async <T>(
   what: string,
   attempts: number,
   fn: () => Promise<T>,
-): Promise<T> {
+): Promise<T> => {
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= attempts; attempt++) {
@@ -65,14 +65,14 @@ export async function withRetry<T>(
   }
 
   throw lastError;
-}
+};
 
 /** Run `fn` over `items` with at most `limit` in flight. Rejects on the first failure. */
-export async function pool<T, R>(
+export const pool = async <T, R>(
   items: T[],
   limit: number,
   fn: (item: T) => Promise<R>,
-): Promise<R[]> {
+): Promise<R[]> => {
   const results = new Array<R>(items.length);
   let cursor = 0;
 
@@ -86,7 +86,7 @@ export async function pool<T, R>(
 
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
   return results;
-}
+};
 
 export const asMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
@@ -100,8 +100,11 @@ export const asMessage = (error: unknown): string =>
 // ---------------------------------------------------------------------------
 
 /** Run SQL through the duckdb CLI and return raw stdout. */
-export async function duckdb(sql: string): Promise<string> {
-  const proc = Bun.spawn(["duckdb", "-json", "-c", sql], { stdout: "pipe", stderr: "pipe" });
+export const duckdb = async (sql: string): Promise<string> => {
+  const proc = Bun.spawn(["duckdb", "-json", "-c", sql], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
 
   const [stdout, stderr, code] = await Promise.all([
     new Response(proc.stdout).text(),
@@ -111,18 +114,18 @@ export async function duckdb(sql: string): Promise<string> {
 
   if (code !== 0) throw new Error(`duckdb failed (exit ${code}):\n${stderr || stdout}`);
   return stdout;
-}
+};
 
 /** Run SQL through the duckdb CLI and parse the JSON result. */
-export async function duckdbJson<T>(sql: string): Promise<T[]> {
+export const duckdbJson = async <T>(sql: string): Promise<T[]> => {
   const out = await duckdb(sql);
   return (out.trim() ? JSON.parse(out) : []) as T[];
-}
+};
 
 export const parquetFileMeta = (glob: string): Promise<ParquetFileMeta[]> =>
   duckdbJson<ParquetFileMeta>(srcParquetFileMeta(glob));
 
-export async function assertDuckdb(): Promise<void> {
+export const assertDuckdb = async (): Promise<void> => {
   try {
     await duckdb("SELECT 1");
   } catch {
@@ -131,7 +134,7 @@ export async function assertDuckdb(): Promise<void> {
         "  macOS: brew install duckdb   |   else: https://duckdb.org/docs/installation/",
     );
   }
-}
+};
 
 // ---------------------------------------------------------------------------
 // cli
@@ -157,11 +160,11 @@ export const flagList = (argv: string[], flag: string): string[] | null => {
 };
 
 /** Run a script's main(), printing a clean error instead of a stack trace on failure. */
-export async function runScript(main: () => Promise<void>): Promise<void> {
+export const runScript = async (main: () => Promise<void>): Promise<void> => {
   try {
     await main();
   } catch (error) {
     console.error(`\n${asMessage(error)}`);
     process.exit(1);
   }
-}
+};

@@ -13,11 +13,7 @@
  */
 import type { ClickHouseClient } from "@clickhouse/client";
 import { DATABASE, makeClient, select, selectOne } from "../clickhouse/client";
-import {
-  DIMENSION_EXPECTATIONS,
-  FACT_FILE,
-  RATIO_UPPER_BOUND,
-} from "../constants";
+import { DIMENSION_EXPECTATIONS, FACT_FILE, RATIO_UPPER_BOUND } from "../constants";
 import * as Q from "../constants/queries";
 import { CheckStatus, View } from "../enums";
 import type {
@@ -32,13 +28,14 @@ import type {
   UniquenessRow,
   VersionRow,
 } from "../interfaces";
+import { closeEnough, duckdbJson, fmt, runScript, secondsSince } from "../utils/common.utils";
 import {
-  closeEnough,
-  duckdbJson,
-  fmt,
-  runScript,
-  secondsSince,
-} from "../utils/common.utils";
+  counter,
+  initObservability,
+  log,
+  shutdownObservability,
+  withSpan,
+} from "../utils/telemetryUtils";
 
 // ---------------------------------------------------------------------------
 // assertions
@@ -46,36 +43,39 @@ import {
 
 let failures = 0;
 
-function check(name: string, ok: boolean, detail: string): void {
-  const status = ok ? CheckStatus.Pass : CheckStatus.Fail;
-  console.log(`  ${status}  ${name.padEnd(44)} ${detail}`);
-  if (!ok) failures++;
-}
+const verifyChecks = counter("verify.checks", "Verification assertions, by outcome");
 
-function checkEqual(name: string, expected: unknown, actual: unknown): void {
+const check = (name: string, ok: boolean, detail: string): void => {
+  const status = ok ? CheckStatus.Pass : CheckStatus.Fail;
+  verifyChecks().add(1, { "verify.outcome": ok ? "pass" : "fail" });
+  log.info(`  ${status}  ${name.padEnd(44)} ${detail}`);
+  if (!ok) failures++;
+};
+
+const checkEqual = (name: string, expected: unknown, actual: unknown): void => {
   const ok = String(expected) === String(actual);
   check(name, ok, ok ? String(actual) : `expected ${expected}, got ${actual}`);
-}
+};
 
-function checkClose(name: string, expected: number, actual: number): void {
+const checkClose = (name: string, expected: number, actual: number): void => {
   const ok = closeEnough(expected, actual);
   check(
     name,
     ok,
     ok ? actual.toFixed(4) : `expected ${expected.toFixed(6)}, got ${actual.toFixed(6)}`,
   );
-}
+};
 
-function checkInRange(name: string, value: number, low: number, high: number): void {
+const checkInRange = (name: string, value: number, low: number, high: number): void => {
   check(name, value > low && value < high, value.toFixed(4));
-}
+};
 
 // ---------------------------------------------------------------------------
 // checks
 // ---------------------------------------------------------------------------
 
-async function verifyDimensions(client: ClickHouseClient): Promise<void> {
-  console.log("== dimension tables ==");
+const verifyDimensions = async (client: ClickHouseClient): Promise<void> => {
+  log.info("== dimension tables ==");
 
   for (const { table, key, rows } of DIMENSION_EXPECTATIONS) {
     const row = await selectOne<UniquenessRow>(client, Q.dimensionUniqueness(table, key));
@@ -91,10 +91,10 @@ async function verifyDimensions(client: ClickHouseClient): Promise<void> {
     );
   }
   console.log();
-}
+};
 
-async function verifyTotals(client: ClickHouseClient): Promise<void> {
-  console.log("== fact totals: ClickHouse vs source Parquet ==");
+const verifyTotals = async (client: ClickHouseClient): Promise<void> => {
+  log.info("== fact totals: ClickHouse vs source Parquet ==");
 
   const [source] = await duckdbJson<FunnelTotals>(Q.srcFunnelTotals(FACT_FILE));
   const loaded = await selectOne<Record<keyof FunnelTotals, string>>(client, Q.funnelTotals);
@@ -108,10 +108,10 @@ async function verifyTotals(client: ClickHouseClient): Promise<void> {
   checkEqual("min event_time", source!.min_time.replace(/\.\d+$/, ""), loaded.min_time);
   checkEqual("max event_time", source!.max_time.replace(/\.\d+$/, ""), loaded.max_time);
   console.log();
-}
+};
 
-async function verifyPerDay(client: ClickHouseClient): Promise<void> {
-  console.log("== per-day reconciliation ==");
+const verifyPerDay = async (client: ClickHouseClient): Promise<void> => {
+  log.info("== per-day reconciliation ==");
 
   const source = await duckdbJson<DayAggregate>(Q.srcDailyTotals(FACT_FILE));
   const loaded = await select<DayAggregateRaw>(client, Q.dailyTotals);
@@ -144,10 +144,10 @@ async function verifyPerDay(client: ClickHouseClient): Promise<void> {
     rows.reduce((sum, row) => sum + Number(row.rows), 0);
   checkEqual("no duplicated rows", sumRows(source), sumRows(loaded));
   console.log();
-}
+};
 
-async function verifyEnrichment(client: ClickHouseClient): Promise<void> {
-  console.log(`== ${View.AdEventsEnriched} (dictionary lookups) ==`);
+const verifyEnrichment = async (client: ClickHouseClient): Promise<void> => {
+  log.info(`== ${View.AdEventsEnriched} (dictionary lookups) ==`);
 
   const gaps = await selectOne<EnrichmentGaps>(client, Q.enrichmentGaps);
 
@@ -162,10 +162,10 @@ async function verifyEnrichment(client: ClickHouseClient): Promise<void> {
     `${fmt(Number(gaps.no_adv_on_unfilled))} unfilled requests`,
   );
   console.log();
-}
+};
 
-async function verifyMetrics(client: ClickHouseClient): Promise<void> {
-  console.log("== glossary metrics ==");
+const verifyMetrics = async (client: ClickHouseClient): Promise<void> => {
+  log.info("== glossary metrics ==");
 
   const metrics = await selectOne<MetricSnapshot>(client, Q.glossaryMetrics);
   checkInRange("fill rate in (0,1)", metrics.fill_rate, 0, 1);
@@ -182,48 +182,52 @@ async function verifyMetrics(client: ClickHouseClient): Promise<void> {
   const identity = await selectOne<RevenueIdentity>(client, Q.revenueIdentity);
   checkClose("revenue identity holds", identity.lhs, identity.rhs);
   console.log();
-}
+};
 
-async function reportStorage(client: ClickHouseClient): Promise<void> {
-  console.log("== storage ==");
+const reportStorage = async (client: ClickHouseClient): Promise<void> => {
+  log.info("== storage ==");
 
   for (const part of await select<PartStats>(client, Q.storageStats(DATABASE))) {
-    console.log(
+    log.info(
       `  ${part.table.padEnd(14)} ${fmt(Number(part.total_rows)).padStart(10)} rows  ` +
         `${part.compressed.padStart(10)} on disk (${part.uncompressed} raw, ${part.ratio}x)  ` +
         `${part.parts} parts`,
     );
   }
   console.log();
-}
+};
 
 // ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 
-async function main(): Promise<void> {
+const main = async (): Promise<void> => {
+  initObservability();
   const client = makeClient();
   const startedAt = performance.now();
 
   try {
-    const { version } = await selectOne<VersionRow>(client, Q.VERSION);
-    console.log(`ClickHouse ${version}, database "${DATABASE}"\n`);
+    await withSpan("verify.run", {}, async () => {
+      const { version } = await selectOne<VersionRow>(client, Q.VERSION);
+      log.info(`ClickHouse ${version}, database "${DATABASE}"\n`);
 
-    await verifyDimensions(client);
-    await verifyTotals(client);
-    await verifyPerDay(client);
-    await verifyEnrichment(client);
-    await verifyMetrics(client);
-    await reportStorage(client);
+      await verifyDimensions(client);
+      await verifyTotals(client);
+      await verifyPerDay(client);
+      await verifyEnrichment(client);
+      await verifyMetrics(client);
+      await reportStorage(client);
+    });
   } finally {
     await client.close();
+    await shutdownObservability();
   }
 
   if (failures > 0) {
     console.error(`${failures} check(s) FAILED in ${secondsSince(startedAt)}`);
     process.exit(1);
   }
-  console.log(`All checks passed in ${secondsSince(startedAt)}.`);
-}
+  log.info(`All checks passed in ${secondsSince(startedAt)}.`);
+};
 
 if (import.meta.main) await runScript(main);

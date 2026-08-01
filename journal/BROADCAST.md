@@ -22,6 +22,7 @@ Read `tail -40` of this file at the start of every session. Format:
 ---
 
 ### 0000-00-00 00:00 — setup — coordination scaffold added
+
 **What changed:** `goal.md`, `AGENTS.md`, `TASKS.md`, `CLAUDE.md`, and `coordination/journal/` created.
 **Who is affected:** everyone.
 **What you must do:** read `AGENTS.md` before your first commit. Fill in `goal.md` and the handle/lane
@@ -31,6 +32,7 @@ tables in `AGENTS.md` § 1–2 at kickoff (tasks T-001, T-002). Rename your `dev
 <!-- append new entries below this line -->
 
 ### 2026-08-01 13:54 — loges — goal.md/AGENTS.md/TASKS.md drafted for kickoff review
+
 **What changed:** `goal.md` fully drafted (architecture, data model against the real `inmobi/` package,
 milestones pinned to today's actual event clock, decision log, risks). `AGENTS.md` §1 lanes/directories
 assigned: loges→`backend/`, dev-2→`clickhouse/`+`mcp/`, dev-3→`clickstack/`, dev-4→`librechat/`.
@@ -45,9 +47,10 @@ assignment, stop and re-check which lane is actually yours.
 **Commit:** branch `dev/loges/kickoff-goal`
 
 ### 2026-08-01 14:45 — sam — proposed scope addition: residualization (T-040), affects Lane A
+
 **What changed:** `goal.md` § 5 gains a residualization bullet, decision row **D-017** carries the
 evidence, and `TASKS.md` gains **T-040** (residualization) and **T-041** (mix-vs-rate split).
-Nothing in anyone's lane was edited. T-018 is untouched — T-040 sits *after* it, it does not
+Nothing in anyone's lane was edited. T-018 is untouched — T-040 sits _after_ it, it does not
 replace it.
 
 **Why, with numbers.** I ran the drill-down by hand against the loaded data for the Jun 23–25
@@ -73,7 +76,7 @@ diagnosis message needs a "cleared" list, not just a cause list.
 
 **What you must do:** accept or reject T-040. If you reject it, please say so here so I stop
 building the demo narrative on it. My argument for accepting: reporting those 20 segments is
-precisely the "hallucinated segment" failure the rubric punishes hardest, it is an *algorithm*
+precisely the "hallucinated segment" failure the rubric punishes hardest, it is an _algorithm_
 problem that no amount of better narration fixes, and the ruled-out list the rubric asks for as a
 bonus falls out of the deflation loop for free. Cost is ~2–4 extra ClickHouse round trips.
 

@@ -27,12 +27,12 @@ If you are an agent and you have read nothing else, read § 0 and § 3.
 Fill in at kickoff. `handle` is used in branch names, commit trailers, and journal filenames — pick
 short, lowercase, no spaces.
 
-| Slot | Name | Handle | Lane | Primary directories |
-|---|---|---|---|---|
-| 1 | Loges | `loges` | Lane A — Orchestrator, backend API, Langfuse, LLM narration | `backend/` |
-| 2 | _TBD_ (fill your name) | `dev-2` | Lane B — ClickHouse schema/ingest + MCP server | `clickhouse/`, `mcp/` |
-| 3 | _TBD_ (fill your name) | `dev-3` | Lane C — ClickStack observability | `clickstack/` |
-| 4 | _TBD_ (fill your name) | `dev-4` | Lane D — LibreChat integration | `librechat/` |
+| Slot | Name                   | Handle  | Lane                                                        | Primary directories   |
+| ---- | ---------------------- | ------- | ----------------------------------------------------------- | --------------------- |
+| 1    | Loges                  | `loges` | Lane A — Orchestrator, backend API, Langfuse, LLM narration | `backend/`            |
+| 2    | _TBD_ (fill your name) | `dev-2` | Lane B — ClickHouse schema/ingest + MCP server              | `clickhouse/`, `mcp/` |
+| 3    | _TBD_ (fill your name) | `dev-3` | Lane C — ClickStack observability                           | `clickstack/`         |
+| 4    | _TBD_ (fill your name) | `dev-4` | Lane D — LibreChat integration                              | `librechat/`          |
 
 Lanes/directories drafted by loges from the pre-event plan (see `goal.md` § 11 decision log) — this
 corrects an earlier draft that had dev-3/dev-4 swapped (ClickStack vs LibreChat). Each person: fill in
@@ -49,18 +49,19 @@ four parallel agents from colliding — git conflicts become nearly impossible i
 touch the same file.
 
 ### Owned files
+
 A file inside your lane's directories is yours. Edit freely, no ceremony.
 
 ### Shared files — special handling required
 
-| File | Rule |
-|---|---|
-| `TASKS.md` | Edit **only your own rows**. Never reformat the table, never re-sort it, never touch another owner's row. |
-| `goal.md` | Sections marked **LOCKED** need agreement from all four + a decision-log entry. Non-locked sections: edit your own lane's rows only. |
-| `coordination/journal/<handle>.md` | **Single-writer, append-only.** Yours is yours; never write to another person's journal. |
-| `coordination/journal/BROADCAST.md` | Append-only. Add entries at the **bottom**. Never edit or delete existing entries. |
-| Schema / DDL (`goal.md` § 7 names the path) | One designated owner. Others propose changes via BROADCAST + decision log. |
-| `README.md`, CI config, `docker-compose.yml`, lockfiles | Announce in BROADCAST before touching. These are conflict magnets. |
+| File                                                    | Rule                                                                                                                                 |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `TASKS.md`                                              | Edit **only your own rows**. Never reformat the table, never re-sort it, never touch another owner's row.                            |
+| `goal.md`                                               | Sections marked **LOCKED** need agreement from all four + a decision-log entry. Non-locked sections: edit your own lane's rows only. |
+| `coordination/journal/<handle>.md`                      | **Single-writer, append-only.** Yours is yours; never write to another person's journal.                                             |
+| `coordination/journal/BROADCAST.md`                     | Append-only. Add entries at the **bottom**. Never edit or delete existing entries.                                                   |
+| Schema / DDL (`goal.md` § 7 names the path)             | One designated owner. Others propose changes via BROADCAST + decision log.                                                           |
+| `README.md`, CI config, `docker-compose.yml`, lockfiles | Announce in BROADCAST before touching. These are conflict magnets.                                                                   |
 
 ### If you must change a file you do not own
 
@@ -169,13 +170,13 @@ Agent: <handle>
 
 **Trailers:**
 
-| Trailer | When | Example |
-|---|---|---|
-| `Task:` | always, if a task exists | `Task: T-014` |
-| `Agent:` | always | `Agent: dev-2` |
-| `Crosses-lane:` | you touched another lane's file | `Crosses-lane: dev-3` |
-| `Breaking:` | you changed a shared contract or schema | `Breaking: events table now has session_id` |
-| `Needs:` | you are blocked on someone | `Needs: loges to expose /api/query` |
+| Trailer         | When                                    | Example                                     |
+| --------------- | --------------------------------------- | ------------------------------------------- |
+| `Task:`         | always, if a task exists                | `Task: T-014`                               |
+| `Agent:`        | always                                  | `Agent: dev-2`                              |
+| `Crosses-lane:` | you touched another lane's file         | `Crosses-lane: dev-3`                       |
+| `Breaking:`     | you changed a shared contract or schema | `Breaking: events table now has session_id` |
+| `Needs:`        | you are blocked on someone              | `Needs: loges to expose /api/query`         |
 
 Anything with `Breaking:` or `Crosses-lane:` **must** also get a BROADCAST entry. Agents: grep for
 these when you start a session —
@@ -236,17 +237,17 @@ git revert <another lane's commit>      # tell them instead
 
 Use the lightest one that works. All of them are in git, so all of them survive.
 
-| Channel | Use for | Latency |
-|---|---|---|
-| **Commit message** | "here is what I did and why" | passive — seen at next pull |
-| **`TASKS.md`** | "I am working on this / this is done / I am blocked" | passive |
-| **`coordination/journal/<handle>.md`** | your own running log; end-of-session handoff | passive |
-| **`coordination/journal/BROADCAST.md`** | "everyone must know this now" — breaking changes, schema edits, requests to touch another lane, freezes | pull-triggered |
-| **PR review comment** | "this specific line is wrong" | needs the other person online |
-| **Talk to each other out loud** | anything urgent or ambiguous | instant — you are in the same room, use it |
+| Channel                                 | Use for                                                                                                 | Latency                                    |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| **Commit message**                      | "here is what I did and why"                                                                            | passive — seen at next pull                |
+| **`TASKS.md`**                          | "I am working on this / this is done / I am blocked"                                                    | passive                                    |
+| **`coordination/journal/<handle>.md`**  | your own running log; end-of-session handoff                                                            | passive                                    |
+| **`coordination/journal/BROADCAST.md`** | "everyone must know this now" — breaking changes, schema edits, requests to touch another lane, freezes | pull-triggered                             |
+| **PR review comment**                   | "this specific line is wrong"                                                                           | needs the other person online              |
+| **Talk to each other out loud**         | anything urgent or ambiguous                                                                            | instant — you are in the same room, use it |
 
 Git is the durable record. Voice is the fast path. Anything decided out loud that affects another
-lane must still be written to BROADCAST or the decision log — otherwise the *agents* never learn it.
+lane must still be written to BROADCAST or the decision log — otherwise the _agents_ never learn it.
 
 ---
 
