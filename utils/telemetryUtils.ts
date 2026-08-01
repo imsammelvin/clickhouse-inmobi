@@ -1,19 +1,30 @@
 /**
- * All telemetry in one place: the ClickStack OTLP pipeline, span helpers, and structured logging.
- * Every entry point imports from here -- there is no second telemetry module.
+ * All telemetry in one place: the ClickStack OTLP pipeline, the Langfuse trace export, span
+ * helpers, and structured logging. Every entry point imports from here -- there is no second
+ * telemetry module.
  *
- * Pipeline: all three signals go over OTLP/HTTP to the ClickStack collector, which writes them
- * into the `otel_traces`, `otel_metrics_*` and `otel_logs` tables of the ClickHouse it manages.
+ * Pipeline: every span created via `withSpan`/`trySpan` goes to TWO destinations off the same
+ * OTel TracerProvider, as two independent span processors:
  *
  *   initObservability()
- *     |-- traces   BatchSpanProcessor        -> /v1/traces   -> otel_traces
- *     |-- metrics  PeriodicExportingReader   -> /v1/metrics  -> otel_metrics_*
- *     +-- logs     BatchLogRecordProcessor   -> /v1/logs     -> otel_logs
+ *     |-- traces   BatchSpanProcessor        -> /v1/traces   -> ClickStack -> otel_traces
+ *     |-- traces   LangfuseSpanProcessor      ------------------> Langfuse Cloud
+ *     |-- metrics  PeriodicExportingReader   -> /v1/metrics  -> ClickStack -> otel_metrics_*
+ *     +-- logs     BatchLogRecordProcessor   -> /v1/logs     -> ClickStack -> otel_logs
+ *
+ * This means `investigation` / `stage.*` / `ledger.run.*` -- already instrumented for ClickStack --
+ * are traced in Langfuse too with no changes to orchestrate.ts, ledger.ts or any stage file. No LLM
+ * runs in this pipeline yet, so there is nothing "generation"-shaped to send; these are plain spans,
+ * and `shouldExportSpan: () => true` is required because Langfuse's default filter only exports
+ * spans that already look like Langfuse/GenAI spans, which a hand-built OTel span never does.
+ * Skipped entirely (falls back to ClickStack-only) when `LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY`
+ * are not set, so a teammate without Langfuse configured locally isn't affected.
  *
  * Lifecycle: every entry point calls `initObservability()` first and `shutdownObservability()` in a
  * finally block. The shutdown is not optional -- the batch processors hold un-exported data, and a
  * CLI process that exits without flushing loses the tail of its own run, which is exactly the part
- * you want when something failed.
+ * you want when something failed. `tracerProvider.shutdown()` shuts down every registered span
+ * processor, so this flushes both ClickStack and Langfuse without extra plumbing.
  *
  * Correlation is the whole point. `withSpan` puts a span on the active context; `log` stamps every
  * record with that span's trace_id/span_id (as attributes, and the SDK sets them as columns too),
@@ -39,12 +50,17 @@ import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
-import { BasicTracerProvider, BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
+import {
+  BasicTracerProvider,
+  BatchSpanProcessor,
+  type SpanProcessor,
+} from "@opentelemetry/sdk-trace-base";
 import { MeterProvider, PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
 import { BatchLogRecordProcessor, LoggerProvider } from "@opentelemetry/sdk-logs";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http";
 import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
+import { LangfuseSpanProcessor } from "@langfuse/otel";
 import {
   DEPLOYMENT_ENVIRONMENT,
   METRIC_EXPORT_INTERVAL_MS,
@@ -120,12 +136,24 @@ export const initObservability = (): void => {
     "deployment.environment.name": DEPLOYMENT_ENVIRONMENT,
   });
 
-  tracerProvider = new BasicTracerProvider({
-    resource,
-    spanProcessors: [
-      new BatchSpanProcessor(new OTLPTraceExporter({ url: url(OtlpPath.Traces), headers })),
-    ],
-  });
+  const spanProcessors: SpanProcessor[] = [
+    new BatchSpanProcessor(new OTLPTraceExporter({ url: url(OtlpPath.Traces), headers })),
+  ];
+
+  // Same spans, second destination. Only added when Langfuse is actually configured, so a
+  // teammate running without it locally gets ClickStack-only tracing and nothing breaks.
+  if (process.env.LANGFUSE_PUBLIC_KEY && process.env.LANGFUSE_SECRET_KEY) {
+    spanProcessors.push(
+      new LangfuseSpanProcessor({
+        // Default filter only forwards spans already shaped like Langfuse/GenAI spans. Every span
+        // in this codebase is a hand-built OTel span (no LLM in the loop yet), so without this
+        // override every one of them would be silently dropped before reaching Langfuse.
+        shouldExportSpan: () => true,
+      }),
+    );
+  }
+
+  tracerProvider = new BasicTracerProvider({ resource, spanProcessors });
   trace.setGlobalTracerProvider(tracerProvider);
 
   meterProvider = new MeterProvider({
