@@ -278,15 +278,29 @@ export async function ensureRollupReady(
     // min/max over the per-key totals catches any key that disagrees, and the key COUNT catches one
     // that is absent entirely — which a sum over present keys cannot see. Cost is a grouped scan of
     // ~150k daily rows, which is metadata next to the queries it guards.
+    //
+    // BOTH grains get the per-key treatment, not just daily (samarth, following sam's fix). The
+    // hourly table was still being spot-checked on `dim = 'ad_format'` alone, which is the very
+    // argument sam's commit makes, one table over: hourly-grain reads go straight to
+    // `rollup_segment_hourly`, so a key short THERE is served just as silently. Daily tying out is
+    // strong evidence but not proof — daily is derived from hourly by the cascaded MV, so anything
+    // written through that path moves both together, but `backfillDailySql` exists as a repair route
+    // that writes daily alone, and a rollup is exactly the kind of thing someone repairs at 3am.
+    // Two tables, two independent checks.
     const [row] = await run<Record<string, unknown>>(
-      `WITH per_key AS (
+      `WITH daily_key AS (
          SELECT dim, sum(events) AS total FROM ${ROLLUP_TABLES.daily} GROUP BY dim
+       ),
+       hourly_key AS (
+         SELECT dim, sum(events) AS total FROM ${ROLLUP_TABLES.hourly} GROUP BY dim
        )
        SELECT (SELECT count() FROM ad_events)                     AS fact_events,
-              (SELECT count() FROM per_key)                       AS key_count,
-              (SELECT min(total) FROM per_key)                    AS min_key_events,
-              (SELECT max(total) FROM per_key)                    AS max_key_events,
-              (SELECT sum(events) FROM ${ROLLUP_TABLES.hourly} WHERE dim = 'ad_format') AS hourly_events,
+              (SELECT count() FROM daily_key)                     AS key_count,
+              (SELECT min(total) FROM daily_key)                  AS min_key_events,
+              (SELECT max(total) FROM daily_key)                  AS max_key_events,
+              (SELECT count() FROM hourly_key)                    AS hourly_key_count,
+              (SELECT min(total) FROM hourly_key)                 AS min_hourly_events,
+              (SELECT max(total) FROM hourly_key)                 AS max_hourly_events,
               (SELECT count() FROM ${ROLLUP_TABLES.daily})        AS daily_rows,
               (SELECT count() FROM ${ROLLUP_TABLES.hourly})       AS hourly_rows`,
     );
@@ -295,7 +309,9 @@ export async function ensureRollupReady(
     const keyCount = Number(row?.key_count ?? 0);
     const minKeyEvents = Number(row?.min_key_events ?? 0);
     const maxKeyEvents = Number(row?.max_key_events ?? 0);
-    const hourlyEvents = Number(row?.hourly_events ?? 0);
+    const hourlyKeyCount = Number(row?.hourly_key_count ?? 0);
+    const minHourlyEvents = Number(row?.min_hourly_events ?? 0);
+    const maxHourlyEvents = Number(row?.max_hourly_events ?? 0);
     const expectedKeys = ROLLUP_DIM_KEYS.length;
 
     const health: RollupHealth = {
@@ -304,7 +320,9 @@ export async function ensureRollupReady(
         keyCount === expectedKeys &&
         minKeyEvents === factEvents &&
         maxKeyEvents === factEvents &&
-        hourlyEvents === factEvents,
+        hourlyKeyCount === expectedKeys &&
+        minHourlyEvents === factEvents &&
+        maxHourlyEvents === factEvents,
       factEvents,
       rollupEvents: minKeyEvents,
       dailyRows: Number(row?.daily_rows ?? 0),
@@ -321,11 +339,18 @@ export async function ensureRollupReady(
               ? `rollup dimension keys disagree: one accounts for ${minKeyEvents} events, another for ` +
                 `${maxKeyEvents}, fact table has ${factEvents} — a partial backfill. ` +
                 `Re-run: bun run ch:rollup`
-              : hourlyEvents !== factEvents
-                ? `hourly rollup accounts for ${hourlyEvents} events, fact table has ${factEvents} — ` +
-                  `re-run: bun run ch:rollup`
-                : `rollup accounts for ${minKeyEvents} events, fact table has ${factEvents} — ` +
-                  `re-run: bun run ch:rollup`;
+              : hourlyKeyCount !== expectedKeys
+                ? `hourly rollup has ${hourlyKeyCount} dimension key(s), expected ${expectedKeys} — ` +
+                  `a cut is missing entirely. Re-run: bun run ch:rollup`
+                : minHourlyEvents !== maxHourlyEvents
+                  ? `hourly rollup dimension keys disagree: one accounts for ${minHourlyEvents} ` +
+                    `events, another for ${maxHourlyEvents}, fact table has ${factEvents} — a partial ` +
+                    `backfill. Re-run: bun run ch:rollup`
+                  : minHourlyEvents !== factEvents
+                    ? `hourly rollup accounts for ${minHourlyEvents} events, fact table has ` +
+                      `${factEvents} — re-run: bun run ch:rollup`
+                    : `rollup accounts for ${minKeyEvents} events, fact table has ${factEvents} — ` +
+                      `re-run: bun run ch:rollup`;
     }
     ready = health.ready;
     lastHealth = health;
