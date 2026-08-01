@@ -29,7 +29,7 @@ import {
   OTEL_INGESTION_TOKEN,
 } from "../constants";
 import { runScript } from "../utils/common.utils";
-import { log } from "./logger";
+import { log } from "../utils/telemetryUtils";
 
 async function run(args: string[]): Promise<string> {
   const proc = Bun.spawn(["docker", ...args], {

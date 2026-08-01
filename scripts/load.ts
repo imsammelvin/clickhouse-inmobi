@@ -65,12 +65,12 @@ import {
   withRetry,
 } from "../utils/common.utils";
 import {
+  counter,
   initObservability,
+  log,
   shutdownObservability,
   withSpan,
-} from "../observability/otel";
-import { metrics } from "@opentelemetry/api";
-import { log } from "../observability/logger";
+} from "../utils/telemetryUtils";
 
 // ---------------------------------------------------------------------------
 // args
@@ -106,14 +106,13 @@ export function parseArgs(argv: string[]): LoadOptions {
 // dimensions
 // ---------------------------------------------------------------------------
 
+const dimensionsLoaded = counter(
+  "ingest.dimensions.loaded",
+  "Dimension rows loaded (replace), by table",
+);
+
 async function loadDimensions(client: ClickHouseClient): Promise<void> {
   log.info("== dimensions ==");
-
-  const dimensionsLoaded = metrics
-    .getMeter("ingest")
-    .createCounter("ingest.dimensions.loaded", {
-      description: "Dimension rows loaded (replace), by table",
-    });
 
   for (const { table, file } of DIMENSION_SOURCES) {
     const path = sourcePath(file);
@@ -137,7 +136,7 @@ async function loadDimensions(client: ClickHouseClient): Promise<void> {
     });
 
     const { n } = await selectOne<CountRow>(client, Q.countRows(table));
-    dimensionsLoaded.add(Number(n), { "load.table": table });
+    dimensionsLoaded().add(Number(n), { "load.table": table });
     log.info(
       `  ${table.padEnd(12)} ${fmt(Number(n)).padStart(9)} rows  ${secondsSince(startedAt)}`,
     );

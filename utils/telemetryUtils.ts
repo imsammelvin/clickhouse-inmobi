@@ -1,21 +1,23 @@
 /**
- * The ClickStack pipeline. All three OTLP signals -- traces, metrics, logs -- are exported over
- * OTLP/HTTP to the ClickStack collector (:4318), which writes them into the `otel_traces`,
- * `otel_metrics_*` and `otel_logs` tables of the same ClickHouse the app queries.
+ * All telemetry in one place: the ClickStack OTLP pipeline, span helpers, and structured logging.
+ * Every entry point imports from here -- there is no second telemetry module.
  *
- * Lifecycle: every entry point calls `initObservability()` first and `shutdownObservability()` in a
- * finally block. The shutdown is not optional -- the batch processors hold un-exported data, and a
- * CLI process that exits without flushing loses the tail of its own run, which is exactly the part
- * you want when something failed.
+ * Pipeline: all three signals go over OTLP/HTTP to the ClickStack collector, which writes them
+ * into the `otel_traces`, `otel_metrics_*` and `otel_logs` tables of the ClickHouse it manages.
  *
  *   initObservability()
  *     |-- traces   BatchSpanProcessor        -> /v1/traces   -> otel_traces
  *     |-- metrics  PeriodicExportingReader   -> /v1/metrics  -> otel_metrics_*
  *     +-- logs     BatchLogRecordProcessor   -> /v1/logs     -> otel_logs
  *
- * Correlation is the whole point: `withSpan` puts a span on the active context, and the log SDK
- * stamps that context's trace_id/span_id onto every record emitted inside it. In the ClickStack UI
- * that turns into "open a trace, see the logs it produced".
+ * Lifecycle: every entry point calls `initObservability()` first and `shutdownObservability()` in a
+ * finally block. The shutdown is not optional -- the batch processors hold un-exported data, and a
+ * CLI process that exits without flushing loses the tail of its own run, which is exactly the part
+ * you want when something failed.
+ *
+ * Correlation is the whole point. `withSpan` puts a span on the active context; `log` stamps every
+ * record with that span's trace_id/span_id (as attributes, and the SDK sets them as columns too),
+ * so in the ClickStack UI a log shows up attached to the operation that produced it.
  */
 import {
   context,
@@ -28,9 +30,15 @@ import {
   SpanStatusCode,
   trace,
   type Attributes,
+  type Counter,
+  type Histogram,
   type Span,
 } from "@opentelemetry/api";
-import { logs } from "@opentelemetry/api-logs";
+import {
+  logs,
+  SeverityNumber,
+  type LogAttributes,
+} from "@opentelemetry/api-logs";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { resourceFromAttributes } from "@opentelemetry/resources";
@@ -63,12 +71,16 @@ import {
 } from "../constants";
 import { EnvVar, OtlpPath } from "../enums";
 
+/** The name every tracer, meter and logger in this codebase is created under. */
+const INSTRUMENTATION_SCOPE = "clickhouse-inmobi";
+
+// ---------------------------------------------------------------------------
+// lifecycle
+// ---------------------------------------------------------------------------
+
 let tracerProvider: BasicTracerProvider | undefined;
 let meterProvider: MeterProvider | undefined;
 let loggerProvider: LoggerProvider | undefined;
-
-/** The name every tracer, meter and logger in this codebase is created under. */
-export const INSTRUMENTATION_SCOPE = "clickhouse-inmobi";
 
 /** ClickStack's collector authenticates every OTLP request with this bearer token. */
 const headers = { Authorization: OTEL_INGESTION_TOKEN };
@@ -192,33 +204,25 @@ export async function flushObservability(): Promise<void> {
   ]);
 }
 
-/** What a `trySpan` produced: the value, or the error, plus how long the span took. */
+// ---------------------------------------------------------------------------
+// spans
+// ---------------------------------------------------------------------------
+
+/** What a span produced: the value, or the error, plus how long it took. */
 export type SpanOutcome<T> =
   | { ok: true; value: T; ms: number }
   | { ok: false; error: Error; ms: number };
 
 /**
- * Like `withSpan`, but the span times itself and failure comes back as a value instead of a throw.
- *
- * Exists to kill the boilerplate that otherwise shows up in every request handler: a
- * `performance.now()` before the call, an `elapsed()` after it, and the same figure recomputed in
- * the catch block so the error response can report a latency too. The span is already measuring
- * exactly that interval, so the duration is read off the span's own timing and returned as `ms`
- * -- and recorded on the span as `app.duration_ms` so it is filterable in ClickStack.
- *
- * Not rethrowing is the point for HTTP handlers: an error is a 503 to render, not an exception to
- * unwind. The span is still marked ERROR and still carries the recorded exception, so the trace
- * looks identical to what `withSpan` would have produced.
- *
- *   const found = await trySpan("db.count", {}, () => selectOne(client, sql));
- *   if (!found.ok) return json({ error: found.error.message, ms: found.ms }, 503);
- *   return json({ count: found.value.n, ms: found.ms }, 200);
+ * Run `fn` inside a span and return the outcome as a value. The span's own timing is measured and
+ * recorded on it as `app.duration_ms` so it is filterable in ClickStack; `withSpan` rethrows on
+ * failure, `trySpan` returns it.
  */
-export async function trySpan<T>(
+async function runSpan<T>(
   name: string,
   attributes: Attributes,
+  kind: SpanKind,
   fn: (span: Span) => Promise<T>,
-  kind: SpanKind = SpanKind.INTERNAL,
 ): Promise<SpanOutcome<T>> {
   const startedAt = performance.now();
 
@@ -245,24 +249,6 @@ export async function trySpan<T>(
 }
 
 /**
- * Defer creating something until it is first used.
- *
- * Use this for every metric instrument. `metrics.getMeter()` resolves against whatever provider is
- * global *at that moment*, and module top-level code runs before `initObservability()` does -- so an
- * instrument created at import time binds to the no-op provider and silently records nothing for
- * the life of the process. Tracing does not have this problem because `withSpan` resolves its
- * tracer per call; metrics are captured once, which is what makes the mistake permanent.
- *
- *   const requests = lazyInstrument(() =>
- *     metrics.getMeter(INSTRUMENTATION_SCOPE).createCounter("app.requests"));
- *   requests().add(1);
- */
-export function lazyInstrument<T>(create: () => T): () => T {
-  let value: T | undefined;
-  return () => (value ??= create());
-}
-
-/**
  * Run `fn` inside a span, recording errors and ending the span. Returns what `fn` returned.
  * Safe to call before initObservability() -- the API falls back to a no-op tracer, so code
  * that forgets to initialise still works, it just emits nothing.
@@ -273,19 +259,144 @@ export async function withSpan<T>(
   fn: (span: Span) => Promise<T>,
   kind: SpanKind = SpanKind.INTERNAL,
 ): Promise<T> {
-  return trace
-    .getTracer(INSTRUMENTATION_SCOPE)
-    .startActiveSpan(name, { kind }, async (span) => {
-      span.setAttributes(attributes);
-      try {
-        return await fn(span);
-      } catch (error) {
-        const err = error instanceof Error ? error : new Error(String(error));
-        span.recordException(err);
-        span.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
-        throw error;
-      } finally {
-        span.end();
-      }
-    });
+  const outcome = await runSpan(name, attributes, kind, fn);
+  if (!outcome.ok) throw outcome.error;
+  return outcome.value;
 }
+
+/**
+ * Like `withSpan`, but failure comes back as a value instead of a throw, with the duration
+ * (`ms`) ready to put in an error response.
+ *
+ * Not rethrowing is the point for HTTP handlers: an error is a 503 to render, not an exception to
+ * unwind. The span is still marked ERROR and still carries the recorded exception, so the trace
+ * looks identical to what `withSpan` would have produced.
+ *
+ *   const found = await trySpan("db.count", {}, () => selectOne(client, sql));
+ *   if (!found.ok) return json({ error: found.error.message, ms: found.ms }, 503);
+ *   return json({ count: found.value.n, ms: found.ms }, 200);
+ */
+export async function trySpan<T>(
+  name: string,
+  attributes: Attributes,
+  fn: (span: Span) => Promise<T>,
+  kind: SpanKind = SpanKind.INTERNAL,
+): Promise<SpanOutcome<T>> {
+  return runSpan(name, attributes, kind, fn);
+}
+
+// ---------------------------------------------------------------------------
+// metrics
+// ---------------------------------------------------------------------------
+
+/**
+ * Defer creating something until it is first used.
+ *
+ * Use this for every metric instrument. `metrics.getMeter()` resolves against whatever provider is
+ * global *at that moment*, and module top-level code runs before `initObservability()` does -- so an
+ * instrument created at import time binds to the no-op provider and silently records nothing for
+ * the life of the process. Tracing does not have this problem because `withSpan` resolves its
+ * tracer per call; metrics are captured once, which is what makes the mistake permanent.
+ */
+function lazyInstrument<T>(create: () => T): () => T {
+  let value: T | undefined;
+  return () => (value ??= create());
+}
+
+/**
+ * A counter instrument under this repo's meter. Lazy, so it is safe to create at module top level.
+ * Call the returned function at record time: `requests().add(1, { route })`.
+ */
+export function counter(
+  name: string,
+  description: string,
+): () => Counter {
+  return lazyInstrument(() =>
+    metrics.getMeter(INSTRUMENTATION_SCOPE).createCounter(name, {
+      description,
+    }),
+  );
+}
+
+/**
+ * A histogram instrument under this repo's meter. Lazy, so it is safe to create at module top
+ * level. Call the returned function at record time: `duration().record(ms, { route })`.
+ */
+export function histogram(
+  name: string,
+  description: string,
+  unit?: string,
+): () => Histogram {
+  return lazyInstrument(() =>
+    metrics.getMeter(INSTRUMENTATION_SCOPE).createHistogram(name, {
+      description,
+      ...(unit ? { unit } : {}),
+    }),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// logs
+// ---------------------------------------------------------------------------
+
+/** Console sink per severity, so warnings and errors reach stderr like they should. */
+const consoleSink: Record<string, (message: string) => void> = {
+  DEBUG: console.debug,
+  INFO: console.log,
+  WARN: console.warn,
+  ERROR: console.error,
+};
+
+/** Compact `key=value` rendering for the console half; the OTLP half keeps real types. */
+const format = (attributes: LogAttributes): string =>
+  Object.entries(attributes)
+    .map(([key, value]) => `${key}=${String(value)}`)
+    .join(" ");
+
+/**
+ * Emit one structured log record to ClickStack, plus a compact console line for the terminal.
+ *
+ * The record is stamped with the trace_id/span_id of whatever span is active at the call site
+ * (the span of the function currently running -- `withSpan` keeps it on the context), so in the
+ * UI the log is attached to the operation that produced it. The ids are only added to the OTLP
+ * record, not the console line: the terminal output is for the human, the attributes are for the
+ * database.
+ */
+function emit(
+  severityNumber: SeverityNumber,
+  severityText: string,
+  message: string,
+  attributes: LogAttributes = {},
+): void {
+  const spanContext = trace.getActiveSpan()?.spanContext();
+  const recordAttributes: LogAttributes = spanContext
+    ? { "trace.id": spanContext.traceId, "span.id": spanContext.spanId, ...attributes }
+    : attributes;
+
+  // Resolved per call rather than cached at import time: the global logger provider is only
+  // registered by initObservability(), which may run after this module is first imported.
+  logs.getLogger(INSTRUMENTATION_SCOPE).emit({
+    severityNumber,
+    severityText,
+    body: message,
+    attributes: recordAttributes,
+  });
+
+  const detail =
+    Object.keys(attributes).length > 0 ? ` ${format(attributes)}` : "";
+  (consoleSink[severityText] ?? console.log)(`${message}${detail}`);
+}
+
+export const log = {
+  debug: (message: string, attributes?: LogAttributes): void =>
+    emit(SeverityNumber.DEBUG, "DEBUG", message, attributes),
+
+  info: (message: string, attributes?: LogAttributes): void =>
+    emit(SeverityNumber.INFO, "INFO", message, attributes),
+
+  warn: (message: string, attributes?: LogAttributes): void =>
+    emit(SeverityNumber.WARN, "WARN", message, attributes),
+
+  error: (message: string, attributes?: LogAttributes): void =>
+    emit(SeverityNumber.ERROR, "ERROR", message, attributes),
+};

@@ -19,15 +19,8 @@
  * Deliberately does NOT initialise observability itself: a verifier that emits the thing it is
  * verifying can pass against its own output.
  */
-import { createClient, type ClickHouseClient } from "@clickhouse/client";
-import { select, selectOne } from "../clickhouse/client";
-import {
-  CLICKSTACK_PASSWORD,
-  CLICKSTACK_URL,
-  CLICKSTACK_USER,
-  OTEL_ENDPOINT,
-  SERVICE_NAME,
-} from "../constants";
+import { makeTelemetryClient, select, selectOne } from "../clickhouse/client";
+import { CLICKSTACK_URL, OTEL_ENDPOINT, SERVICE_NAME } from "../constants";
 import * as Q from "../constants/queries";
 import { CheckStatus, VerifyFlag } from "../enums";
 import type {
@@ -37,7 +30,7 @@ import type {
   TraceSpanRow,
 } from "../interfaces";
 import { flagValue, fmt, runScript } from "../utils/common.utils";
-import { log } from "./logger";
+import { log } from "../utils/telemetryUtils";
 
 /**
  * Which service to check. Each entry point publishes under its own name (the API runs as
@@ -46,17 +39,6 @@ import { log } from "./logger";
  */
 const service =
   flagValue(process.argv.slice(2), VerifyFlag.Service) ?? SERVICE_NAME;
-
-/**
- * Connects to ClickStack's own ClickHouse, not the app's. `makeClient()` points at ClickHouse
- * Cloud where the fact data lives; the otel_* tables are in the ClickStack container.
- */
-const makeTelemetryClient = (): ClickHouseClient =>
-  createClient({
-    url: CLICKSTACK_URL,
-    username: CLICKSTACK_USER,
-    password: CLICKSTACK_PASSWORD,
-  });
 
 let failures = 0;
 

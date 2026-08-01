@@ -182,7 +182,7 @@ export const logTraceCorrelation = (service: string): string => `
 
 /**
  * The span tree of the most recent trace, in start order. A flat list of roots here means context
- * propagation is broken -- see the AsyncLocalStorage note in observability/otel.ts.
+ * propagation is broken -- see the AsyncLocalStorage note in utils/telemetryUtils.ts.
  */
 export const latestTraceTree = (service: string): string => `
   SELECT SpanName                        AS span,

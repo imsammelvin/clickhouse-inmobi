@@ -11,8 +11,8 @@ import {
   initObservability,
   shutdownObservability,
   withSpan,
-} from "../observability/otel";
-import { log } from "../observability/logger";
+} from "../utils/telemetryUtils";
+import { log } from "../utils/telemetryUtils";
 
 async function main(): Promise<void> {
   initObservability();

@@ -2,7 +2,7 @@
  * Paths, tuning knobs and expected values. No script should hard-code any of these.
  */
 import { join, resolve } from "node:path";
-import { DimensionKey, SourceFile, Table } from "../enums";
+import { DimensionKey, EnvVar, SourceFile, Table } from "../enums";
 import type { DimensionExpectation, DimensionSource } from "../interfaces";
 
 // ---------------------------------------------------------------------------
@@ -84,8 +84,6 @@ export const RATIO_UPPER_BOUND = 1.0001;
 // ---------------------------------------------------------------------------
 // observability (OTLP -> ClickStack collector)
 // ---------------------------------------------------------------------------
-
-import { EnvVar } from "../enums";
 
 /**
  * Identifies this process in ClickStack. Every signal -- trace, metric, log -- is tagged with it,

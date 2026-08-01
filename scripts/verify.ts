@@ -40,13 +40,12 @@ import {
   secondsSince,
 } from "../utils/common.utils";
 import {
+  counter,
   initObservability,
-  lazyInstrument,
+  log,
   shutdownObservability,
   withSpan,
-} from "../observability/otel";
-import { metrics } from "@opentelemetry/api";
-import { log } from "../observability/logger";
+} from "../utils/telemetryUtils";
 
 // ---------------------------------------------------------------------------
 // assertions
@@ -54,13 +53,7 @@ import { log } from "../observability/logger";
 
 let failures = 0;
 
-// Lazy: a counter created at module load binds to the no-op meter provider that exists before
-// initObservability() runs, and would export nothing. See lazyInstrument().
-const verifyChecks = lazyInstrument(() =>
-  metrics.getMeter("verify").createCounter("verify.checks", {
-    description: "Verification assertions, by outcome",
-  }),
-);
+const verifyChecks = counter("verify.checks", "Verification assertions, by outcome");
 
 function check(name: string, ok: boolean, detail: string): void {
   const status = ok ? CheckStatus.Pass : CheckStatus.Fail;

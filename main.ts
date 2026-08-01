@@ -14,7 +14,6 @@
  * harness that runs them under observability, not a place to add new analysis.
  */
 import type { ClickHouseClient } from "@clickhouse/client";
-import { metrics, type Meter } from "@opentelemetry/api";
 import { DATABASE, makeClient, select } from "./clickhouse/client";
 import {
   APP_WORKLOAD_INTERVAL_S,
@@ -31,15 +30,15 @@ import {
   runScript,
   sleep,
 } from "./utils/common.utils";
-import { log } from "./observability/logger";
 import {
-  INSTRUMENTATION_SCOPE,
+  counter,
   flushObservability,
+  histogram,
   initObservability,
-  lazyInstrument,
+  log,
   shutdownObservability,
   withSpan,
-} from "./observability/otel";
+} from "./utils/telemetryUtils";
 
 // ---------------------------------------------------------------------------
 // workload
@@ -95,31 +94,25 @@ export function parseArgs(argv: string[]): AppOptions {
 // ---------------------------------------------------------------------------
 // instruments
 //
-// All lazy -- see lazyInstrument(). Creating these at module load would bind them to the no-op
-// meter provider that exists before initObservability() runs, and they would export nothing.
-// The meter provider ships accumulated points to ClickStack every METRIC_EXPORT_INTERVAL_MS.
+// Lazy -- see counter()/histogram() in telemetryUtils. Created at module load they would bind to
+// the no-op meter provider that exists before initObservability() runs and export nothing.
 // ---------------------------------------------------------------------------
 
-const meter = (): Meter => metrics.getMeter(INSTRUMENTATION_SCOPE);
-
-const queryCounter = lazyInstrument(() =>
-  meter().createCounter("app.queries", {
-    description: "Workload queries executed, by name and outcome",
-  }),
+const queryCounter = counter(
+  "app.queries",
+  "Workload queries executed, by name and outcome",
 );
 
-const queryDuration = lazyInstrument(() =>
-  meter().createHistogram("app.query.duration", {
-    description: "Wall-clock duration of one workload query",
-    unit: "ms",
-  }),
+const queryDuration = histogram(
+  "app.query.duration",
+  "Wall-clock duration of one workload query",
+  "ms",
 );
 
-const passDuration = lazyInstrument(() =>
-  meter().createHistogram("app.pass.duration", {
-    description: "Wall-clock duration of one full workload pass",
-    unit: "ms",
-  }),
+const passDuration = histogram(
+  "app.pass.duration",
+  "Wall-clock duration of one full workload pass",
+  "ms",
 );
 
 // ---------------------------------------------------------------------------

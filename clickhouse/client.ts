@@ -9,12 +9,15 @@ import {
   type InsertValues,
 } from "@clickhouse/client";
 import {
+  CLICKSTACK_PASSWORD,
+  CLICKSTACK_URL,
+  CLICKSTACK_USER,
   DEFAULT_DATABASE,
   PROGRESS_HEADER_INTERVAL_MS,
   REQUEST_TIMEOUT_MS,
 } from "../constants";
 import { DataFormat, EnvVar } from "../enums";
-import { withSpan } from "../observability/otel";
+import { withSpan } from "../utils/telemetryUtils";
 
 function required(name: EnvVar): string {
   const value = process.env[name];
@@ -66,6 +69,22 @@ function dbAttributes(query: string): Record<string, string> {
     "db.query.text": query.length > 500 ? `${query.slice(0, 500)}...` : query,
     "db.collection.name": DATABASE,
   };
+}
+
+/**
+ * Client for ClickStack's telemetry store -- the otel_* tables.
+ *
+ * Deliberately separate from makeClient(): the fact data lives in ClickHouse Cloud while the
+ * ClickStack all-in-one container keeps its otel_* tables in its own bundled instance, so the
+ * observability scripts have to look somewhere else than the app does. Defaults to that container;
+ * point CLICKSTACK_CLICKHOUSE_URL at Cloud to target it instead.
+ */
+export function makeTelemetryClient(): ClickHouseClient {
+  return createClient({
+    url: CLICKSTACK_URL,
+    username: CLICKSTACK_USER,
+    password: CLICKSTACK_PASSWORD,
+  });
 }
 
 /** Run a statement and discard the result. */

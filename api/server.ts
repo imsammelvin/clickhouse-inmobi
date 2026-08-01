@@ -17,7 +17,7 @@
  * header. Paste it into ClickStack to pull up the exact trace -- including the nested
  * `clickhouse.select` child span and the log records emitted inside it.
  *
- * Inbound `traceparent` headers are honoured (W3C propagation is registered in observability/otel.ts),
+ * Inbound `traceparent` headers are honoured (W3C propagation is registered in utils/telemetryUtils.ts),
  * so a caller that is already tracing gets one continuous trace across the hop rather than two
  * disconnected ones.
  */
@@ -25,10 +25,7 @@ import {
   SpanKind,
   SpanStatusCode,
   context,
-  metrics,
   propagation,
-  trace,
-  type Meter,
 } from "@opentelemetry/api";
 import { DATABASE, makeClient, selectOne } from "../clickhouse/client";
 import {
@@ -48,33 +45,25 @@ import type {
   PingResponse,
   ServerInfo,
 } from "../interfaces";
-import { log } from "../observability/logger";
 import {
-  INSTRUMENTATION_SCOPE,
+  counter,
+  histogram,
   initObservability,
-  lazyInstrument,
+  log,
   shutdownObservability,
   trySpan,
-} from "../observability/otel";
+} from "../utils/telemetryUtils";
 
 // ---------------------------------------------------------------------------
-// instruments -- lazy, see lazyInstrument()
+// instruments -- lazy, see counter()/histogram()
 // ---------------------------------------------------------------------------
 
-const meter = (): Meter => metrics.getMeter(INSTRUMENTATION_SCOPE);
-
-const requestCounter = lazyInstrument(() =>
-  meter().createCounter("http.server.requests", {
-    description: "HTTP requests served, by route and status",
-  }),
+const requestCounter = counter(
+  "http.server.requests",
+  "HTTP requests served, by route and status",
 );
 
-const requestDuration = lazyInstrument(() =>
-  meter().createHistogram("http.server.duration", {
-    description: "HTTP request duration",
-    unit: "ms",
-  }),
-);
+const requestDuration = histogram("http.server.duration", "HTTP request duration", "ms");
 
 // ---------------------------------------------------------------------------
 // setup
@@ -193,9 +182,11 @@ function handleHealth(traceId: string): Response {
 // request pipeline
 // ---------------------------------------------------------------------------
 
-async function route(request: Request, path: string): Promise<Response> {
-  const traceId = trace.getActiveSpan()?.spanContext().traceId ?? "";
-
+async function route(
+  request: Request,
+  path: string,
+  traceId: string,
+): Promise<Response> {
   if (request.method !== "GET") {
     return json({ error: "method not allowed" }, 405, traceId);
   }
@@ -245,7 +236,7 @@ async function handle(request: Request): Promise<Response> {
       },
       async (span) => {
         traceId = span.spanContext().traceId;
-        const response = await route(request, path);
+        const response = await route(request, path, traceId);
 
         span.setAttribute("http.response.status_code", response.status);
         // 4xx is the caller's fault, not ours; only 5xx marks the span failed.

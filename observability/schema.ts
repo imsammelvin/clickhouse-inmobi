@@ -13,28 +13,19 @@
  * Target: CLICKSTACK_CLICKHOUSE_URL (defaults to the local ClickStack container). Point that at
  * ClickHouse Cloud to apply it there instead -- see .env.example.
  */
-import { createClient, type ClickHouseClient } from "@clickhouse/client";
 import { readFileSync } from "node:fs";
-import {
-  CLICKSTACK_PASSWORD,
-  CLICKSTACK_SCHEMA_FILE,
-  CLICKSTACK_URL,
-  CLICKSTACK_USER,
-} from "../constants";
+import { makeTelemetryClient } from "../clickhouse/client";
+import { CLICKSTACK_SCHEMA_FILE, CLICKSTACK_URL } from "../constants";
 import { runScript } from "../utils/common.utils";
 import { splitStatements, statementLabel } from "../utils/sql.utils";
-import { log } from "./logger";
+import { log } from "../utils/telemetryUtils";
 
 async function main(): Promise<void> {
   const statements = splitStatements(
     readFileSync(CLICKSTACK_SCHEMA_FILE, "utf8"),
   );
 
-  const client: ClickHouseClient = createClient({
-    url: CLICKSTACK_URL,
-    username: CLICKSTACK_USER,
-    password: CLICKSTACK_PASSWORD,
-  });
+  const client = makeTelemetryClient();
 
   try {
     log.info(`Applying ${statements.length} statements to ${CLICKSTACK_URL}\n`);
