@@ -26,6 +26,8 @@ import { decompose } from "../backend/stages/decompose";
 import { clusterWindows, groupIntoIncidents, scanSegments } from "../backend/segments";
 import { DEFAULT_METRICS } from "../backend/scan";
 import { segmentPredicate } from "../backend/types";
+import { rollupHealth } from "../clickhouse/rollup";
+import { scanSegmentsRollup } from "./sweep";
 import {
   DATASET_END,
   DATASET_START,
@@ -101,6 +103,7 @@ const describeData: ToolDef = {
     return {
       summary: `${o.days} days, ${o.requests.toLocaleString()} requests`,
       payload: {
+        servedFrom: o.servedFrom,
         window: { from: o.from, to: o.to, days: o.days },
         volumes: {
           requests: o.requests,
@@ -173,7 +176,7 @@ const listDimensionValues: ToolDef = {
   handler: async (args, ledger) => {
     const metric = typeof args.metric === "string" ? args.metric : "revenue";
     const window = assertWindow(args.from ?? DATASET_START, args.to ?? DATASET_END);
-    const values = await dimensionValues(
+    const { values, servedFrom } = await dimensionValues(
       ledger,
       String(args.dimension),
       metric,
@@ -182,7 +185,13 @@ const listDimensionValues: ToolDef = {
     );
     return {
       summary: `${values.length} value(s) of ${String(args.dimension)}`,
-      payload: { dimension: args.dimension, window, values, truncated: values.length >= MAX_ROWS },
+      payload: {
+        dimension: args.dimension,
+        window,
+        values,
+        truncated: values.length >= MAX_ROWS,
+        servedFrom,
+      },
     };
   },
 };
@@ -379,12 +388,20 @@ const findIncidents: ToolDef = {
           : undefined;
     const limit = typeof args.limit === "number" ? Math.min(args.limit, 50) : 12;
 
+    // The rollup-backed sweep when the rollup is proven current, the raw fan-out otherwise. Same
+    // gates, same statistics, same firings -- asserted firing-for-firing by ch:verify-rollup -- so
+    // this chooses between two costs, not two answers. It is the biggest single latency item in the
+    // server: the raw sweep fans 9M events out 17 ways per metric across the whole history, because
+    // the baseline needs the whole history.
+    const health = rollupHealth();
+    const scan = health?.ready ? scanSegmentsRollup : scanSegments;
+
     const firings = [];
     for (const metric of metrics) {
       // Growth is estimated from the whole daily series, never from a handful of baseline points:
       // a 3-point fit once produced a phantom +213% at 427 sigma.
       const growth = await weeklyGrowthFor(ledger, metric);
-      firings.push(...(await scanSegments(ledger, metric, growth, window)));
+      firings.push(...(await scan(ledger, metric, growth, window)));
     }
     const windows = clusterWindows(groupIntoIncidents(firings));
 
@@ -394,6 +411,7 @@ const findIncidents: ToolDef = {
         metricsSwept: metrics,
         reportedWindow: window ?? { from: DATASET_START, to: DATASET_END },
         gates: "abs(change) >= 10% AND abs(sigma) >= 5, min 150 requests/day/segment",
+        servedFrom: health?.ready ? "rollup:daily" : "raw",
         windowCount: windows.length,
         windows: windows.slice(0, limit).map((w) => ({
           metric: w.metric,

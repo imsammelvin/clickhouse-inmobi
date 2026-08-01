@@ -317,117 +317,160 @@ change it without risking a regression elsewhere. `investigate()` on the exact h
 (Jun 19-22) already gets this right today (confirmed: `mcp:eval` C-finance-ecpm passes 100%). Flagging
 for whoever has time before the freeze to confirm whether the European-interstitial pattern is real.
 
-### 2026-08-01 22:40 — sam — synthetic dataset built; the engine fabricates a cause on an unseen uniform collapse
-
-**What exists:** `mcp/synth/` — a 1.48M-row dataset in its own database `rca_synth` with five deviations
-planted from a declarative spec, plus a scorer. `CLICKHOUSE_DATABASE` retargets the whole engine, so
-what runs is the shipping code. `bun run synth:build` / `synth:verify` / `synth:destroy`. `default` is
-untouchable by construction (two independent guards, both tested).
-
-**Why it matters:** `KNOWN_INCIDENTS` measures agreement with our own homework — we found those
-incidents with the same intuitions we then encoded. Here the deviations are declared before the data
-exists, and precision becomes measurable for the first time: anything firing that is not in the spec
-is a false positive definitionally, not "untriaged".
-
 ---
 
-**GOOD NEWS FIRST.** On a dataset the engine has never seen, with different values and baselines:
+## 2026-08-01 — T-013 landed: rollup MVs live. One decision-log correction, one cross-lane export, one patch offered to Lane A. — samarth (Lane B)
 
-    P1  fill collapse on os_version='iOS 18.4'   -> FOUND, localized, technical_break, -$7.80/day
-    P2  eCPM drop on app_category='banking'      -> FOUND, localized, demand_change
-    quiet days (4 of them)                        -> all no_anomaly, nothing invented
+Branch `dev/samarth/rollup-mv`. Nothing in `backend/` changed except one word (below). Everything is
+additive and every existing gate is green: `typecheck` clean, `mcp:eval` **16/16 cases / 60/60 gated**,
+`criteria` **4/4**, `diagnose` unchanged (46 windows -> 30 incidents -> 6 investigated, 100% grounded).
 
-Localization and channel are both right on both. That is real evidence of generalisation.
+### What exists now
 
----
+`rollup_segment_hourly` (3,089,172 rows) and `rollup_segment_daily` (~148k), both `SummingMergeTree`,
+long format: one row per `(bucket, dim, val)` -> `events, fills, impressions, clicks, revenue`. Sums
+only, never a stored ratio. Maintained by two incremental MVs that fire on every `ad_events` insert —
+`mv_rollup_segment_hourly` off `ad_events`, `mv_rollup_segment_daily` cascaded off the hourly table so
+daily cannot disagree with hourly.
 
-**FINDING 1 — loges, this is the important one. A uniform collapse gets a fabricated cause.**
+New commands: `bun run ch:rollup` (backfill — an MV only sees inserts made after it exists, so a
+loaded table needs this once) and `bun run ch:verify-rollup` (the correctness gate) and
+`bun run bench:rollup` (the measured delta). `ch:setup` chains all of them.
 
-P3 plants a platform-wide request collapse to 55% for one day, applied to every row equally — no
-segment is responsible, by construction. Incident B (Jun 21) is the same shape and correctly returns
-`not_localizable`. On this dataset:
+**Measured, 11 representative tool calls, cost from `system.query_log`, artifact in
+`clickhouse/rollup-bench.json`:** rows read **213.6M -> 3.69M (57.9x)**, bytes 2,680 MiB -> 117 MiB,
+peak memory **848 MiB -> 30 MiB**, server time **49.1s -> 1.0s (47x)**. `find_incidents` over the full
+history: **38.2s -> 1.14s**. Every other tool call is 40-65ms.
 
-    investigate(requests, 2026-09-30) -> demand_change, cause region|device_model='SOUTH|Zeal'
+### D-020 PROPOSED — the § 7 rollup grain is wrong, and I measured it before building
 
-**It named a segment that is not responsible, on the case our headline claim is built on.** "It can
-return zero causes" holds for Jun 21 and does not generalise. This is the failure the rubric punishes
-hardest, and on the unseen dataset it is the one most likely to be tested.
+goal.md § 7 (LOCKED) specifies a rollup at `(hour, app_id, geo_device_id, advertiser_id, ad_format)`.
+**Do not build that one.** Measured on the real table: that key space is so much larger than the event
+count that 9M events land on ~9M distinct keys — it compresses nothing and would just be a second copy
+of the fact table. The access pattern is never one app x one geo x one advertiser; it is one dimension
+at a time, occasionally two.
 
-**FINDING 2 — a metric moving UP is diagnosed as a break.** P4 raises CTR on `region='ISLANDS'` by
-65%. Result: `technical_break`, cause `country|ad_format='FF|video'`. Nothing is broken; CTR improved.
+What shipped instead: long format `(bucket, dim, val)`, carrying 11 single dimensions and **all 36
+pairs of the 9 low-cardinality ones** — 4,221 segments, 148k daily rows. Entity dimensions (`app_id`,
+`advertiser_id`) are carried singly but never paired: `app_id x os_version` alone is 529k daily rows,
+more than every other pair combined. Cost grows with _cardinality x time_, not with events, which is
+the petabyte answer § 3 promises.
 
-**FINDING 3 — `render_rate` is never swept.** `DEFAULT_METRICS` in `backend/scan.ts` is revenue,
-requests, fill_rate, ecpm, ctr. P5 breaks render rate on `ad_format='rewarded'` (verified in the data
-at 0.6498 against 0.94 elsewhere) and the sweep cannot see it, so the unattended path misses a whole
-funnel stage. One-word fix, your file.
+§ 7 is LOCKED, so this is a **proposal, not an edit**. loges: please add D-020 to § 11 and correct the
+§ 7 rollup bullet, or argue the other side here. The tables are already live either way — the DDL is
+generated from a registry in `clickhouse/rollup.ts`, which is where the grain now actually lives.
 
-**FINDING 4 — precision is worse than anything we could previously measure.** One run reported 50
-windows of which 29 matched nothing planted, mostly `ctr` moves of 15-50% on small segments. At 5 sigma
-over ~10^5 tests, chance predicts under one. The spread floor (`MIN_COEFF_VARIATION` 0.5%) is
-calibrated for a metric as stable as fill rate and badly understates the noise in a low-count ratio
-like CTR, so sigma is inflated and the gate stops binding. Two consecutive identical runs also reported
-50 and then 9 windows — that instability is its own bug.
+### Crosses-lane: loges — one word in `backend/segments.ts`
 
-**FINDING 5 — samarth, a Day-2 landmine in the load path.** After inserting fresh dimension rows,
-`dictGet` returned `''` for every row until the dictionaries actually loaded on the serving replica.
-Every dimension becomes blank, the sweep sees one valueless dimension, and the engine confidently
-answers **`not_localizable` for everything** — no error, no empty result, a trace that looks clean.
-I lost an hour to it believing the engine had failed. `SYSTEM RELOAD DICTIONARY` at load time is not
-sufficient on its own; **`ch:verify` should assert that a sample `dictGet` returns a non-empty value
-before declaring the load good.**
+`MIN_BASELINE_POINTS` is now `export const` instead of `const`. `mcp/sweep.ts` reads it rather than
+restating it: a detection threshold that exists in two places will eventually differ in two places, and
+the symptom would be two sweeps disagreeing about whether an incident happened. No behaviour change.
 
-**Mine, already fixed:** a pair-dimension cause (`region|device_model`) threw "Unknown dimension" in my
-filter validation and took the whole investigation down. Training data never produced a pair cause.
+### Lane A: T-043 is now a small change, and here is the measured priority order
 
-**Commit:** on `dev/sam/mcp-confidentiality`
+`find_incidents` went from ~40% of a `diagnose` run's rows read to **0.7%**. Everything left is engine
+stages, from that run's own `query_log` attribution:
 
-### 2026-08-01 23:30 — sam — RETRACTION: three of the five defects I reported at 22:40 do not exist
+| stage                    | queries | rows read   | share | rollup-servable?                                  |
+| ------------------------ | ------- | ----------- | ----- | ------------------------------------------------- |
+| residualize              | 25      | 121,770,166 | 36.7% | partly — single-exclusion x small-dim target only |
+| detect                   | 12      | 72,561,654  | 21.9% | **yes, fully**                                    |
+| confirm (calls `detect`) | 16      | 66,008,845  | 19.9% | **yes, fully**                                    |
+| localize                 | 5       | 21,722,112  | 6.5%  | unmasked pass yes; masked needs the pair          |
+| decompose                | 10      | 21,722,107  | 6.5%  | **yes**                                           |
+| classify                 | 4       | 15,775,802  | 4.8%  | no — `uniqExact` on advertisers is not a sum      |
+| find_incidents           | 10      | 2,286,280   | 0.7%  | done                                              |
 
-**loges, samarth — please read this before acting on my 22:40 entry.** I reported that the engine
-fabricates a cause on a uniform collapse and that "it can return zero causes" does not generalise.
-**That was wrong, and the fault was mine.**
+**Start with `detect`. 41.8% of the remaining rows for a three-line change.** Its query is one
+`GROUP BY event_date` over a mask, i.e. 0-2 dimensions — exactly what the rollup serves:
 
-**What happened.** My synthetic dataset ran 40k events/day. The real one runs ~257k. At a sixth of
-production volume, segment-level sampling noise is large enough to manufacture an apparent cause inside
-a genuinely uniform move — so the harness was measuring its own noise and I read it as an engine
-defect. I also planted two deviations inside the first two weeks, where a same-weekday baseline cannot
-exist yet (`MIN_BASELINE_DAYS` needs two prior observations, so nothing before day 14 is detectable by
-construction), and read those misses as detector failures too.
+```ts
+// backend/stages/detect.ts
+import { planRollup, RAW_SOURCE } from "../../clickhouse/rollup";
 
-**Rebuilt at 260k events/day with the deviations moved past day 14 — 9.6M rows, same seed, same
-planted spec, same engine code:**
+const src =
+  planRollup({ dims: mask.dims ?? [], grain: "daily", expressions: [expr] }) ?? RAW_SOURCE;
+const sql = `
+SELECT toString(event_date) AS d, ${src.expr(expr)} AS v
+FROM ${src.from}
+WHERE (${mask.sql}) AND (...)
+GROUP BY event_date ORDER BY event_date`;
+```
 
-    P1  fill collapse on os_version='iOS 18.4'   FOUND, localized, technical_break
-    P2  eCPM drop on app_category='banking'      FOUND, localized, demand_change
-    P3  uniform platform-wide request collapse   FOUND, not_localizable, NAMED NO SEGMENT
-    P4  CTR raised 65% on region='ISLANDS'       FOUND, named no segment
-    P5  render break on ad_format='rewarded'     FOUND, localized, technical_break
-    4 quiet days                                  all no_anomaly
-    0 unplanted windows touching a weekend        seasonality fully absorbed
-    gated failures                                0
+The one thing it needs from you: **`Mask` should carry the dimensions it constrains.** `segmentPredicate`
+and `andMask` in `backend/types.ts` already know them at construction — the type just does not record
+them, so `planRollup` cannot be asked. A `dims?: readonly string[]` field populated there is enough, and
+`NO_MASK` gets `dims: []`. Without it, pass `[]` and only unmasked detects hit the rollup, which is
+still the 21.9% row.
 
-Unattributed windows fell from 29-of-50 to **4-of-20**, and all four are metrics moving UP, which the
-digest does not escalate.
+Two rules if you take this: **(1) list EVERY dimension the query mentions, filters included** — a filter
+costs a cut just as a group-by does, and forgetting one returns the _unfiltered_ number, which is
+plausible and wrong. **(2) Add your case to `scripts/verify-rollup.ts`.** It runs the real query path
+twice, rollup off then on, and asserts both the numbers and _which surface served them_ — a probe that
+silently fell back would otherwise pass by comparing raw against itself.
 
-**So, corrected:**
+`backend/scan.ts` (`bun run scan`) also still uses the raw sweep; `mcp/sweep.ts` exports
+`scanSegmentsRollup` with an identical signature, verified firing-for-firing against yours, if you want
+the one-line swap.
 
-- **Finding 1 (fabricates a cause on a uniform collapse) — WITHDRAWN.** It returns `not_localizable`
-  and names nothing, exactly as designed. Your headline claim holds on a dataset it has never seen.
-- **Finding 2 (a rise diagnosed as a break) — WITHDRAWN.** Names no segment at production volume.
-- **Finding 3 (`render_rate` never swept) — DOWNGRADED.** It is genuinely absent from
-  `DEFAULT_METRICS`, but the break surfaces through correlated windows on other metrics and
-  `investigate` localizes it correctly to `ad_format='rewarded'`. Worth adding for directness; not the
-  blind spot I described.
-- **Finding 4 (precision) — DOWNGRADED** to 20% unattributed, all of them rises.
-- **Finding 5 (dictionary `LIFETIME(0)` serving blank dimensions) — STANDS, and is the one to act on.**
-  Unrelated to scale. samarth: `ch:verify` asserting a sample `dictGet` is non-empty would have saved
-  me an hour and would stop a Day-2 load looking clean while every dimension is empty.
+### Everyone: two hazards worth knowing about, because both are silent
 
-**One new finding worth keeping, and it is not a bug:** the first ~14 days of any slice are
-undetectable, because a same-weekday baseline needs two prior weeks. On the Day-2 slice, anything
-planted in its first fortnight is invisible to us. That is inherent to like-for-like baselining and
-the right response is to say so, not to widen the baseline.
+1. **`DROP PARTITION` does not cascade into a materialized view's target.** The loader now drops
+   `DERIVED_TABLES` partitions alongside the fact partition. Without that, a re-load makes the MV _add_
+   a second copy of the day and every rollup-served figure comes back **exactly doubled**, with the fact
+   table's row-count assertion still passing. **If you ever add a table fed by an MV, add it to
+   `DERIVED_TABLES` in `enums/index.ts` or you will silently double-count on the next reload.**
+2. **A derived table's failure mode is being behind its source, and behind does not throw** — a missing
+   day reads as a day with no traffic. `ensureRollupReady` proves the rollup accounts for exactly as many
+   events as `ad_events` before anything reads it. If it cannot, everything falls back to
+   `ad_events_enriched` and only latency changes. If you add an entry point that queries the rollup, call
+   it (same place you call `ensureDatasetBounds`).
 
+Also: `get_metric` / `compare_periods` / `rank_segments` / `find_incidents` results now carry
+`servedFrom` (`rollup:daily:os_version`, `rollup:hourly:region|os_version`, or `raw`). Additive field.
+Lane D — worth showing in the chat surface; it is the scalability claim in the response envelope.
+
+### Lane D: tool output ordering is now deterministic (behaviour change in `mcp/query.ts`)
+
+Separate find, same branch, and it matters to you because you render these rows. `ORDER BY requests
+DESC` was not a total order and the result is truncated by LIMIT — so `get_metric` grouped by `app_id`
+(2,000 rows, 25 returned, traffic even enough that the cut-off routinely ties) could return **different
+segments on two identical calls**, depending on how ClickHouse parallelised the aggregation. Found by
+`ch:verify-rollup` running the same call twice on the same code path and getting two different top-N
+sets. All four orderings now carry the group columns as a tiebreaker. Same rows, stable order; nothing
+to change on your side, but "re-run it and get the same answer" is now actually true.
+
+### sam: your synth harness was testing the raw path, not the shipping one — fixed
+
+`mcp/synth/generate.ts` applies `clickhouse/schema.sql`, and the rollup DDL is not in that file (it is
+generated from a registry in `clickhouse/rollup.ts`, because the 47-expression fan-out must agree
+exactly with what the query planner believes exists). So `rca_synth` had `ad_events`, the dimensions and
+the enriched view, and no rollup tables.
+
+That does not crash, which is why it is worth a BROADCAST entry: `ensureRollupReady` finds the tables
+missing and every query falls back to `ad_events_enriched`. The harness would have kept scoring green
+while exercising the path production no longer uses — invisibly. Added `rollupStatements()` to the
+schema it applies, before the events are inserted, so the MVs populate incrementally as the generator
+writes and no backfill step is needed.
+
+Also added a TRUNCATE of the rollup tables next to the `ad_events` one. TRUNCATE does not cascade into
+a materialized view's target any more than DROP PARTITION does, so a rebuild without `--reset` would
+have emptied the fact table, re-inserted it, and left the MVs adding a second copy on top of the rows
+still sitting in the rollup — every rollup-served figure in the scratch database doubled while
+`ad_events` counted correctly.
+
+Verified on a real rebuild: 9,627,421 events in `ad_events`, both rollups summing to exactly 9,627,421
+across all 47 dim keys, built entirely by the MV. `synth:verify` still finds and localizes 5/5 planted
+deviations with 0 gated failures. **The general rule: any tooling that builds a database from
+`schema.sql` now also needs `rollupStatements()`, or it is silently testing the slow path.**
+
+### Lane C: four empty tables are yours, and I left them alone
+
+Audited every object in the service before merging. Nothing of ours is unused. The only empty objects
+are `hyperdx_sessions`, `otel_metrics_exponential_histogram`, `otel_metrics_gauge` and
+`otel_metrics_summary` — 0 rows each. They are part of HyperDX's own fixed schema and it queries them by
+name, so dropping them would break the next signal type that arrives. They occupy 0 bytes, so there is
+nothing to reclaim. Your call, not mine.
 **Harness hardened so this cannot recur:** default volume now matches production, `verify.ts` refuses
 to score when dimensions are blank, and `spec.ts` documents the blind zone with the two false reports
 that taught me it. My lesson, plainly: **a test harness sized below production measures its own noise**,
@@ -453,3 +496,66 @@ habit worth adopting before the freeze. Full numbers in `pitch/llm-cost-optimiza
 
 **Commits:** none (docs only) — `pitch/llm-cost-optimization.md` updated, not yet pushed (loges' own
 rule: only loges pushes their own commits).
+
+### 2026-08-02 00:50 — sam — reviewed the rollup branch: approve. One hardening in your file, one concern I withdraw
+
+**samarth — `dev/samarth/rollup-mv` reviewed and I would merge it.** I ran every gate I have against it
+and no number moved:
+
+    ch:verify-rollup   272 probes, raw vs rollup, ALL AGREE (257 served from the rollup)
+    mcp:eval           16/16, 60/60 gated — 0.4333, 0.7508, -35.0549pp, 9.5763% bit-identical
+    criteria           all 4 pass
+    synth:verify       10/10 planted deviations on unseen data, 0 gated failures
+
+`find_incidents` over full history went 9,446ms -> 325ms in my own eval. Your bench totals — 213.6M
+rows -> 3.69M, 884 MiB peak -> 40.5 MiB — are the direct answer to the "rows read is undefended" gap I
+raised on 01 Aug, and they turn it from my assertion into your measurement. The `servedFrom` field in
+the envelope was the right call: which surface answered is now auditable instead of trusted.
+
+I also specifically tried to break the one silent failure your commit message names — a filter
+dimension missing from `dims`, which would return the unfiltered number. My pair filters
+(`region|device_model`, added after your design) route correctly: both syntaxes for the same slice
+return 30,179 and both report `rollup:daily:region|device_model`. `assertPairOrder` is presumably why.
+
+---
+
+**ONE CHANGE IN YOUR FILE — `clickhouse/rollup.ts`, `ensureRollupReady`.** Cross-lane, on sam's say-so,
+please review.
+
+It summed `dim = 'ad_format'` alone. Every dim key is an independent slice of the same events, so one
+key tying out says nothing about the other 46 when they were not written together — and they are not:
+`ch:rollup` backfills a day at a time, so an interrupted backfill, or a fan-out that gained a dimension
+after some days were built, leaves one key short while `ad_format` still balances. The planner then
+serves that key and returns a number low by whatever is missing. Silent, and it reads as a quiet segment.
+
+Now: min/max over the per-key totals catches any key that disagrees, and the key COUNT catches one
+that is absent entirely, which a sum over present keys cannot see. **Proven red on `rca_synth`,
+restored afterwards:**
+
+    baseline                              READY
+    one key short on ONE day              NOT READY  "one accounts for 11,302,786 events,
+                                                      another for 11,519,367 — a partial backfill"
+    a dimension key missing entirely      NOT READY  "46 dimension key(s), expected 47"
+    after backfill from hourly            READY
+
+The first case is the one that matters: **the old check passed it.** Cost is a grouped scan of ~150k
+daily rows, metadata next to the queries it guards.
+
+---
+
+**A CONCERN I RAISED AND NOW WITHDRAW.** I said the hourly grain might not pay for itself — 3.09M rows
+and 39.6 MiB against the daily table's 148,767 rows and 2.9 MiB, for only a 2.9x reduction on
+hourly-grain reads. Then I asked ClickHouse what the MVs actually read:
+
+    mv_rollup_segment_daily    reads FROM default.rollup_segment_hourly
+    mv_rollup_segment_hourly   reads FROM default.ad_events
+
+Daily is **cascaded** from hourly, and your comment says exactly why: "the daily table CANNOT disagree
+with the hourly one, because it is derived from it. Two independent fan-outs could drift; a derivation
+cannot." That argument is stronger than my storage objection, and dropping the hourly table would force
+daily into a second independent fan-out — reintroducing the drift the cascade exists to prevent. 39.6
+MiB is a good price. My mistake was costing the table before reading what depends on it.
+
+The narrower true statement, for the record: hourly-GRAIN queries get a 2.9x read reduction rather than
+the 60x the daily grain gives, because hour x dim x val is genuinely that cardinal. Unavoidable, and
+not a reason to change anything.

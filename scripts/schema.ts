@@ -5,6 +5,7 @@
  */
 import { readFileSync } from "node:fs";
 import { DATABASE, exec, makeClient } from "../clickhouse/client";
+import { rollupStatements } from "../clickhouse/rollup";
 import { SCHEMA_FILE } from "../constants";
 import { runScript } from "../utils/common.utils";
 import { splitStatements, statementLabel } from "../utils/sql.utils";
@@ -12,7 +13,9 @@ import { initObservability, shutdownObservability, withSpan } from "../utils/tel
 import { log } from "../utils/telemetryUtils";
 
 const main = async (): Promise<void> => {
-  const statements = splitStatements(readFileSync(SCHEMA_FILE, "utf8"));
+  // schema.sql first, then the generated rollup DDL -- the MVs reference both `ad_events` and the
+  // dictionaries, so order matters on a fresh database.
+  const statements = [...splitStatements(readFileSync(SCHEMA_FILE, "utf8")), ...rollupStatements()];
   initObservability();
   const client = makeClient();
 
@@ -29,6 +32,10 @@ const main = async (): Promise<void> => {
     });
 
     log.info("\nSchema applied. Next: bun run ch:load");
+    log.info(
+      "If ad_events was already loaded, the rollups are empty -- a materialized view only sees " +
+        "inserts made after it exists. Run: bun run ch:rollup",
+    );
   } finally {
     await client.close();
     await shutdownObservability();
