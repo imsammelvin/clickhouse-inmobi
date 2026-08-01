@@ -42,13 +42,13 @@ const service =
 
 let failures = 0;
 
-function check(name: string, ok: boolean, detail: string): void {
+const check = (name: string, ok: boolean, detail: string): void => {
   const status = ok ? CheckStatus.Pass : CheckStatus.Fail;
   log.info(`  ${status}  ${name.padEnd(40)} ${detail}`);
   if (!ok) failures++;
-}
+};
 
-async function main(): Promise<void> {
+const main = async (): Promise<void> => {
   const client = makeTelemetryClient();
 
   log.info(
@@ -141,6 +141,6 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   log.info("ClickStack pipeline verified. UI: http://localhost:8080");
-}
+};
 
 if (import.meta.main) await runScript(main);

@@ -14,7 +14,7 @@ import {
 } from "../utils/telemetryUtils";
 import { log } from "../utils/telemetryUtils";
 
-async function main(): Promise<void> {
+const main = async (): Promise<void> => {
   initObservability();
   const client = makeClient();
 
@@ -31,6 +31,6 @@ async function main(): Promise<void> {
     await client.close();
     await shutdownObservability();
   }
-}
+};
 
 if (import.meta.main) await runScript(main);

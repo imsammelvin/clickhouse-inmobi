@@ -31,7 +31,7 @@ import {
 import { runScript } from "../utils/common.utils";
 import { log } from "../utils/telemetryUtils";
 
-async function run(args: string[]): Promise<string> {
+const run = async (args: string[]): Promise<string> => {
   const proc = Bun.spawn(["docker", ...args], {
     stdout: "pipe",
     stderr: "pipe",
@@ -44,9 +44,9 @@ async function run(args: string[]): Promise<string> {
   if (code !== 0)
     throw new Error(`docker ${args[0]} failed:\n${stderr || stdout}`);
   return stdout.trim();
-}
+};
 
-async function main(): Promise<void> {
+const main = async (): Promise<void> => {
   if (CLICKSTACK_URL.includes("localhost")) {
     // Pointing the collector at the all-in-one container's own ClickHouse would be a loop: that
     // container already runs a collector on 4317/4318.
@@ -87,6 +87,6 @@ async function main(): Promise<void> {
   log.info(
     `\nPoint the app at it with OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:${COLLECTOR_HTTP_PORT}`,
   );
-}
+};
 
 if (import.meta.main) await runScript(main);

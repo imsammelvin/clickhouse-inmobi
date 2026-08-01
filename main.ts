@@ -63,7 +63,7 @@ const WORKLOAD: WorkloadQuery[] = [
 // args
 // ---------------------------------------------------------------------------
 
-export function parseArgs(argv: string[]): AppOptions {
+export const parseArgs = (argv: string[]): AppOptions => {
   const loop = hasFlag(argv, AppFlag.Loop);
 
   const interval = Number(
@@ -89,7 +89,7 @@ export function parseArgs(argv: string[]): AppOptions {
   }
 
   return { loop, interval, iterations };
-}
+};
 
 // ---------------------------------------------------------------------------
 // instruments
@@ -123,10 +123,10 @@ const passDuration = histogram(
  * Run one query under its own span. The `select()` helper opens a nested `clickhouse.select` span
  * underneath, which is what gives the trace its shape: pass -> query -> statement.
  */
-async function runQuery(
+const runQuery = async (
   client: ClickHouseClient,
   query: WorkloadQuery,
-): Promise<void> {
+): Promise<void> => {
   const startedAt = performance.now();
 
   await withSpan(
@@ -165,13 +165,13 @@ async function runQuery(
       }
     },
   );
-}
+};
 
 /** One full pass over the workload. Becomes exactly one trace in ClickStack. */
-async function runPass(
+const runPass = async (
   client: ClickHouseClient,
   pass: number,
-): Promise<number> {
+): Promise<number> => {
   const startedAt = performance.now();
 
   await withSpan(
@@ -194,13 +194,13 @@ async function runPass(
   );
 
   return elapsed(startedAt) * 1000;
-}
+};
 
 // ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 
-async function main(): Promise<void> {
+const main = async (): Promise<void> => {
   const options = parseArgs(process.argv.slice(2));
 
   initObservability();
@@ -239,6 +239,6 @@ async function main(): Promise<void> {
   }
 
   log.info("Telemetry flushed. View it at http://localhost:8080");
-}
+};
 
 if (import.meta.main) await runScript(main);

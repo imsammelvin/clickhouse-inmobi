@@ -76,7 +76,7 @@ import {
 // args
 // ---------------------------------------------------------------------------
 
-export function parseArgs(argv: string[]): LoadOptions {
+export const parseArgs = (argv: string[]): LoadOptions => {
   const concurrency = Number(
     flagValue(argv, LoadFlag.Concurrency) ?? DEFAULT_CONCURRENCY,
   );
@@ -100,7 +100,7 @@ export function parseArgs(argv: string[]): LoadOptions {
     concurrency,
     only: flagList(argv, LoadFlag.Only),
   };
-}
+};
 
 // ---------------------------------------------------------------------------
 // dimensions
@@ -111,7 +111,7 @@ const dimensionsLoaded = counter(
   "Dimension rows loaded (replace), by table",
 );
 
-async function loadDimensions(client: ClickHouseClient): Promise<void> {
+const loadDimensions = async (client: ClickHouseClient): Promise<void> => {
   log.info("== dimensions ==");
 
   for (const { table, file } of DIMENSION_SOURCES) {
@@ -148,13 +148,13 @@ async function loadDimensions(client: ClickHouseClient): Promise<void> {
     await exec(client, Q.reloadDictionary(dictionary));
   }
   log.info("  dictionaries reloaded\n");
-}
+};
 
 // ---------------------------------------------------------------------------
 // fact: extract
 // ---------------------------------------------------------------------------
 
-async function extractChunks(options: LoadOptions): Promise<DayChunk[]> {
+const extractChunks = async (options: LoadOptions): Promise<DayChunk[]> => {
   if (!existsSync(FACT_FILE))
     throw new Error(`Missing source file: ${FACT_FILE}`);
 
@@ -200,13 +200,13 @@ async function extractChunks(options: LoadOptions): Promise<DayChunk[]> {
       `${chunks[0]!.date} .. ${chunks.at(-1)!.date}\n`,
   );
   return chunks;
-}
+};
 
 /**
  * One file per day is the expected shape. More than one would break the 1:1 chunk-to-partition
  * mapping that idempotency relies on, so refuse rather than silently load a partial day.
  */
-function assertOneFilePerDay(chunks: DayChunk[]): void {
+const assertOneFilePerDay = (chunks: DayChunk[]): void => {
   const perDay = new Map<string, number>();
   for (const chunk of chunks)
     perDay.set(chunk.date, (perDay.get(chunk.date) ?? 0) + 1);
@@ -220,26 +220,26 @@ function assertOneFilePerDay(chunks: DayChunk[]): void {
         `Delete ${relPath(CHUNK_DIR)} and re-run without ${LoadFlag.SkipExtract}.`,
     );
   }
-}
+};
 
 // ---------------------------------------------------------------------------
 // fact: load
 // ---------------------------------------------------------------------------
 
 /** Live row count per partition, straight from system.parts. */
-async function partitionCounts(
+const partitionCounts = async (
   client: ClickHouseClient,
-): Promise<Map<string, number>> {
+): Promise<Map<string, number>> => {
   const rows = await select<PartitionRow>(client, Q.partitionCounts(DATABASE));
   return new Map(rows.map((row) => [row.partition, Number(row.rows)]));
-}
+};
 
 /** Days still needing work: everything under --force, otherwise those whose counts disagree. */
-function selectPending(
+const selectPending = (
   chunks: DayChunk[],
   existing: Map<string, number>,
   options: LoadOptions,
-): DayChunk[] {
+): DayChunk[] => {
   if (options.force) return chunks;
 
   return chunks.filter((chunk) => {
@@ -250,12 +250,12 @@ function selectPending(
     }
     return true;
   });
-}
+};
 
-async function loadDay(
+const loadDay = async (
   client: ClickHouseClient,
   chunk: DayChunk,
-): Promise<void> {
+): Promise<void> => {
   await withSpan(
     "load.day",
     { "load.date": chunk.date, "load.rows": chunk.rows },
@@ -291,12 +291,12 @@ async function loadDay(
       });
     },
   );
-}
+};
 
-async function loadFacts(
+const loadFacts = async (
   client: ClickHouseClient,
   options: LoadOptions,
-): Promise<void> {
+): Promise<void> => {
   await assertDuckdb();
 
   let chunks = await extractChunks(options);
@@ -341,13 +341,13 @@ async function loadFacts(
     `\n  loaded ${fmt(rows)} rows in ${seconds.toFixed(1)}s ` +
       `(${fmt(Math.round(rows / seconds))} rows/s, concurrency ${options.concurrency})\n`,
   );
-}
+};
 
 // ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 
-async function main(): Promise<void> {
+const main = async (): Promise<void> => {
   const options = parseArgs(process.argv.slice(2));
   initObservability();
   const client = makeClient();
@@ -381,6 +381,6 @@ async function main(): Promise<void> {
     await client.close();
     await shutdownObservability();
   }
-}
+};
 
 if (import.meta.main) await runScript(main);

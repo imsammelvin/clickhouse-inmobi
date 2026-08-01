@@ -20,7 +20,7 @@ import { runScript } from "../utils/common.utils";
 import { splitStatements, statementLabel } from "../utils/sql.utils";
 import { log } from "../utils/telemetryUtils";
 
-async function main(): Promise<void> {
+const main = async (): Promise<void> => {
   const statements = splitStatements(
     readFileSync(CLICKSTACK_SCHEMA_FILE, "utf8"),
   );
@@ -44,6 +44,6 @@ async function main(): Promise<void> {
   } finally {
     await client.close();
   }
-}
+};
 
 if (import.meta.main) await runScript(main);

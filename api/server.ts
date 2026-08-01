@@ -63,7 +63,11 @@ const requestCounter = counter(
   "HTTP requests served, by route and status",
 );
 
-const requestDuration = histogram("http.server.duration", "HTTP request duration", "ms");
+const requestDuration = histogram(
+  "http.server.duration",
+  "HTTP request duration",
+  "ms",
+);
 
 // ---------------------------------------------------------------------------
 // setup
@@ -84,7 +88,7 @@ const json = (body: unknown, status: number, traceId: string): Response =>
 // handlers
 // ---------------------------------------------------------------------------
 
-async function handlePing(traceId: string): Promise<Response> {
+const handlePing = async (traceId: string): Promise<Response> => {
   const info = await trySpan(
     "db.server_info",
     { "db.system": "clickhouse" },
@@ -120,14 +124,14 @@ async function handlePing(traceId: string): Promise<Response> {
     traceId,
   };
   return json(body, 200, traceId);
-}
+};
 
 /**
  * Row count of the fact table. `count()` on a MergeTree reads part metadata rather than scanning,
  * so this stays in single-digit milliseconds server-side even at 9M rows -- the latency you see is
  * almost entirely the round trip to ClickHouse Cloud.
  */
-async function handleAdEventsCount(traceId: string): Promise<Response> {
+const handleAdEventsCount = async (traceId: string): Promise<Response> => {
   const row = await trySpan(
     "db.ad_events.count",
     { "db.system": "clickhouse", "db.collection.name": Table.AdEvents },
@@ -165,9 +169,9 @@ async function handleAdEventsCount(traceId: string): Promise<Response> {
     traceId,
   };
   return json(body, 200, traceId);
-}
+};
 
-function handleHealth(traceId: string): Response {
+const handleHealth = (traceId: string): Response => {
   const body: HealthResponse = {
     status: "ok",
     service: SERVICE_NAME,
@@ -176,17 +180,17 @@ function handleHealth(traceId: string): Response {
     uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
   };
   return json(body, 200, traceId);
-}
+};
 
 // ---------------------------------------------------------------------------
 // request pipeline
 // ---------------------------------------------------------------------------
 
-async function route(
+const route = async (
   request: Request,
   path: string,
   traceId: string,
-): Promise<Response> {
+): Promise<Response> => {
   if (request.method !== "GET") {
     return json({ error: "method not allowed" }, 405, traceId);
   }
@@ -205,14 +209,14 @@ async function route(
         traceId,
       );
   }
-}
+};
 
 /**
  * Wraps one request in a SERVER span. `propagation.extract` pulls any inbound `traceparent` off
  * the headers, and `context.with` makes that the parent, so the span we open continues the
  * caller's trace instead of rooting a new one.
  */
-async function handle(request: Request): Promise<Response> {
+const handle = async (request: Request): Promise<Response> => {
   const url = new URL(request.url);
   const path = url.pathname;
 
@@ -274,7 +278,7 @@ async function handle(request: Request): Promise<Response> {
   requestDuration().record(handled.ms, labels);
 
   return response;
-}
+};
 
 // ---------------------------------------------------------------------------
 // server
@@ -290,7 +294,7 @@ const isPortTaken = (error: unknown): boolean =>
  * it is just friction -- the port actually bound is printed below, and PORT pins it explicitly
  * when something downstream depends on a fixed value.
  */
-function listen(): ReturnType<typeof Bun.serve> {
+const listen = (): ReturnType<typeof Bun.serve> => {
   for (let port = API_PORT; port < API_PORT + API_PORT_SCAN; port++) {
     try {
       return Bun.serve({ port, fetch: handle });
@@ -301,20 +305,20 @@ function listen(): ReturnType<typeof Bun.serve> {
   }
   // Everything in the scan range was taken; let the OS choose.
   return Bun.serve({ port: 0, fetch: handle });
-}
+};
 
 const server = listen();
 
 log.info(`Started the server`);
 
 /** Stop accepting requests, then flush -- an un-flushed batch is a lost trace. */
-async function shutdown(): Promise<void> {
+const shutdown = async (): Promise<void> => {
   await server.stop();
   await client.close();
   log.info(`Shutting down the server`);
   await shutdownObservability();
   process.exit(0);
-}
+};
 
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);

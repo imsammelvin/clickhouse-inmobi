@@ -95,7 +95,7 @@ const url = (path: OtlpPath): string => `${OTEL_ENDPOINT}${path}`;
  * side -- the process runs fine and no telemetry ever appears. `OTEL_LOG_LEVEL=debug` is the way
  * to see the actual HTTP result of each export.
  */
-function enableDiagnostics(): void {
+const enableDiagnostics = (): void => {
   const level = process.env[EnvVar.OtelLogLevel];
   if (!level) return;
 
@@ -111,7 +111,7 @@ function enableDiagnostics(): void {
     new DiagConsoleLogger(),
     levels[level.toLowerCase()] ?? DiagLogLevel.INFO,
   );
-}
+};
 
 /**
  * Wire up all three OTLP pipelines to ClickStack. Idempotent -- a second call is a no-op, so
@@ -121,7 +121,7 @@ function enableDiagnostics(): void {
  * lets a log record find the span it was emitted inside. Without it `startActiveSpan` falls back to
  * a no-op context: every span becomes a root and every log loses its trace_id.
  */
-export function initObservability(): void {
+export const initObservability = (): void => {
   if (tracerProvider) return;
 
   enableDiagnostics();
@@ -174,14 +174,14 @@ export function initObservability(): void {
     ],
   });
   logs.setGlobalLoggerProvider(loggerProvider);
-}
+};
 
 /**
  * Flush and tear down all three pipelines so the process can exit without dropping data.
  * `allSettled` rather than `all`: a collector that rejects one signal must not stop the other two
  * from flushing, and a failed flush is not worth crashing a run that already did its work.
  */
-export async function shutdownObservability(): Promise<void> {
+export const shutdownObservability = async (): Promise<void> => {
   await Promise.allSettled([
     tracerProvider?.shutdown(),
     meterProvider?.shutdown(),
@@ -190,19 +190,19 @@ export async function shutdownObservability(): Promise<void> {
   tracerProvider = undefined;
   meterProvider = undefined;
   loggerProvider = undefined;
-}
+};
 
 /**
  * Push buffered signals to ClickStack without tearing the pipelines down -- for a long-running
  * loop where the UI should show the current run before it finishes.
  */
-export async function flushObservability(): Promise<void> {
+export const flushObservability = async (): Promise<void> => {
   await Promise.allSettled([
     tracerProvider?.forceFlush(),
     meterProvider?.forceFlush(),
     loggerProvider?.forceFlush(),
   ]);
-}
+};
 
 // ---------------------------------------------------------------------------
 // spans
@@ -218,12 +218,12 @@ export type SpanOutcome<T> =
  * recorded on it as `app.duration_ms` so it is filterable in ClickStack; `withSpan` rethrows on
  * failure, `trySpan` returns it.
  */
-async function runSpan<T>(
+const runSpan = async <T>(
   name: string,
   attributes: Attributes,
   kind: SpanKind,
   fn: (span: Span) => Promise<T>,
-): Promise<SpanOutcome<T>> {
+): Promise<SpanOutcome<T>> => {
   const startedAt = performance.now();
 
   return trace
@@ -246,23 +246,23 @@ async function runSpan<T>(
         span.end();
       }
     });
-}
+};
 
 /**
  * Run `fn` inside a span, recording errors and ending the span. Returns what `fn` returned.
  * Safe to call before initObservability() -- the API falls back to a no-op tracer, so code
  * that forgets to initialise still works, it just emits nothing.
  */
-export async function withSpan<T>(
+export const withSpan = async <T>(
   name: string,
   attributes: Attributes,
   fn: (span: Span) => Promise<T>,
   kind: SpanKind = SpanKind.INTERNAL,
-): Promise<T> {
+): Promise<T> => {
   const outcome = await runSpan(name, attributes, kind, fn);
   if (!outcome.ok) throw outcome.error;
   return outcome.value;
-}
+};
 
 /**
  * Like `withSpan`, but failure comes back as a value instead of a throw, with the duration
@@ -276,14 +276,14 @@ export async function withSpan<T>(
  *   if (!found.ok) return json({ error: found.error.message, ms: found.ms }, 503);
  *   return json({ count: found.value.n, ms: found.ms }, 200);
  */
-export async function trySpan<T>(
+export const trySpan = async <T>(
   name: string,
   attributes: Attributes,
   fn: (span: Span) => Promise<T>,
   kind: SpanKind = SpanKind.INTERNAL,
-): Promise<SpanOutcome<T>> {
+): Promise<SpanOutcome<T>> => {
   return runSpan(name, attributes, kind, fn);
-}
+};
 
 // ---------------------------------------------------------------------------
 // metrics
@@ -298,42 +298,39 @@ export async function trySpan<T>(
  * the life of the process. Tracing does not have this problem because `withSpan` resolves its
  * tracer per call; metrics are captured once, which is what makes the mistake permanent.
  */
-function lazyInstrument<T>(create: () => T): () => T {
+const lazyInstrument = <T>(create: () => T): (() => T) => {
   let value: T | undefined;
   return () => (value ??= create());
-}
+};
 
 /**
  * A counter instrument under this repo's meter. Lazy, so it is safe to create at module top level.
  * Call the returned function at record time: `requests().add(1, { route })`.
  */
-export function counter(
-  name: string,
-  description: string,
-): () => Counter {
+export const counter = (name: string, description: string): (() => Counter) => {
   return lazyInstrument(() =>
     metrics.getMeter(INSTRUMENTATION_SCOPE).createCounter(name, {
       description,
     }),
   );
-}
+};
 
 /**
  * A histogram instrument under this repo's meter. Lazy, so it is safe to create at module top
  * level. Call the returned function at record time: `duration().record(ms, { route })`.
  */
-export function histogram(
+export const histogram = (
   name: string,
   description: string,
   unit?: string,
-): () => Histogram {
+): (() => Histogram) => {
   return lazyInstrument(() =>
     metrics.getMeter(INSTRUMENTATION_SCOPE).createHistogram(name, {
       description,
       ...(unit ? { unit } : {}),
     }),
   );
-}
+};
 
 // ---------------------------------------------------------------------------
 // logs
@@ -362,15 +359,19 @@ const format = (attributes: LogAttributes): string =>
  * record, not the console line: the terminal output is for the human, the attributes are for the
  * database.
  */
-function emit(
+const emit = (
   severityNumber: SeverityNumber,
   severityText: string,
   message: string,
   attributes: LogAttributes = {},
-): void {
+): void => {
   const spanContext = trace.getActiveSpan()?.spanContext();
   const recordAttributes: LogAttributes = spanContext
-    ? { "trace.id": spanContext.traceId, "span.id": spanContext.spanId, ...attributes }
+    ? {
+        "trace.id": spanContext.traceId,
+        "span.id": spanContext.spanId,
+        ...attributes,
+      }
     : attributes;
 
   // Resolved per call rather than cached at import time: the global logger provider is only
@@ -385,7 +386,7 @@ function emit(
   const detail =
     Object.keys(attributes).length > 0 ? ` ${format(attributes)}` : "";
   (consoleSink[severityText] ?? console.log)(`${message}${detail}`);
-}
+};
 
 export const log = {
   debug: (message: string, attributes?: LogAttributes): void =>
