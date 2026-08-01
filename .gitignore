@@ -34,3 +34,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .DS_Store
 InMobi
 InMobiclickhouse/.chunks/
+
+# MCP session traces. Written on every tool call, so this fills up fast in normal use.
+# A trace kept as an exhibit should be copied into pitch/ and committed there deliberately.
+mcp/traces/
