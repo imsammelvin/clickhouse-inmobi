@@ -264,11 +264,20 @@ export function estimateWeeklyGrowth(series: Map<string, number>): number {
  * of two weeks ago. Level comes from the robust median (resistant to a prior incident in the
  * window); trend comes from the whole series (where it is actually estimable). Neither job is asked
  * of a sample too small to do it.
+ *
+ * `floored` reports that the observed MAD lost to MIN_COEFF_VARIATION, and it matters far more than
+ * it looks. When the floor binds, spread is no longer measured from the data — it is a fixed 0.5% of
+ * the level — so sigma collapses to `deltaPct / 0.5`, a restatement of the size gate rather than an
+ * independent check. The two-gate rule in `detect` assumes two independent signals; with the floor
+ * active the sigma gate cannot fail once the size gate passes (3% => 6 sigma, always). Measured:
+ * 2026-06-27 revenue (a normal Saturday) and the 2026-06-23..25 Android 15 incident both land at
+ * +/-4.4% and +/-8.7 sigma — identical on both gates, one noise and one the flagship incident. So a
+ * floored detection is a size-only detection, and callers must not read its sigma as corroboration.
  */
 export function trendAwareBaseline(
   points: Array<{ weeksAgo: number; value: number }>,
   weeklyGrowth: number,
-): { centre: number; spread: number; weeklyGrowth: number } {
+): { centre: number; spread: number; weeklyGrowth: number; floored: boolean } {
   return withSyncSpan(
     "baseline.trend_aware",
     { "app.baseline.points": points.length, "app.growth.weekly": weeklyGrowth },
@@ -276,13 +285,18 @@ export function trendAwareBaseline(
       const adjusted = points.map((p) => p.value * (1 + weeklyGrowth) ** p.weeksAgo);
       const centre = median(adjusted);
       const floor = Math.abs(centre) * MIN_COEFF_VARIATION;
-      const spread = Math.max(mad(adjusted), floor);
+      const observed = mad(adjusted);
+      const spread = Math.max(observed, floor);
+      // Whether the floor won is not a diagnostic detail, it decides how much the sigma gate is
+      // worth -- see the `floored` note on the return type. Callers act on it, so it is returned
+      // rather than only stamped on the span.
+      const floored = observed < floor;
       span.setAttributes({
         "app.baseline.centre": centre,
         "app.baseline.spread": spread,
-        "app.baseline.floored": spread === floor,
+        "app.baseline.floored": floored,
       });
-      return { centre, spread, weeklyGrowth };
+      return { centre, spread, weeklyGrowth, floored };
     },
   );
 }
