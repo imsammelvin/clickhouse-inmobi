@@ -1,20 +1,3 @@
-# CI/CD — clickhouse-inmobi
-#
-#   inmobi-api  -> api/server.ts                    http://<host>:2345
-#   inmobi-mcp  -> mcp/server.ts --transport http    http://<host>:3333/mcp
-#
-# The .env lives on the server at /opt/clickhouse-inmobi/.env (next to package.json). pm2 runs both
-# processes with that folder as cwd and Bun auto-loads .env from cwd, so nothing else is needed.
-# The deploy does `git reset --hard` but never `git clean -x`, so your .env is never touched.
-#
-# Repo secrets: SSH_HOST, SSH_USER, SSH_PRIVATE_KEY  (optional: SSH_PORT, DEPLOY_PATH)
-#
-# One-time on the server:
-#   curl -fsSL https://bun.sh/install | bash
-#   bun install -g pm2 && pm2 startup      # run the command it prints
-#   sudo mkdir -p /opt/clickhouse-inmobi && sudo chown $USER /opt/clickhouse-inmobi
-#   nano /opt/clickhouse-inmobi/.env
-
 name: ci-cd
 
 on:
@@ -30,48 +13,95 @@ concurrency:
 jobs:
   ci:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
+
 
   deploy:
     needs: ci
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+
     runs-on: ubuntu-latest
+
     steps:
-      - name: Deploy over ssh
-        env:
-          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/clickhouse-inmobi' }}
-          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+      - uses: actions/checkout@v4
+
+      - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
-          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/key && chmod 600 ~/.ssh/key
-          ssh-keyscan -p "${{ secrets.SSH_PORT || 22 }}" -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
 
-          ssh -i ~/.ssh/key -p "${{ secrets.SSH_PORT || 22 }}" \
+          cat > ~/.ssh/key <<'EOF'
+          ${{ secrets.SSH_PRIVATE_KEY }}
+          EOF
+
+          chmod 600 ~/.ssh/key
+
+          ssh-keyscan \
+            -p "${{ secrets.SSH_PORT || 22 }}" \
+            -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
+
+
+      - name: Test SSH connection
+        run: |
+          ssh \
+            -i ~/.ssh/key \
+            -p "${{ secrets.SSH_PORT || 22 }}" \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-            "DEPLOY_PATH='$DEPLOY_PATH' REPO_URL='$REPO_URL' SHA='${{ github.sha }}' bash -s" <<'REMOTE'
-          set -eu
+            "echo SSH_WORKING && pwd"
+
+
+      - name: Sync code to server
+        run: |
+          rsync -az \
+            --exclude=".git" \
+            --exclude=".github" \
+            --exclude=".env" \
+            -e "ssh -i ~/.ssh/key -p ${{ secrets.SSH_PORT || 22 }}" \
+            ./ \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:~/clickhouse-inmobi/"
+
+
+      - name: Restart application
+        run: |
+          ssh \
+            -i ~/.ssh/key \
+            -p "${{ secrets.SSH_PORT || 22 }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" <<'EOF'
+
+          set -e
+
           export PATH="$HOME/.bun/bin:$PATH"
 
-          # Clone on the first deploy, reuse the checkout after that.
-          [ -d "$DEPLOY_PATH/.git" ] || git clone "$REPO_URL" "$DEPLOY_PATH"
-          cd "$DEPLOY_PATH"
+          cd ~/clickhouse-inmobi
 
-          git fetch origin
-          git reset --hard "$SHA"
           bun install --frozen-lockfile
 
-          # api/server.ts reads PORT; mcp/server.ts takes --port.
-          export PORT=2345 MCP_PORT=3333 NODE_ENV=production
+          export PORT=2345
+          export MCP_PORT=3333
+          export NODE_ENV=production
 
-          pm2 delete inmobi-api inmobi-mcp 2>/dev/null || true
-          pm2 start api/server.ts --name inmobi-api --interpreter "$(command -v bun)"
-          pm2 start mcp/server.ts --name inmobi-mcp --interpreter "$(command -v bun)" -- --transport http --port 3333
+          pm2 delete inmobi-api 2>/dev/null || true
+          pm2 delete inmobi-mcp 2>/dev/null || true
+
+          pm2 start api/server.ts \
+            --name inmobi-api \
+            --interpreter "$(command -v bun)"
+
+          pm2 start mcp/server.ts \
+            --name inmobi-mcp \
+            --interpreter "$(command -v bun)" \
+            -- --transport http --port 3333
+
           pm2 save --force
+
           pm2 status
-          REMOTE
+
+          EOF
