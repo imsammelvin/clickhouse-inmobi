@@ -20,6 +20,7 @@
  * reproduced by anyone. All generation happens server-side from `numbers()`: no rows cross the wire.
  */
 import { readFileSync } from "node:fs";
+import { ROLLUP_TABLES, rollupStatements } from "../../clickhouse/rollup";
 import { splitStatements } from "../../utils/sql.utils";
 import { DIMS, PLANTED, SHAPE, dateOf } from "./spec";
 import { resolveTargetDatabase, scratchClient, serverClient } from "./target";
@@ -256,7 +257,21 @@ async function main(): Promise<void> {
   const dryRun = flag("dry-run");
   const reset = flag("reset");
 
-  const schema = splitStatements(readFileSync("clickhouse/schema.sql", "utf8"));
+  /**
+   * schema.sql plus the generated rollup DDL, in that order — the same pair `bun run ch:schema`
+   * applies, and it has to be the same pair or this harness stops testing what ships.
+   *
+   * The rollup lives in `clickhouse/rollup.ts`, not in schema.sql, so applying only schema.sql left
+   * the scratch database with no rollup tables and no materialized views. That is not a crash:
+   * `ensureRollupReady` finds the tables missing and every query falls back to `ad_events_enriched`.
+   * The harness would keep passing while silently exercising the raw path that production no longer
+   * uses — a green scorer that scores the wrong code. Applied BEFORE the events are inserted, so the
+   * MVs populate incrementally as the generator writes, and no backfill step is needed.
+   */
+  const schema = [
+    ...splitStatements(readFileSync("clickhouse/schema.sql", "utf8")),
+    ...rollupStatements(),
+  ];
   const statements: string[] = [
     ...(reset ? [`DROP DATABASE IF EXISTS ${db}`] : []),
     `CREATE DATABASE IF NOT EXISTS ${db}`,
@@ -309,6 +324,18 @@ async function main(): Promise<void> {
       query: `TRUNCATE TABLE IF EXISTS ad_events`,
       clickhouse_settings: { wait_end_of_query: 1 },
     });
+
+    // TRUNCATE does not cascade into a materialized view's target any more than DROP PARTITION does.
+    // Without these, a rebuild without --reset empties `ad_events`, re-inserts it, and the MVs ADD a
+    // second copy on top of the rows still sitting in the rollup — so every rollup-served figure in
+    // the scratch database comes back doubled while `ad_events` counts correctly. Same trap as the
+    // loader's, one layer over.
+    for (const table of Object.values(ROLLUP_TABLES)) {
+      await client.command({
+        query: `TRUNCATE TABLE IF EXISTS ${table}`,
+        clickhouse_settings: { wait_end_of_query: 1 },
+      });
+    }
     await client.command({ query: eventStatement(), clickhouse_settings: { wait_end_of_query: 1 } });
     say(`[synth] events inserted in ${((Date.now() - started) / 1000).toFixed(1)}s`);
 
