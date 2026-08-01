@@ -34,3 +34,8 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .DS_Store
 InMobi
 InMobiclickhouse/.chunks/
+
+# MCP session traces and generated reports. Both are written on every run, so they churn.
+# An exhibit worth keeping is copied into pitch/example-report/ and committed there deliberately.
+mcp/traces/
+mcp/reports/

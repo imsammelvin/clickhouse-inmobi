@@ -80,9 +80,7 @@ function renderNarrativeInner(inv: Investigation): string {
   // anything until the reader knows *what* moved -- and a ruled-out list is only worth what a
   // judge can check.
   for (const r of normal) {
-    L.push(
-      r.segment ? `  x ${r.segment.dimension} = '${r.segment.value}' ${r.note}` : `  x ${r.note}`,
-    );
+    L.push(r.segment ? `  x ${r.segment.dimension} = '${r.segment.value}' ${r.note}` : `  x ${r.note}`);
   }
   if (contam.length) {
     L.push(`  x ${contam.length} segment(s) cleared as contamination:`);
