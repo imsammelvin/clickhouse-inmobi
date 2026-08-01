@@ -1,0 +1,3 @@
+# Dataset downloaded from sidagarwal04/click-a-thon-2026 — do not commit (98MB+)
+data/*.parquet
+data/*.csv
