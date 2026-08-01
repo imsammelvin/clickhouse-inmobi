@@ -95,11 +95,14 @@ unattended run:
 | peak memory | 848.2 MiB |
 | queries | 55 |
 
-`find_incidents` alone is 135M rows across 10 queries, because each metric's sweep scans the full
-history for its baseline. **This is the honest scalability picture:** rows *returned* are bounded by
-dimension cardinality (the criterion-3 invariant, and it holds), but rows *read* are not — one run
-reads ~38x the fact table. The rollup that fixes it is Lane B's `T-013`, and the report measuring the
-cost is what turns that from an assertion into a delta.
+**This was written before the rollup landed and is kept as the before-figure.** Rows *returned* were
+always bounded by dimension cardinality (the criterion-3 invariant); rows *read* were not. They are
+now: all 10 tools, `find_incidents`, and five of six investigation stages read the materialized views,
+measured at 213.6M rows -> 3.69M and 884 MiB peak -> 40.5 MiB. Only `residualize`'s masked re-sweeps
+still scan raw events, and `classify` cannot be converted at all since a distinct count is not
+recoverable from sums. Current state and the reasoning are in
+[`pitch/scalability-state.md`](../pitch/scalability-state.md); `bun run parity` is the gate that proves
+every converted stage returns identical numbers.
 
 ### The rollup, and the delta it actually bought (T-013)
 
