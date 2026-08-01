@@ -1,0 +1,133 @@
+{
+  "capturedAt": "2026-08-01 11:53:38",
+  "label": "baseline",
+  "scenarios": [
+    {
+      "name": "technical_break",
+      "metric": "fill_rate",
+      "window": "2026-06-23..2026-06-25",
+      "wallMs": 1579,
+      "clientQueries": 6,
+      "stages": [
+        {
+          "stage": "residualize",
+          "queries": 1,
+          "ms": 497,
+          "rows": 4115018,
+          "bytes": 48668470,
+          "peakMemBytes": 196632968
+        },
+        {
+          "stage": "localize",
+          "queries": 1,
+          "ms": 492,
+          "rows": 3271278,
+          "bytes": 39143881,
+          "peakMemBytes": 297898617
+        },
+        {
+          "stage": "classify",
+          "queries": 1,
+          "ms": 97,
+          "rows": 3271277,
+          "bytes": 64461738,
+          "peakMemBytes": 113575338
+        },
+        {
+          "stage": "decompose",
+          "queries": 2,
+          "ms": 48,
+          "rows": 3271277,
+          "bytes": 45797878,
+          "peakMemBytes": 52986416
+        },
+        {
+          "stage": "detect",
+          "queries": 1,
+          "ms": 28,
+          "rows": 3271277,
+          "bytes": 16356385,
+          "peakMemBytes": 37792094
+        }
+      ],
+      "totals": {
+        "queries": 6,
+        "ms": 1162,
+        "rows": 17200127,
+        "bytes": 214428352,
+        "peakMemBytes": 297898617
+      }
+    },
+    {
+      "name": "not_localizable",
+      "metric": "requests",
+      "window": "2026-06-21",
+      "wallMs": 302,
+      "clientQueries": 4,
+      "stages": [
+        {
+          "stage": "localize",
+          "queries": 1,
+          "ms": 119,
+          "rows": 572211,
+          "bytes": 6722371,
+          "peakMemBytes": 170926828
+        },
+        {
+          "stage": "decompose",
+          "queries": 2,
+          "ms": 22,
+          "rows": 572210,
+          "bytes": 8010940,
+          "peakMemBytes": 40217300
+        },
+        {
+          "stage": "detect",
+          "queries": 1,
+          "ms": 16,
+          "rows": 572210,
+          "bytes": 2288840,
+          "peakMemBytes": 15146131
+        }
+      ],
+      "totals": {
+        "queries": 4,
+        "ms": 157,
+        "rows": 1716631,
+        "bytes": 17022151,
+        "peakMemBytes": 170926828
+      }
+    },
+    {
+      "name": "no_anomaly",
+      "metric": "requests",
+      "window": "2026-06-28",
+      "wallMs": 40,
+      "clientQueries": 1,
+      "stages": [
+        {
+          "stage": "detect",
+          "queries": 1,
+          "ms": 10,
+          "rows": 806153,
+          "bytes": 3224612,
+          "peakMemBytes": 13015485
+        }
+      ],
+      "totals": {
+        "queries": 1,
+        "ms": 10,
+        "rows": 806153,
+        "bytes": 3224612,
+        "peakMemBytes": 13015485
+      }
+    }
+  ],
+  "grand": {
+    "queries": 11,
+    "ms": 1329,
+    "rows": 19722911,
+    "bytes": 234675115,
+    "peakMemBytes": 297898617
+  }
+}

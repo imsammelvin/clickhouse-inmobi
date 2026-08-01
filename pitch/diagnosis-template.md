@@ -37,8 +37,7 @@ anything, and the reader deserves to know that.
   from "−35pp on 0.2% of traffic".
 - **Cleared means cleared.** "Checked and cleared at 6.1σ", never "probably fine", "seems normal",
   or "unlikely to be the cause". If we can't clear it, it goes in WHERE as a second cause.
-- **Never name an external event** unless it joined to `external_events` (D-009). Describe the
-  fingerprint instead.
+- **Never attribute to anything outside the dataset** (D-019) — no events, calendars or holidays.
 - **No adjectives on magnitude.** Not "a dramatic collapse" — "−35.04pp". The number is the drama.
 
 ---
@@ -179,10 +178,10 @@ substitutable advertisers on the same inventory.
 rate effect and mix effect; WHERE names the dimension whose weights moved, not a broken segment;
 SO WHAT is explicitly **no action**. Requires T-041. _No training case found_ — see T-031.
 
-**Exogenous event.** WHERE reports the fingerprint (onset/offset hours, geo + category
-concentration, request- vs price-driven, no same-weekday precedent). **Names the event only if it
-joined `external_events`** (D-009); otherwise "unlabelled external event, shape consistent with a
-scheduled live event in <country>, <window>."
+~~**Exogenous event.**~~ **Dropped under D-019** — external attribution is out of scope, and the
+data has no event structure to find (largest hourly deviations in entertainment apps are 1.6× on
+49–85 requests at random hours, i.e. noise). There is no fingerprint stage and no `external_events`
+join.
 
 ---
 
