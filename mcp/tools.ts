@@ -46,6 +46,7 @@ import {
   resolveMetric,
   weeklyGrowthFor,
 } from "./query";
+import { recommendAction } from "./action";
 import type { Session, ToolOutcome } from "./trace";
 
 export interface ToolDef {
@@ -430,7 +431,12 @@ const investigateTool: ToolDef = {
     "ranked drill-down would have reported as 20 extra findings. It can also legitimately conclude " +
     "that nothing is localizable or that nothing is wrong; report that verdict as given, do not " +
     "hunt for a cause it declined to name. The narrative it returns has already been machine-checked " +
-    "so that every numeral resolves to an evidence row — prefer quoting its numbers to recomputing them.",
+    "so that every numeral resolves to an evidence row — prefer quoting its numbers to recomputing them. " +
+    "It also returns an `action` block: whether the incident is STILL HAPPENING or has recovered, who " +
+    "owns it, what it has cost so far, where in the funnel to look, and which segments not to chase. " +
+    "Always give the user the action — a cause with no next step is half an answer — and never go " +
+    "beyond `action.whereToLook`: it names a stage of the funnel, not a system, because this data " +
+    "cannot see deploys, bids or servers.",
   inputSchema: {
     type: "object",
     properties: {
@@ -461,6 +467,10 @@ const investigateTool: ToolDef = {
     }
 
     const inv = await investigate({ metric, from: window.from, to: window.to, ledger, segment });
+    // Two extra queries on top of the investigation, and they answer the question the engine never
+    // did: is this still happening? An incident that recovered and one still running need completely
+    // different responses, and a diagnosis nobody can act on is worth nothing.
+    const action = await recommendAction(ledger, inv);
     const narrative = renderNarrative(inv);
     // The same check the criteria gate runs, on the same string a reader sees. Reported per answer
     // rather than only in CI: a caller is entitled to know whether this specific text is grounded.
@@ -482,6 +492,7 @@ const investigateTool: ToolDef = {
             "Every numeral in `narrative` was matched against a recorded evidence row at the " +
             "precision printed. ok=false means do not repeat the narrative — say so instead.",
         },
+        action,
         findings: inv.findings,
         ruledOut: inv.ruledOut,
         planSteps: inv.planSteps,

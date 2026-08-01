@@ -54,14 +54,38 @@ export interface RefusalCase {
   errorContains: string;
 }
 
+/**
+ * What the action block must say.
+ *
+ * Recovery dates and durations are GATED: they are facts about the series, verified by hand against
+ * the daily numbers, and getting one wrong is how a recovered incident gets paged at 3am or a live one
+ * gets filed for next week. `daysRunning` is checked separately from the window on purpose — asking
+ * about one day of a three-day break must still report three days, or the money is understated.
+ */
+export interface ActionExpectation {
+  status?: "ongoing" | "recovered" | "not_applicable";
+  /** The day it came back. Gated — verified against the daily series. */
+  recoveredOn?: string;
+  /** How long it actually ran, which is NOT the length of the window asked about. */
+  daysRunning?: number;
+  priority?: "act_now" | "post_mortem" | "monitor" | "none";
+  ownerContains?: string;
+  /** A clean day has nothing to chase; listing cleared slices implies there was something to chase. */
+  doNotChaseEmpty?: boolean;
+  whereToLookContains?: string;
+}
+
 export interface InvestigationCase {
   kind: "investigation";
   id: string;
   question: string;
   args: Record<string, unknown>;
+  action?: ActionExpectation;
   expect: {
     /** GATED: the segment that is actually responsible, or null for a platform-wide/no-cause verdict. */
     segment: { dimension: string; value: string } | null;
+    /** Set when the case tests something else and localization is not the subject. */
+    skipLocalization?: boolean;
     /** GATED: `true` when the correct answer is "nothing is wrong here". */
     noAnomaly?: boolean;
     /** GATED: the engine must not name a cause when the movement is uniform. */
@@ -91,6 +115,14 @@ export const CASES: EvalCase[] = [
       channel: "technical_break",
       revenueUsdPerDay: { value: -20.8, tolerance: 3 },
     },
+    action: {
+      status: "recovered",
+      recoveredOn: "2026-06-26",
+      daysRunning: 3,
+      priority: "post_mortem",
+      ownerContains: "Engineering",
+      whereToLookContains: "between request and fill",
+    },
   },
   {
     kind: "investigation",
@@ -104,6 +136,14 @@ export const CASES: EvalCase[] = [
       notLocalizable: true,
       channel: "not_localizable",
     },
+    // A one-day collapse. The first version of the recovery check reported this as recovering on the
+    // 27th, six days late, because it compared every following weekday against a *Sunday* baseline.
+    action: {
+      status: "recovered",
+      recoveredOn: "2026-06-22",
+      daysRunning: 1,
+      ownerContains: "Platform",
+    },
   },
   {
     kind: "investigation",
@@ -114,6 +154,7 @@ export const CASES: EvalCase[] = [
       segment: { dimension: "app_category", value: "finance" },
       channel: "demand_change",
     },
+    action: { status: "recovered", recoveredOn: "2026-06-23", daysRunning: 4 },
   },
   {
     kind: "investigation",
@@ -124,6 +165,7 @@ export const CASES: EvalCase[] = [
       segment: { dimension: "os_version", value: "iOS 18.1" },
       channel: "technical_break",
     },
+    action: { status: "recovered", recoveredOn: "2026-07-01", daysRunning: 3 },
   },
   {
     kind: "investigation",
@@ -138,6 +180,29 @@ export const CASES: EvalCase[] = [
       noAnomaly: true,
       channel: "no_anomaly",
     },
+    action: {
+      status: "not_applicable",
+      priority: "none",
+      doNotChaseEmpty: true,
+      ownerContains: "Nobody",
+    },
+  },
+
+  {
+    kind: "investigation",
+    id: "D-duration-outlives-window",
+    question: "Was there a fill rate problem on 28 June?",
+    args: { metric: "fill_rate", from: "2026-06-28", to: "2026-06-28" },
+    expect: {
+      // Deliberately unchecked: a one-day slice of a three-day break localizes differently, and
+      // localization is not what this case is testing.
+      segment: null,
+      skipLocalization: true,
+    },
+    // The point of the case. Asked about ONE day, the action must still report that the incident ran
+    // three (28-30 June) and price three, because the money lost is a fact about the incident and not
+    // about the question. The first version reported one day and understated the cost by two thirds.
+    action: { status: "recovered", recoveredOn: "2026-07-01", daysRunning: 3 },
   },
 
   // --- measurement ----------------------------------------------------------------------------

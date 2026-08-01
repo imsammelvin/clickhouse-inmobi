@@ -307,6 +307,7 @@ async function main(): Promise<void> {
           .filter((r) => r.status !== "cleared_as_contamination" && r.note)
           .map((r) => r.note!)
           .slice(0, 8),
+        action: d.action as DiagnosedIncident["action"],
         planSteps: (d.planSteps ?? []) as DiagnosedIncident["planSteps"],
         evidence: receipts,
         evidenceTotal: all.length,
@@ -319,7 +320,12 @@ async function main(): Promise<void> {
 
     // Selection was by severity proxy; presentation is by measured impact, which is the number an
     // operator actually triages on. Both orders are stated in the report so neither is implied.
-    diagnosed.sort((a, b) => Math.abs(b.revenueUsdPerDay ?? 0) - Math.abs(a.revenueUsdPerDay ?? 0));
+    // Still-bleeding first, then by size. An incident that is over and one that is running right now
+    // are not comparable on dollars alone, and a digest that buries the live one has failed.
+    const live = (d: DiagnosedIncident): number => (d.action?.status === "ongoing" ? 1 : 0);
+    diagnosed.sort(
+      (a, b) => live(b) - live(a) || Math.abs(b.revenueUsdPerDay ?? 0) - Math.abs(a.revenueUsdPerDay ?? 0),
+    );
     diagnosed.forEach((d, i) => (d.rank = i + 1));
 
     // ---- 5. what did it cost -------------------------------------------------------------
@@ -376,7 +382,7 @@ async function main(): Promise<void> {
     for (const d of diagnosed) {
       const cause = d.leadSegment ? `${d.leadSegment.dimension}='${d.leadSegment.value}'` : "platform-wide";
       say(
-        `  ${d.rank}. ${d.metric} ${d.from}..${d.to}  ${d.channel}  ${cause}  ` +
+        `  ${d.rank}. ${d.metric} ${d.from}..${d.to}  ${d.channel}  ${d.action?.priority ?? "?"}  ${cause}  ` +
           `${d.revenueUsdPerDay === null ? "" : `$${d.revenueUsdPerDay.toFixed(2)}/day  `}` +
           `grounded ${d.grounding.grounded}/${d.grounding.numeralsChecked}`,
       );

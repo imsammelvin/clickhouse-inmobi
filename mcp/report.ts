@@ -9,6 +9,7 @@
  * per-stage timings and query counts, the measured bytes read where `system.query_log` has flushed,
  * and the segments we checked and cleared.
  */
+import type { ActionRecommendation } from "./action";
 import type { CostReport } from "./cost";
 import type { SessionTrace } from "./trace";
 import type { Evidence } from "../backend/types";
@@ -46,6 +47,7 @@ export interface DiagnosedIncident {
   planSteps: Array<{ stage: string; ms: number; queries: number; summary: string }>;
   evidence: Array<Evidence & { qualifiedId: string }>;
   evidenceTotal: number;
+  action: ActionRecommendation;
   callId: string;
   ms: number;
   queries: number;
@@ -129,13 +131,14 @@ export function renderMarkdown(d: Digest): string {
 
   L.push("## Summary");
   L.push("");
-  L.push("| # | Metric | Window | Cause | Channel | $/day | Grounded |");
-  L.push("| --- | --- | --- | --- | --- | --- | --- |");
+  L.push("| # | Metric | Window | Cause | Channel | $/day | Status | Priority | Grounded |");
+  L.push("| --- | --- | --- | --- | --- | --- | --- | --- | --- |");
   for (const i of d.incidents) {
     const cause = i.leadSegment ? `\`${i.leadSegment.dimension}='${i.leadSegment.value}'\`` : "platform-wide";
     L.push(
       `| ${i.rank} | ${i.metric} | ${span(i.from, i.to)} | ${cause} | ${i.channel} | ` +
-        `${usd(i.revenueUsdPerDay)} | ${i.grounding.grounded}/${i.grounding.numeralsChecked} |`,
+        `${usd(i.revenueUsdPerDay)} | ${i.action.status} | ${i.action.priority} | ` +
+        `${i.grounding.grounded}/${i.grounding.numeralsChecked} |`,
     );
   }
   L.push("");
@@ -162,6 +165,26 @@ export function renderMarkdown(d: Digest): string {
         `a recorded evidence row` +
         (i.grounding.ok ? "." : " — **this answer failed the grounding check and must not be quoted.**"),
     );
+    L.push("");
+    L.push("### What to do");
+    L.push("");
+    L.push(`**${i.action.priority.replace(/_/g, " ")}** — ${i.action.priorityBasis}`);
+    L.push("");
+    L.push(`- **Status:** ${i.action.statusDetail}`);
+    L.push(`- **Owner:** ${i.action.owner}`);
+    if (i.action.lostSoFarUsd !== null) {
+      L.push(
+        `- **Cost:** ${usd(i.action.moneyUsdPerDay)}/day over ${i.action.daysRunning} day(s) = ` +
+          `${usd(i.action.lostSoFarUsd)}; ${usd(i.action.recoverableUsdPerDay)}/day recoverable now.`,
+      );
+    }
+    for (const l of i.action.whereToLook) L.push(`- ${l}`);
+    if (i.action.doNotChase.length) {
+      L.push(`- **Do not chase:** ${i.action.doNotChase.length} slice(s) look affected and are not.`);
+    }
+    if (i.action.nextQuestion) L.push(`- **Next question:** ${i.action.nextQuestion}`);
+    L.push("");
+    L.push(`_${i.action.boundary}_`);
     L.push("");
     L.push(`### Receipts (${i.evidence.length} of ${i.evidenceTotal} rows)`);
     L.push("");
@@ -305,7 +328,7 @@ export function renderHtml(d: Digest): string {
     P.push(`<h2>Summary</h2>`);
     P.push(
       htmlTable(
-        ["#", "Metric", "Window", "Cause", "Channel", "$/day", "Grounded"],
+        ["#", "Metric", "Window", "Cause", "Channel", "$/day", "Status", "Priority", "Grounded"],
         d.incidents.map((i) => [
           String(i.rank),
           esc(i.metric),
@@ -315,9 +338,11 @@ export function renderHtml(d: Digest): string {
             : "platform-wide",
           esc(CHANNEL[i.channel] ?? i.channel),
           esc(usd(i.revenueUsdPerDay)),
+          `<span class="${i.action.status === "ongoing" ? "bad" : ""}">${esc(i.action.status)}</span>`,
+          esc(i.action.priority.replace(/_/g, " ")),
           `<span class="${i.grounding.ok ? "ok" : "bad"}">${i.grounding.grounded}/${i.grounding.numeralsChecked}</span>`,
         ]),
-        [0, 5, 6],
+        [0, 5, 8],
       ),
     );
 
@@ -341,6 +366,23 @@ export function renderHtml(d: Digest): string {
           `</p></div>`,
       );
 
+      P.push(`<h3>What to do</h3>`);
+      P.push(
+        `<div class="card"><p class="verdict">${esc(i.action.priority.replace(/_/g, " "))}</p>` +
+          `<p>${esc(i.action.priorityBasis)}</p>` +
+          `<p class="sub"><b>Status:</b> ${esc(i.action.statusDetail)}<br>` +
+          `<b>Owner:</b> ${esc(i.action.owner)}` +
+          (i.action.lostSoFarUsd !== null
+            ? `<br><b>Cost:</b> ${esc(usd(i.action.moneyUsdPerDay))}/day over ${i.action.daysRunning} ` +
+              `day(s) = ${esc(usd(i.action.lostSoFarUsd))}, ${esc(usd(i.action.recoverableUsdPerDay))}/day recoverable now`
+            : "") +
+          `</p><ul class="sub">${i.action.whereToLook.map((l) => `<li>${esc(l)}</li>`).join("")}` +
+          (i.action.doNotChase.length
+            ? `<li><b>Do not chase:</b> ${i.action.doNotChase.length} slice(s) look affected and are not — listed under "checked and cleared" below.</li>`
+            : "") +
+          (i.action.nextQuestion ? `<li><b>Next question:</b> ${esc(i.action.nextQuestion)}</li>` : "") +
+          `</ul><p class="sub"><em>${esc(i.action.boundary)}</em></p></div>`,
+      );
       P.push(`<h3>Receipts — every number, and the query behind it</h3>`);
       P.push(
         `<p class="sub">${i.evidence.length} of ${i.evidenceTotal} recorded rows. Each hash is the ` +

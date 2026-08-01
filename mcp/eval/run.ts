@@ -149,7 +149,9 @@ async function runCase(session: Session, c: EvalCase): Promise<CaseResult> {
       const want = c.expect;
 
       // Localization is the criterion-1 question and the one we are certain about.
-      if (want.segment) {
+      if (want.skipLocalization) {
+        // nothing to assert — this case is about something else
+      } else if (want.segment) {
         const ok = named?.dimension === want.segment.dimension && named?.value === want.segment.value;
         checks.push({
           label: "localization",
@@ -208,6 +210,105 @@ async function runCase(session: Session, c: EvalCase): Promise<CaseResult> {
           detail: ok ? channel : `got ${channel}, believed ${want.channel}`,
         });
       }
+      // ---- the action block -------------------------------------------------------------
+      const action = parsed.action as Record<string, unknown> | undefined;
+      if (!action) {
+        checks.push({
+          label: "action present",
+          gated: true,
+          ok: false,
+          detail: "investigate returned no action block — a cause with no next step is half an answer",
+        });
+      } else {
+        /**
+         * Anti-fabrication. This dataset is ad request events: no deploy logs, no bid logs, no server
+         * telemetry, no config history. Any of these words in a recommendation means the system has
+         * started inventing remediation, which sends a person somewhere for an afternoon on no
+         * evidence — the same failure as a fabricated number, and harder to notice because it reads
+         * as expertise.
+         */
+        const FORBIDDEN = [
+          "deploy", "rollback", "roll back", "restart", "reboot", "hotfix",
+          "patch", "release", "sdk", "changelog", "git ", "commit",
+        ];
+        const text = JSON.stringify([action.whereToLook, action.priorityBasis, action.statusDetail])
+          .toLowerCase();
+        const found = FORBIDDEN.filter((w) => text.includes(w));
+        checks.push({
+          label: "no invented remedy",
+          gated: true,
+          ok: found.length === 0,
+          detail:
+            found.length === 0
+              ? "recommends only what the funnel evidence supports"
+              : `claims this data cannot support: ${found.join(", ")}`,
+        });
+
+        const a = c.action;
+        if (a) {
+          if (a.status) {
+            checks.push({
+              label: "action.status",
+              gated: true,
+              ok: action.status === a.status,
+              detail: action.status === a.status ? String(action.status) : `got ${String(action.status)}, want ${a.status}`,
+            });
+          }
+          if (a.recoveredOn) {
+            const detail = String(action.statusDetail ?? "");
+            const ok = detail.includes(a.recoveredOn);
+            checks.push({
+              label: "recovered on",
+              gated: true,
+              ok,
+              detail: ok ? a.recoveredOn : `expected ${a.recoveredOn} in: ${detail.slice(0, 100)}`,
+            });
+          }
+          if (a.daysRunning !== undefined) {
+            const ok = action.daysRunning === a.daysRunning;
+            checks.push({
+              label: "days it ran",
+              gated: true,
+              ok,
+              detail: ok ? `${a.daysRunning} day(s)` : `got ${String(action.daysRunning)}, want ${a.daysRunning}`,
+            });
+          }
+          if (a.priority) {
+            const ok = action.priority === a.priority;
+            checks.push({
+              label: "priority",
+              gated: true,
+              ok,
+              detail: ok ? String(action.priority) : `got ${String(action.priority)}, want ${a.priority}`,
+            });
+          }
+          if (a.ownerContains) {
+            const owner = String(action.owner ?? "");
+            const ok = owner.includes(a.ownerContains);
+            checks.push({ label: "owner", gated: true, ok, detail: ok ? owner : `got "${owner}", want it to name ${a.ownerContains}` });
+          }
+          if (a.doNotChaseEmpty) {
+            const list = (action.doNotChase ?? []) as unknown[];
+            checks.push({
+              label: "nothing to chase",
+              gated: true,
+              ok: list.length === 0,
+              detail: list.length === 0 ? "empty, as it should be on a clean day" : `${list.length} item(s) listed on a day with no incident`,
+            });
+          }
+          if (a.whereToLookContains) {
+            const where = JSON.stringify(action.whereToLook ?? []);
+            const ok = where.includes(a.whereToLookContains);
+            checks.push({
+              label: "where to look",
+              gated: true,
+              ok,
+              detail: ok ? `mentions "${a.whereToLookContains}"` : `expected "${a.whereToLookContains}" in ${where.slice(0, 110)}`,
+            });
+          }
+        }
+      }
+
       if (want.revenueUsdPerDay) {
         const priced = findings.find((f) => f.revenueImpactUsd !== null)?.revenueImpactUsd ?? null;
         const ok = near(priced, want.revenueUsdPerDay);

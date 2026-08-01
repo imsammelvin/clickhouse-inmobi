@@ -146,7 +146,7 @@ into a single artifact. The OTel trace id appears in both places, so the file an
 | `compare_periods` | "did it change? what moved most?" | Defaults to the same-weekday trailing baseline. Per-day medians on both sides. |
 | `rank_segments` | "which is worst/best/biggest?" | Ranks on level, not change. Applies the volume floor and states it. |
 | `find_incidents` | "did anything break?" | Segment sweep in SQL at 5σ/10% gates, returned as distinct incident **windows** — one per event with its strongest segment, not one row per segment that moved. |
-| `investigate` | "why?" | Cause, channel, owner, dollars/day, and the ruled-out list. Can legitimately answer "nothing is localizable" or "nothing is wrong". |
+| `investigate` | "why?" | Cause, channel, owner, dollars/day, the ruled-out list, **and the action block** (below). Can legitimately answer "nothing is localizable" or "nothing is wrong". |
 | `explain_revenue` | "volume or price?" | Revenue identity split four ways, priced, parts summing to the total. |
 | `get_evidence` | "where did that number come from?" | Evidence id -> SQL + hash. Searchable by label. |
 | `export_trace` | "show me the audit trail" | Writes the session artifact, returns path + totals. |
@@ -162,6 +162,33 @@ a bare `e12` is ambiguous across calls (`get_evidence` resolves it only if it is
 `investigate` records ~1,700 rows — one per candidate the residualization loop cleared — so the
 model-facing envelope caps ids at 12 and `get_evidence` takes a `label_contains` filter. The full set
 lives in the trace artifact.
+
+## The action block — what to do about it
+
+A diagnosis nobody acts on is worth nothing, so every `investigate` result carries an `action` block.
+It is built under one hard constraint, and the constraint is why it can be trusted: **this dataset is
+ad request events — no deploy logs, no bid logs, no server telemetry, no config history.** So it never
+says "roll back the deploy" or "restart the serving path". `mcp/eval` enforces that with a check that
+fails on `deploy`, `rollback`, `restart`, `hotfix`, `patch`, `release`, `sdk` and friends anywhere in a
+recommendation — proven red by planting one.
+
+What it does say, all derived:
+
+| Field | Answers |
+| --- | --- |
+| `status`, `statusDetail` | **Is it still happening?** The most actionable fact about any incident, and the engine never reported it. `recovered on 2026-06-26 — back to 0.7834 against a same-weekday normal of 0.7833` |
+| `daysRunning`, `lostSoFarUsd`, `recoverableUsdPerDay` | How long it actually ran and what that cost. Duration is a fact about the incident, not about the window asked about — investigating one day of a three-day break still reports three. |
+| `priority`, `priorityBasis` | `act_now` if still bleeding, `post_mortem` if recovered, `none` if nothing is broken. From facts already established, not a tuned threshold. |
+| `owner` | Engineering / Sales / Publisher ops / Platform on-call / nobody |
+| `whereToLook` | Which **stage of the funnel**, never which system. "Requests arrived, buyers were bidding and prices held, so the failure is between request and fill for this segment." |
+| `doNotChase` | The residualization payoff as an instruction: slices that look broken and are clean. Empty on a clean day — listing them there would imply there was something to chase. |
+| `nextQuestion` | A follow-up this system can actually run, so the loop stays inside the evidence. |
+| `boundary` | The disclaimer, in the payload rather than only in a comment, so the narrator cannot overclaim past it. |
+
+Recovery is judged **per day against that day's own weekday**, in the direction the incident moved,
+against the detector's own 3% gate — so "recovered" means exactly "would no longer fire". Three
+separate bugs forced that shape; `resolveStatus` in `mcp/action.ts` documents each one, because every
+single one was a window-comparison arithmetic error that a ratio metric concealed.
 
 ## Answer style
 
