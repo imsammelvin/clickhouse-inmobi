@@ -17,10 +17,89 @@ LibreChat ──MCP/JSON-RPC──▶ mcp/server.ts ──▶ mcp/tools.ts ─�
 
 ```bash
 bun install                 # required on a fresh clone
+bun run diagnose            # THE unattended path: sweep -> rank -> investigate -> report
 bun run mcp:http            # LibreChat and anything else with a URL -> :3333/mcp
 bun run mcp:stdio           # local desktop client
 bun run mcp:eval            # accuracy scorecard, exits non-zero on a gated miss
 ```
+
+## `bun run diagnose` — the unattended path
+
+Takes no arguments. Nobody hands you a metric and a window on Day 2, so this is the submission
+artifact:
+
+```
+describe_data -> find_incidents -> rank -> group -> investigate top N -> report.{md,json,html}
+```
+
+Measured on the training data, 91s, nothing supplied by a human:
+
+| # | Metric | Window | Channel | Cause | $/day | Grounded |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | fill_rate | Jun 23-26 | technical_break | `os_version='Android 15'` | -$20.45 | 42/42 |
+| 2 | ecpm | Jun 16-22 | demand_change | `ad_format='interstitial'` | -$5.40 | 36/36 |
+| 3 | fill_rate | Jun 28-30 | technical_break | `os_version='iOS 18.1'` | -$1.50 | 46/46 |
+| 4 | revenue | Jun 19-26 | not_localizable | platform-wide | — | 16/16 |
+| 5 | requests | Jun 21-22 | not_localizable | platform-wide | — | 6/6 |
+| 6 | revenue | Jun 15-21 | no_anomaly | platform-wide | — | 7/7 |
+
+46 firing windows → 30 distinct incidents → 6 investigated. All four known training incidents appear,
+including the Jun 21 collapse as `not_localizable` rather than as a fabricated cause. The 24 not
+escalated are listed in the report with their numbers and the reason.
+
+Flags: `--from` / `--to` (restrict the reported window), `--top N` (default 6 — a readability cap, not
+a detection threshold), `--metrics a,b`, `--out DIR`, `--cost-timeout MS`. Exits non-zero if any
+report contains an ungrounded number.
+
+**Three things this got wrong first**, all worth knowing because they are the mistake this codebase
+keeps making:
+
+1. Merging overlapping windows and investigating the **union** produced an eight-day `ctr` window
+   spanning two incidents, diluted both to `no_anomaly`, and lost the Android 15 collapse entirely.
+   Grouping now changes only what the report *says*; each incident is investigated over its own
+   detected dates.
+2. Grouping across metrics on a shared lead segment folded the Jun 23-26 fill-rate break into the
+   Jun 19-26 revenue window — the sweep leads both with the pair `finance|Android 15` — so the
+   flagship incident was never investigated on its own terms. Cross-metric grouping is now
+   identical-window only.
+3. Ranking on |move| put CTR **rises** of +30-58% above real losses. Only drops are escalated, and
+   breadth (`correlatedSegments`) is folded in because Jun 21's platform-wide collapse leads with
+   `app_id=app_00091` on 0.11% of traffic while 425 segments move together.
+
+### The artifact
+
+`report.html` is one self-contained file — inline CSS, no scripts, no fonts, no network of any kind.
+It carries every printed number beside the SQL that produced it and that SQL's hash, per-stage
+timings and query counts, the segments checked and cleared, and every tool call with its OTel trace
+id. A judge needs a browser, not our Docker stack. A committed exhibit lives in
+[`pitch/example-report/`](../pitch/example-report/).
+
+`report.json` is the same thing machine-readable, including every evidence row. `report.md` is for a
+terminal or a PR.
+
+### What it cost
+
+`Ledger` tags every query with `run=`/`stage=`, so `mcp/cost.ts` attributes ClickHouse cost per tool
+call from `system.query_log` — most teams cannot tell a judge what their queries cost. One full
+unattended run:
+
+| | |
+| --- | --- |
+| rows read | 343,970,353 |
+| bytes read | 4,096.9 MiB |
+| server time | 59,232 ms |
+| peak memory | 848.2 MiB |
+| queries | 55 |
+
+`find_incidents` alone is 135M rows across 10 queries, because each metric's sweep scans the full
+history for its baseline. **This is the honest scalability picture:** rows *returned* are bounded by
+dimension cardinality (the criterion-3 invariant, and it holds), but rows *read* are not — one run
+reads ~38x the fact table. The rollup that fixes it is Lane B's `T-013`, and the report measuring the
+cost is what turns that from an assertion into a delta.
+
+Best-effort with an 8s deadline: `query_log` on Cloud flushes asynchronously, so the report says
+"not flushed yet" rather than printing zeros that look authoritative. A diagnosis never waits on
+telemetry.
 
 `.env` needs the ClickHouse Cloud credentials (see `.env.example`).
 

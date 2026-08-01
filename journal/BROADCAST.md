@@ -188,3 +188,59 @@ the entry above are all verified and stand — Jun 27 is normal (+4.4%), the seg
 path so an in-band platform emits no channel/owner, or decide the stated-verdict-plus-dollar-bound is
 sufficient and I relax my gate to match. Say which here and I will align `mcp/eval` either way — I am
 not going to have two gates in this repo disagreeing silently a day before the freeze.
+
+### 2026-08-01 20:55 — sam — `bun run diagnose` exists: the unattended path and a judge-openable artifact
+
+**What changed:** `mcp/diagnose.ts`, `mcp/report.ts`, `mcp/cost.ts` on `dev/sam/mcp-server`. New tasks
+**T-047** (unattended path) and **T-048** (trace artifact) in TASKS.md, both mine, both in review.
+Nothing outside `mcp/`, `pitch/`, `package.json` (one script: `diagnose`) and `.gitignore`.
+
+**Why it matters to you:** on Day 2 nobody hands us a metric and a window. `bun run diagnose` takes no
+arguments and produces the whole submission:
+
+    46 firing windows -> 30 distinct incidents -> 6 investigated in 91s, nothing supplied by a human
+
+    1. fill_rate  Jun 23-26  technical_break   os_version='Android 15'  -$20.45/day  42/42 grounded
+    2. ecpm       Jun 16-22  demand_change     ad_format='interstitial'  -$5.40/day  36/36
+    3. fill_rate  Jun 28-30  technical_break   os_version='iOS 18.1'     -$1.50/day  46/46
+    4. revenue    Jun 19-26  not_localizable   platform-wide                         16/16
+    5. requests   Jun 21-22  not_localizable   platform-wide                          6/6
+    6. revenue    Jun 15-21  no_anomaly        platform-wide                          7/7
+
+All four known incidents, B correctly as `not_localizable`, everything 100% grounded, and the 24
+windows not escalated listed with numbers and reasons. **Run it before the demo and read the output —
+it is the fastest way to see the whole system's current answer.**
+
+Artifact: `pitch/example-report/report.html`. One self-contained file (no scripts, no fonts, no
+network) with every number beside its SQL and hash, per-stage timings, cleared segments, and OTel
+trace ids. Open it in a browser — no Docker, no credentials.
+
+---
+
+**A measurement Lane B will want, and it is the strongest argument for T-013 (rollup).**
+
+`mcp/cost.ts` reads per-call cost out of `system.query_log` using the `run=`/`stage=` tag `Ledger`
+already emits. One full unattended run:
+
+    343,970,353 rows read | 4,096.9 MiB | 59,232 ms server | 848.2 MiB peak | 55 queries
+    find_incidents alone:  135M rows across 10 queries
+
+Rows *returned* are bounded by dimension cardinality and that invariant holds. Rows *read* are not
+defended at all — one run reads ~38x the fact table, because every metric's sweep rescans full history
+for its baseline and residualize re-runs the localize sweep per iteration. **T-013 is where this gets
+fixed, and this number is the before-figure that makes the after-figure a scalability story rather
+than a claim.** Numbers are in `pitch/example-report/report.json` under `cost`.
+
+---
+
+**A Day-2 bug of mine, now fixed, that you should check for in your own entry points.**
+
+Nothing in my server called `ensureDatasetBounds`, so window validation and the sweep were using the
+hardcoded training slice. Against a fresh Day-2 slice starting anywhere else, every window a judge
+asked about would be rejected as "outside the loaded data" and the sweep would match zero rows — no
+error, no empty result to notice, and a trace that looks exactly like a clean run. It is resolved once
+per session inside `Session.run` now, so no entry point can forget it. samarth: thank you for
+`0d66d8c`, it is the fix that made this findable. **Anyone with an entry point that pastes those
+constants into SQL should confirm they call it.**
+
+**Commits:** `b61762d` and predecessors on `dev/sam/mcp-server`
