@@ -16,7 +16,8 @@ import { Ledger } from "./ledger";
 import { METRICS, metricExpr } from "./metrics";
 import {
   MIN_BASELINE_DAYS,
-  robustBaseline,
+  estimateWeeklyGrowth,
+  trendAwareBaseline,
   DATASET_START,
   DATASET_END,
   datesBetween,
@@ -58,6 +59,7 @@ async function seriesFor(ledger: Ledger, metric: string): Promise<Map<string, nu
   const sql = `
 SELECT toString(event_date) AS d, ${metricExpr(def)} AS v
 FROM ad_events_enriched
+WHERE event_date BETWEEN '${DATASET_START}' AND '${DATASET_END}'
 GROUP BY event_date ORDER BY event_date`.trim();
   const rows = await ledger.run<Row>(sql);
   return new Map(rows.map((r) => [r.d, Number(r.v ?? 0)]));
@@ -66,19 +68,20 @@ GROUP BY event_date ORDER BY event_date`.trim();
 function evaluate(
   series: Map<string, number>,
   day: string,
+  weeklyGrowth: number,
 ): { pct: number; sigma: number; fired: boolean; n: number } {
   const t = Date.parse(`${day}T00:00:00Z`);
-  const base: number[] = [];
+  const base: Array<{ weeksAgo: number; value: number }> = [];
   for (let k = 1; k <= 4; k++) {
     const prior = new Date(t - k * 7 * 86_400_000).toISOString().slice(0, 10);
     const v = series.get(prior);
-    if (v !== undefined) base.push(v);
+    if (v !== undefined) base.push({ weeksAgo: k, value: v });
   }
   const actual = series.get(day);
   if (actual === undefined || base.length < MIN_BASELINE_DAYS) {
     return { pct: 0, sigma: 0, fired: false, n: base.length };
   }
-  const { centre, spread } = robustBaseline(base);
+  const { centre, spread } = trendAwareBaseline(base, weeklyGrowth);
   const pct = centre === 0 ? 0 : ((actual - centre) / centre) * 100;
   const sigma = spread === 0 ? 0 : (actual - centre) / spread;
   return {
@@ -112,8 +115,10 @@ export async function scanAll(metrics: string[] = DEFAULT_METRICS): Promise<Scan
   try {
     for (const metric of metrics) {
       const series = await seriesFor(ledger, metric);
+      // Estimated once per metric from the full series, then applied to every day.
+      const weeklyGrowth = estimateWeeklyGrowth(series);
       for (const day of datesBetween(DATASET_START, DATASET_END)) {
-        const r = evaluate(series, day);
+        const r = evaluate(series, day, weeklyGrowth);
         if (r.fired) fired.push({ metric, day, pct: r.pct, sigma: r.sigma });
       }
     }
@@ -127,8 +132,17 @@ export async function scanAll(metrics: string[] = DEFAULT_METRICS): Promise<Scan
     const hit = fired.some((f) => f.metric === k.metric && k.dates.includes(f.day));
     (hit ? found : missed).push(`${k.label}  (${k.metric})`);
   }
-  const knownDays = new Set(KNOWN_INCIDENTS.flatMap((k) => k.dates.map((d) => `${k.metric}|${d}`)));
-  const extra = fired.filter((f) => !knownDays.has(`${f.metric}|${f.day}`));
+
+  // Attribution is by DATE, not by (metric, date).
+  //
+  // One incident shows up in several metrics at once - the Jun 21 collapse fires on requests AND
+  // on revenue, and the Android 15 break drags CTR along with fill rate. Matching metric-exactly
+  // counted those echoes as unexplained and inflated "hallucination risk" from 6 to 19, which
+  // overstates the problem: an operator seeing two rows for one real incident has a grouping
+  // annoyance, not a false alarm. What actually deserves the label is a firing on a date where
+  // nothing is known to have happened.
+  const knownDates = new Set(KNOWN_INCIDENTS.flatMap((k) => k.dates));
+  const extra = fired.filter((f) => !knownDates.has(f.day));
 
   return { fired: fired.sort((a, b) => a.day.localeCompare(b.day)), found, missed, extra };
 }

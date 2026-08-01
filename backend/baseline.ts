@@ -123,3 +123,73 @@ export function robustBaseline(xs: number[]): { centre: number; spread: number }
   const floor = Math.abs(centre) * MIN_COEFF_VARIATION;
   return { centre, spread: Math.max(mad(xs), floor) };
 }
+
+/**
+ * Theil-Sen slope: the median of all pairwise slopes.
+ *
+ * Chosen over least squares because the baseline is 3-4 points and one of them may itself be a
+ * prior incident. A single outlier drags a least-squares line badly at n=4; the median of pairwise
+ * slopes shrugs it off, which is the same reasoning that put a median at the centre.
+ */
+function theilSenSlope(points: Array<{ x: number; y: number }>): number {
+  const slopes: number[] = [];
+  for (let i = 0; i < points.length; i++) {
+    for (let j = i + 1; j < points.length; j++) {
+      const dx = points[j]!.x - points[i]!.x;
+      if (dx !== 0) slopes.push((points[j]!.y - points[i]!.y) / dx);
+    }
+  }
+  return slopes.length ? median(slopes) : 0;
+}
+
+/**
+ * Weekly fractional growth, estimated from the WHOLE daily series.
+ *
+ * This is the second attempt and the first one is worth recording, because the failure was
+ * instructive. Fitting the trend through the 3-4 same-weekday baseline points looked principled
+ * and is not: the growth being estimated is ~1.3%/week, which is well below the noise in a 4-point
+ * sample, and — worse — those points routinely contain a prior incident. For Sunday 2026-06-28 the
+ * three priors are Jun 21 (126,052, itself the planted collapse), Jun 14 and Jun 7. At n=3 two of
+ * the three pairwise slopes touch any given point, so Theil-Sen has no resistance at all: it fitted
+ * a steep decline and predicted 78,690 against an actual 233,943, reporting **+213% at 427 sigma**.
+ * Robustness claimed is not robustness held.
+ *
+ * Estimating from all ~35 daily points instead gives Theil-Sen ~595 pairwise slopes, where a
+ * handful of incident days cannot move the median. The slope is taken on log values so growth is
+ * multiplicative — a 6% trend means 6% of whatever the level is, not a fixed number of requests.
+ */
+export function estimateWeeklyGrowth(series: Map<string, number>): number {
+  const points = [...series.entries()]
+    .filter(([, v]) => v > 0)
+    .map(([d, v]) => ({ x: Date.parse(`${d}T00:00:00Z`) / DAY_MS, y: Math.log(v) }))
+    .sort((a, b) => a.x - b.x);
+
+  if (points.length < 14) return 0; // Too little history to claim a trend at all.
+
+  const perDayLog = theilSenSlope(points);
+  const weekly = Math.exp(perDayLog * 7) - 1;
+
+  // Guard against a pathological fit: anything beyond +/-15%/week is not a growth trend in this
+  // dataset, it is an artefact, and applying it would do more damage than ignoring it.
+  if (!Number.isFinite(weekly) || Math.abs(weekly) > 0.15) return 0;
+  return weekly;
+}
+
+/**
+ * Baseline with the growth trend removed.
+ *
+ * Each historical same-weekday value is carried FORWARD by the globally-estimated growth before the
+ * median is taken, so the centre predicts the level of the day being tested rather than the level
+ * of two weeks ago. Level comes from the robust median (resistant to a prior incident in the
+ * window); trend comes from the whole series (where it is actually estimable). Neither job is asked
+ * of a sample too small to do it.
+ */
+export function trendAwareBaseline(
+  points: Array<{ weeksAgo: number; value: number }>,
+  weeklyGrowth: number,
+): { centre: number; spread: number; weeklyGrowth: number } {
+  const adjusted = points.map((p) => p.value * (1 + weeklyGrowth) ** p.weeksAgo);
+  const centre = median(adjusted);
+  const floor = Math.abs(centre) * MIN_COEFF_VARIATION;
+  return { centre, spread: Math.max(mad(adjusted), floor), weeklyGrowth };
+}

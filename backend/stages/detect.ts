@@ -7,7 +7,14 @@
  */
 import type { Ledger } from "../ledger";
 import { METRICS, metricExpr } from "../metrics";
-import { MIN_BASELINE_DAYS, baselineDates, mean, robustBaseline, sqlDateList } from "../baseline";
+import {
+  MIN_BASELINE_DAYS,
+  baselineDates,
+  estimateWeeklyGrowth,
+  mean,
+  sqlDateList,
+  trendAwareBaseline,
+} from "../baseline";
 import { type Mask, NO_MASK } from "../types";
 
 export interface Detection {
@@ -77,12 +84,26 @@ ORDER BY event_date`.trim();
     def.kind === "absolute" ? incidentValue / incidentDays.length : incidentValue;
 
   const baseVals = baselineDays.map(num);
+  // Same-weekday points tagged with how many weeks back they sit, so the baseline can project the
+  // documented growth trend forward instead of averaging behind it.
+  const dayMs = 86_400_000;
+  const anchor = Date.parse(`${from}T00:00:00Z`);
+  const basePoints = baselineDays.map((r) => ({
+    weeksAgo: Math.max(1, Math.round((anchor - Date.parse(`${r.d}T00:00:00Z`)) / (7 * dayMs))),
+    value: num(r),
+  }));
   // Compare per-day against per-day. A 3-day incident total against a 1-day baseline would show a
   // 200% "increase" that is pure arithmetic.
   //
   // Median, not mean: a prior planted incident sitting inside the baseline window would otherwise
   // drag the centre and manufacture an anomaly on a perfectly normal day. See `robustBaseline`.
-  const { centre: baselineMean, spread: baselineStd } = robustBaseline(baseVals);
+  // Growth is estimated from every day the query returned, not from the baseline points alone —
+  // four points cannot support a trend estimate (see estimateWeeklyGrowth).
+  const wholeSeries = new Map(rows.map((r) => [r.d, num(r)]));
+  const { centre: baselineMean, spread: baselineStd } = trendAwareBaseline(
+    basePoints,
+    estimateWeeklyGrowth(wholeSeries),
+  );
 
   const deltaAbs = perDayIncident - baselineMean;
   const deltaPct = baselineMean === 0 ? 0 : (deltaAbs / baselineMean) * 100;
