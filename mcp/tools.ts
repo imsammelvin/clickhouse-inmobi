@@ -568,7 +568,15 @@ const explainRevenue: ToolDef = {
       ledger,
       window.from,
       window.to,
-      scope.sql === "1" ? undefined : { sql: scope.sql, description: scope.description },
+      scope.sql === "1"
+        ? undefined
+        : {
+            sql: scope.sql,
+            description: scope.description,
+            // `buildScope` validated these against the metric, so its keys ARE the dimensions the
+            // predicate constrains — see the obligation on `Mask.dims`.
+            dims: Object.keys(scope.filters),
+          },
     );
     return {
       summary: `driver ${dec.driver?.name ?? "none"}, ${dec.revenueDelta.toFixed(2)} USD/day`,

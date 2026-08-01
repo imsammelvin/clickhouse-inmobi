@@ -92,9 +92,25 @@ export interface Investigation {
 export interface Mask {
   sql: string;
   description: string;
+  /**
+   * Which dimensions the predicate constrains. Empty for `NO_MASK`.
+   *
+   * Added for T-050 (samarth, Crosses-lane: loges). A stage cannot ask whether the rollup can serve
+   * its query without knowing which dimensions the query touches, and `sql` is a string — parsing it
+   * back would be both fragile and exactly the wrong direction, since the callers below already know
+   * the answer at construction time and were simply discarding it.
+   *
+   * It carries a real obligation: **every dimension the predicate references must be listed.** The
+   * rollup pre-sums each cut, so a dimension left out of this list is a dimension that has already
+   * been summed away — `planRollup` would hand back a cut that cannot express the filter, and the
+   * query would return the number for the WHOLE slice instead of the filtered one. Plausible, wrong,
+   * and silent. Use the builders below rather than assembling a Mask by hand; they are the reason
+   * this cannot be got wrong in one place and right in another.
+   */
+  dims: readonly string[];
 }
 
-export const NO_MASK: Mask = { sql: "1", description: "no exclusions" };
+export const NO_MASK: Mask = { sql: "1", description: "no exclusions", dims: [] };
 
 const esc = (v: string): string => v.replace(/'/g, "\\'");
 
@@ -119,10 +135,41 @@ export function segmentExclusion(dimension: string, value: string): string {
   return `NOT (${segmentPredicate(dimension, value)})`;
 }
 
+/**
+ * The dimensions a segment name constrains — one, or two for a synthetic pair.
+ *
+ * Split on `|` for the same reason `segmentPredicate` does: the sweep emits pairs as a single
+ * dimension called `region|os_version`, and both halves are real columns that a rollup cut has to
+ * carry for the predicate to be expressible.
+ */
+export const segmentDims = (dimension: string): readonly string[] => dimension.split("|");
+
+/** Restrict to one segment. */
+export function segmentMask(dimension: string, value: string): Mask {
+  return {
+    sql: segmentPredicate(dimension, value),
+    description: `${dimension}='${value}'`,
+    dims: segmentDims(dimension),
+  };
+}
+
+/** Exclude one segment, for residualization's deflation loop. */
+export function exclusionMask(dimension: string, value: string): Mask {
+  return {
+    sql: segmentExclusion(dimension, value),
+    description: `excluding ${dimension} = '${value}'`,
+    dims: segmentDims(dimension),
+  };
+}
+
 export function andMask(a: Mask, b: Mask): Mask {
   if (a.sql === "1") return b;
   return {
     sql: `(${a.sql}) AND (${b.sql})`,
     description: `${a.description}; ${b.description}`,
+    // Union, because the combined predicate constrains everything either side did. Two exclusions on
+    // different dimensions therefore report two dims and `planRollup` declines the cut — correct: no
+    // materialised cut can express both at once, so it falls back to the raw scan.
+    dims: [...new Set([...a.dims, ...b.dims])],
   };
 }

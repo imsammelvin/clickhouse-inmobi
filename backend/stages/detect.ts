@@ -16,6 +16,7 @@ import {
   trendAwareBaseline,
 } from "../baseline";
 import { type Mask, NO_MASK } from "../types";
+import { RAW_SOURCE, planRollup, sourceLabel } from "../../clickhouse/rollup";
 import { withSpan } from "../../utils/telemetryUtils";
 import type { Span } from "@opentelemetry/api";
 
@@ -94,11 +95,30 @@ async function detectInner(
   const base = baselineDates(from, to);
   const evidenceIds: string[] = [];
 
+  /**
+   * Read the rollup when it can express this mask exactly, the raw view otherwise (T-043/T-050).
+   *
+   * This stage is the single largest remaining consumer of raw events, and not because it is
+   * complicated — the query below is one `GROUP BY event_date`. It is because it runs so often:
+   * once for the platform, then once per candidate cause in `confirm`, each time re-deriving daily
+   * totals from millions of events to produce ~7 numbers. Measured over one `diagnose` run,
+   * `detect` plus the `confirm` loop that calls it accounted for **41.8% of all rows read**
+   * (138.6M of 331.7M) — more than every other stage combined.
+   *
+   * `mask.dims` is what makes the decision possible: 0 dimensions for the platform, 1 or 2 for a
+   * segment (a pair counts as two), and `planRollup` declines anything wider so a mask the rollup
+   * cannot express falls back rather than being answered approximately. `src.expr` rewrites the
+   * metric formula from `backend/metrics.ts` for the rolled-up columns, so there is still exactly
+   * one definition of every metric.
+   */
+  const plan = planRollup({ dims: mask.dims, grain: "daily", expressions: [expr] });
+  const src = plan ?? RAW_SOURCE;
+
   // One query returns both the incident window and every baseline day, so the two can never be
   // computed against different filters or a different mask.
   const sql = `
-SELECT toString(event_date) AS d, ${expr} AS v
-FROM ad_events_enriched
+SELECT toString(event_date) AS d, ${src.expr(expr)} AS v
+FROM ${src.from}
 WHERE (${mask.sql})
   AND (event_date BETWEEN '${from}' AND '${to}' OR event_date IN (${sqlDateList(base)}))
 GROUP BY event_date
@@ -250,6 +270,9 @@ ORDER BY event_date`.trim();
     "app.detect.baseline_days": baseVals.length,
     "app.detect.delta_pct": Number(deltaPct.toFixed(4)),
     "app.detect.sigma": Number(sigma.toFixed(3)),
+    // Which surface answered, next to the latency it bought — the same fact `servedFrom` puts in the
+    // MCP envelope, for a stage that has no envelope of its own.
+    "app.source": sourceLabel(plan),
     // Filterable, because "which of our detections were carried by the floor rather than by a
     // measured spread" is the question that separates a real signal from a restated size gate.
     "app.detect.spread_floored": spreadFloored,

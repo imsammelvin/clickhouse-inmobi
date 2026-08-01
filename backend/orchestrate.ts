@@ -25,7 +25,7 @@ import {
   type Mask,
   NO_MASK,
   type Segment,
-  segmentPredicate,
+  segmentMask,
 } from "./types";
 import { withSpan } from "../utils/telemetryUtils";
 
@@ -67,11 +67,8 @@ export interface InvestigateOptions {
 }
 
 /** Restrict every stage to one segment. Stages already accept a Mask; this just builds one. */
-function segmentMask(segment: Segment): Mask {
-  return {
-    sql: segmentPredicate(segment.dimension, segment.value),
-    description: `${segment.dimension}='${segment.value}'`,
-  };
+function maskFor(segment: Segment): Mask {
+  return segmentMask(segment.dimension, segment.value);
 }
 
 /**
@@ -118,7 +115,7 @@ async function investigateInner(opts: InvestigateOptions): Promise<Investigation
   const findings: Finding[] = [];
   const ruledOut: Finding[] = [];
 
-  const scope: Mask = opts.segment ? segmentMask(opts.segment) : NO_MASK;
+  const scope: Mask = opts.segment ? maskFor(opts.segment) : NO_MASK;
 
   // ---- Stage 0: detect -----------------------------------------------------------------
   ledger.beginStage("detect");
@@ -144,7 +141,7 @@ async function investigateInner(opts: InvestigateOptions): Promise<Investigation
     const lead = windows[0]?.lead;
     if (lead) {
       scopedTo = { dimension: lead.dimension, value: lead.value };
-      const rescoped = await detect(ledger, metric, from, to, segmentMask(scopedTo));
+      const rescoped = await detect(ledger, metric, from, to, maskFor(scopedTo));
       if (rescoped.anomalous) {
         det = rescoped;
         platformInBand = { pct: platformDet.deltaPct, sigma: platformDet.sigma };
@@ -280,10 +277,7 @@ async function investigateInner(opts: InvestigateOptions): Promise<Investigation
     [];
 
   for (const c of res.causes) {
-    const segDet = await detect(ledger, sweepMetric, from, to, {
-      sql: segmentPredicate(c.dimension, c.value),
-      description: `${c.dimension}='${c.value}'`,
-    });
+    const segDet = await detect(ledger, sweepMetric, from, to, segmentMask(c.dimension, c.value));
     if (segDet.anomalous) confirmed.push(c);
     else insignificant.push({ cause: c, sigma: segDet.sigma, pct: segDet.deltaPct });
   }
@@ -438,12 +432,7 @@ async function investigateInner(opts: InvestigateOptions): Promise<Investigation
   // Publisher ops. A segment-level finding has to be classified on the segment's own funnel, not
   // on what the rest of the platform was doing around it.
   const causeSegment = res.causes[0];
-  const causeMask = causeSegment
-    ? {
-        sql: segmentPredicate(causeSegment.dimension, causeSegment.value),
-        description: `${causeSegment.dimension}='${causeSegment.value}'`,
-      }
-    : null;
+  const causeMask = causeSegment ? segmentMask(causeSegment.dimension, causeSegment.value) : null;
   const scoped = causeMask ? await decompose(ledger, from, to, causeMask) : dec;
 
   ledger.beginStage("classify");

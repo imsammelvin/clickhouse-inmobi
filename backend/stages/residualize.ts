@@ -18,7 +18,7 @@
  */
 import type { Ledger } from "../ledger";
 import { type Candidate, localize } from "./localize";
-import { type Mask, NO_MASK, andMask, segmentExclusion } from "../types";
+import { type Mask, NO_MASK, andMask, exclusionMask } from "../types";
 import { withSpan } from "../../utils/telemetryUtils";
 
 export interface ResidualizeResult {
@@ -252,12 +252,11 @@ async function residualizeInner(
     causes.push(top);
     iterations++;
 
-    mask = andMask(mask, {
-      // Via the shared builder: a pair dimension has to be split back into its two columns, and
-      // hand-rolling that here emitted `country|ad_format != 'ES|native'`, which is a syntax error.
-      sql: segmentExclusion(top.dimension, top.value),
-      description: `excluding ${top.dimension} = '${top.value}'`,
-    });
+    // Via the shared builder: a pair dimension has to be split back into its two columns, and
+    // hand-rolling that here emitted `country|ad_format != 'ES|native'`, which is a syntax error.
+    // The builder also records which dimensions the exclusion constrains, so a stage reading the
+    // rollup can tell whether a materialised cut can express it.
+    mask = andMask(mask, exclusionMask(top.dimension, top.value));
 
     // Re-sweep the remainder. This is the whole idea: what still moves once the cause is gone?
     const after = await localize(ledger, metric, from, to, mask);
@@ -345,11 +344,7 @@ async function orderBySurvival(
   for (const c of causes) {
     const others = causes.filter((o) => o !== c);
     const mask = others.reduce<Mask>(
-      (m, o) =>
-        andMask(m, {
-          sql: segmentExclusion(o.dimension, o.value),
-          description: `excluding ${o.dimension} = '${o.value}'`,
-        }),
+      (m, o) => andMask(m, exclusionMask(o.dimension, o.value)),
       NO_MASK,
     );
     const after = await localize(ledger, metric, from, to, mask);
