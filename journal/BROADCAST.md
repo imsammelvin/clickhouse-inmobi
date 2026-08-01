@@ -316,3 +316,126 @@ tuned against several known incidents already, and I do not have enough confiden
 change it without risking a regression elsewhere. `investigate()` on the exact hand-verified window
 (Jun 19-22) already gets this right today (confirmed: `mcp:eval` C-finance-ecpm passes 100%). Flagging
 for whoever has time before the freeze to confirm whether the European-interstitial pattern is real.
+
+
+---
+
+## 2026-08-01 — T-013 landed: rollup MVs live. One decision-log correction, one cross-lane export, one patch offered to Lane A. — samarth (Lane B)
+
+Branch `dev/samarth/rollup-mv`. Nothing in `backend/` changed except one word (below). Everything is
+additive and every existing gate is green: `typecheck` clean, `mcp:eval` **16/16 cases / 60/60 gated**,
+`criteria` **4/4**, `diagnose` unchanged (46 windows -> 30 incidents -> 6 investigated, 100% grounded).
+
+### What exists now
+
+`rollup_segment_hourly` (3,089,172 rows) and `rollup_segment_daily` (~148k), both `SummingMergeTree`,
+long format: one row per `(bucket, dim, val)` -> `events, fills, impressions, clicks, revenue`. Sums
+only, never a stored ratio. Maintained by two incremental MVs that fire on every `ad_events` insert —
+`mv_rollup_segment_hourly` off `ad_events`, `mv_rollup_segment_daily` cascaded off the hourly table so
+daily cannot disagree with hourly.
+
+New commands: `bun run ch:rollup` (backfill — an MV only sees inserts made after it exists, so a
+loaded table needs this once) and `bun run ch:verify-rollup` (the correctness gate) and
+`bun run bench:rollup` (the measured delta). `ch:setup` chains all of them.
+
+**Measured, 11 representative tool calls, cost from `system.query_log`, artifact in
+`clickhouse/rollup-bench.json`:** rows read **213.6M -> 3.69M (57.9x)**, bytes 2,680 MiB -> 117 MiB,
+peak memory **848 MiB -> 30 MiB**, server time **49.1s -> 1.0s (47x)**. `find_incidents` over the full
+history: **38.2s -> 1.14s**. Every other tool call is 40-65ms.
+
+### D-020 PROPOSED — the § 7 rollup grain is wrong, and I measured it before building
+
+goal.md § 7 (LOCKED) specifies a rollup at `(hour, app_id, geo_device_id, advertiser_id, ad_format)`.
+**Do not build that one.** Measured on the real table: that key space is so much larger than the event
+count that 9M events land on ~9M distinct keys — it compresses nothing and would just be a second copy
+of the fact table. The access pattern is never one app x one geo x one advertiser; it is one dimension
+at a time, occasionally two.
+
+What shipped instead: long format `(bucket, dim, val)`, carrying 11 single dimensions and **all 36
+pairs of the 9 low-cardinality ones** — 4,221 segments, 148k daily rows. Entity dimensions (`app_id`,
+`advertiser_id`) are carried singly but never paired: `app_id x os_version` alone is 529k daily rows,
+more than every other pair combined. Cost grows with *cardinality x time*, not with events, which is
+the petabyte answer § 3 promises.
+
+§ 7 is LOCKED, so this is a **proposal, not an edit**. loges: please add D-020 to § 11 and correct the
+§ 7 rollup bullet, or argue the other side here. The tables are already live either way — the DDL is
+generated from a registry in `clickhouse/rollup.ts`, which is where the grain now actually lives.
+
+### Crosses-lane: loges — one word in `backend/segments.ts`
+
+`MIN_BASELINE_POINTS` is now `export const` instead of `const`. `mcp/sweep.ts` reads it rather than
+restating it: a detection threshold that exists in two places will eventually differ in two places, and
+the symptom would be two sweeps disagreeing about whether an incident happened. No behaviour change.
+
+### Lane A: T-043 is now a small change, and here is the measured priority order
+
+`find_incidents` went from ~40% of a `diagnose` run's rows read to **0.7%**. Everything left is engine
+stages, from that run's own `query_log` attribution:
+
+| stage | queries | rows read | share | rollup-servable? |
+| --- | --- | --- | --- | --- |
+| residualize | 25 | 121,770,166 | 36.7% | partly — single-exclusion x small-dim target only |
+| detect | 12 | 72,561,654 | 21.9% | **yes, fully** |
+| confirm (calls `detect`) | 16 | 66,008,845 | 19.9% | **yes, fully** |
+| localize | 5 | 21,722,112 | 6.5% | unmasked pass yes; masked needs the pair |
+| decompose | 10 | 21,722,107 | 6.5% | **yes** |
+| classify | 4 | 15,775,802 | 4.8% | no — `uniqExact` on advertisers is not a sum |
+| find_incidents | 10 | 2,286,280 | 0.7% | done |
+
+**Start with `detect`. 41.8% of the remaining rows for a three-line change.** Its query is one
+`GROUP BY event_date` over a mask, i.e. 0-2 dimensions — exactly what the rollup serves:
+
+```ts
+// backend/stages/detect.ts
+import { planRollup, RAW_SOURCE } from "../../clickhouse/rollup";
+
+const src = planRollup({ dims: mask.dims ?? [], grain: "daily", expressions: [expr] }) ?? RAW_SOURCE;
+const sql = `
+SELECT toString(event_date) AS d, ${src.expr(expr)} AS v
+FROM ${src.from}
+WHERE (${mask.sql}) AND (...)
+GROUP BY event_date ORDER BY event_date`;
+```
+
+The one thing it needs from you: **`Mask` should carry the dimensions it constrains.** `segmentPredicate`
+and `andMask` in `backend/types.ts` already know them at construction — the type just does not record
+them, so `planRollup` cannot be asked. A `dims?: readonly string[]` field populated there is enough, and
+`NO_MASK` gets `dims: []`. Without it, pass `[]` and only unmasked detects hit the rollup, which is
+still the 21.9% row.
+
+Two rules if you take this: **(1) list EVERY dimension the query mentions, filters included** — a filter
+costs a cut just as a group-by does, and forgetting one returns the *unfiltered* number, which is
+plausible and wrong. **(2) Add your case to `scripts/verify-rollup.ts`.** It runs the real query path
+twice, rollup off then on, and asserts both the numbers and *which surface served them* — a probe that
+silently fell back would otherwise pass by comparing raw against itself.
+
+`backend/scan.ts` (`bun run scan`) also still uses the raw sweep; `mcp/sweep.ts` exports
+`scanSegmentsRollup` with an identical signature, verified firing-for-firing against yours, if you want
+the one-line swap.
+
+### Everyone: two hazards worth knowing about, because both are silent
+
+1. **`DROP PARTITION` does not cascade into a materialized view's target.** The loader now drops
+   `DERIVED_TABLES` partitions alongside the fact partition. Without that, a re-load makes the MV *add*
+   a second copy of the day and every rollup-served figure comes back **exactly doubled**, with the fact
+   table's row-count assertion still passing. **If you ever add a table fed by an MV, add it to
+   `DERIVED_TABLES` in `enums/index.ts` or you will silently double-count on the next reload.**
+2. **A derived table's failure mode is being behind its source, and behind does not throw** — a missing
+   day reads as a day with no traffic. `ensureRollupReady` proves the rollup accounts for exactly as many
+   events as `ad_events` before anything reads it. If it cannot, everything falls back to
+   `ad_events_enriched` and only latency changes. If you add an entry point that queries the rollup, call
+   it (same place you call `ensureDatasetBounds`).
+
+Also: `get_metric` / `compare_periods` / `rank_segments` / `find_incidents` results now carry
+`servedFrom` (`rollup:daily:os_version`, `rollup:hourly:region|os_version`, or `raw`). Additive field.
+Lane D — worth showing in the chat surface; it is the scalability claim in the response envelope.
+
+### Lane D: tool output ordering is now deterministic (behaviour change in `mcp/query.ts`)
+
+Separate find, same branch, and it matters to you because you render these rows. `ORDER BY requests
+DESC` was not a total order and the result is truncated by LIMIT — so `get_metric` grouped by `app_id`
+(2,000 rows, 25 returned, traffic even enough that the cut-off routinely ties) could return **different
+segments on two identical calls**, depending on how ClickHouse parallelised the aggregation. Found by
+`ch:verify-rollup` running the same call twice on the same code path and getting two different top-N
+sets. All four orderings now carry the group columns as a tiebreaker. Same rows, stable order; nothing
+to change on your side, but "re-run it and get the same answer" is now actually true.

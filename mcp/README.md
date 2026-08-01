@@ -98,6 +98,42 @@ dimension cardinality (the criterion-3 invariant, and it holds), but rows *read*
 reads ~38x the fact table. The rollup that fixes it is Lane B's `T-013`, and the report measuring the
 cost is what turns that from an assertion into a delta.
 
+### The rollup, and the delta it actually bought (T-013)
+
+Every tool below now reads `rollup_segment_daily` / `rollup_segment_hourly` — long format, one row per
+`(bucket, dimension, value)` → five sums, maintained incrementally by a materialized view on every
+`ad_events` insert. See `clickhouse/rollup.ts` for the grain and why it is not the one `goal.md` § 7
+proposed (that one was measured first: 9M events land on ~9M distinct keys, so it compresses nothing).
+
+Measured over the 11 tool calls a judge actually makes, each run twice through `callTool` with the
+rollup forced off and then on, cost read per call from `system.query_log`
+(`bun run bench:rollup`, artifact `clickhouse/rollup-bench.json`):
+
+| | raw | rollup | |
+| --- | --- | --- | --- |
+| rows read | 213,625,303 | 3,689,938 | **57.9x less** |
+| bytes read | 2,680.6 MiB | 116.8 MiB | 22.9x less |
+| peak memory | 848.2 MiB | 29.9 MiB | 28x less |
+| server time | 49,064 ms | 1,041 ms | **47.1x faster** |
+
+`find_incidents` over the full history: **38.2s → 1.14s**, 135M rows → 2.3M. Every other call is
+40–65ms. Within a full `diagnose` run the sweep fell from ~40% of rows read to **0.7%**; what remains is
+the engine's own stages (`detect`, `confirm`, `residualize`), which is `T-043`/`T-050` in Lane A.
+
+Two things make this safe to trust rather than merely fast:
+
+- **A question the rollup cannot answer exactly falls back to `ad_events_enriched`.** Three or more
+  dimensions at once, `geo_device_id`, an entity dimension paired with another, a metric referencing a
+  column the rollup does not sum — `planRollup` returns null and the raw path runs as before. Nothing
+  approximates. Every result carries **`servedFrom`** (`rollup:daily:os_version`,
+  `rollup:hourly:region|os_version`, or `raw`) so which surface answered is in the envelope, not a
+  matter of trust.
+- **`bun run ch:verify-rollup`** runs the real query path twice over identical arguments — rollup off,
+  then on — across 248 probes covering every metric × dimension, both grains, two-dimension cuts,
+  filter+group-by combinations, prefix and list filters, and the sweep compared **firing-for-firing**
+  against `backend/segments.ts`. It also asserts *which* surface served each probe, because a probe that
+  silently fell back would otherwise pass by comparing the raw path against itself.
+
 Best-effort with an 8s deadline: `query_log` on Cloud flushes asynchronously, so the report says
 "not flushed yet" rather than printing zeros that look authoritative. A diagnosis never waits on
 telemetry.
