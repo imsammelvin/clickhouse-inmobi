@@ -23,9 +23,9 @@
 | T-007 | Define cross-lane interfaces in `goal.md` § 8 so lanes can mock each other | all | — | todo | — | T-002 | Do this early — it is what unblocks parallel work. |
 | T-008 | Ingest path: raw data → ClickHouse, repeatable and idempotent | — | — | todo | — | T-006 | |
 | T-009 | Vertical slice: one query path working end to end | — | — | todo | — | T-008, T-007 | M2. Ugly is fine. |
-| T-010 | Demo script written out beat by beat in `goal.md` § 4 | all | — | todo | — | T-001 | Write before building the polish. |
+| T-010 | Demo script written out beat by beat in `goal.md` § 4 | Biz | sam | doing | dev/sam/biz-specs | T-001 | Write before building the polish. First draft is in `goal.md` § 4; needs timings validated against a real run and a rehearsal pass. |
 | T-011 | Demo fallback recorded (video / seeded local data) | — | — | todo | — | T-009 | Do not leave to the last hour. |
-| T-012 | README: what it is, how to run it, screenshots | — | — | todo | — | T-009 | Judges read this. |
+| T-012 | README: what it is, how to run it, screenshots | Biz | sam | todo | — | T-009 | Judges read this. Biz writes the "what it is / why it matters" half; whoever owns the run path writes the "how to run it" half. |
 
 ## Backlog
 
@@ -44,6 +44,20 @@
 | T-023 | LibreChat: render investigation JSON as a formatted diagnosis chat message | Lane D | — | todo | — | T-018 | Mock against a sample JSON payload per `goal.md` § 8 — don't block on Lane A's API. |
 | T-024 | LibreChat: follow-up question loop (triggers a real ClickHouse/MCP query, not canned) | Lane D | — | todo | — | T-021, T-023 | Bonus feature — build after T-023 is solid. |
 | T-025 | Rehearse full pipeline end-to-end, unattended, on 3+ training-set incidents (incl. a non-revenue metric) | all | — | todo | — | T-019, T-022, T-023 | Validates the "unseen incident" readiness before Day 2. No hand-tuning during this. |
+| T-026 | Diagnosis output template: the exact prose the system emits, one golden example per cause channel | Biz | sam | doing | dev/sam/biz-specs | — | **Highest-leverage business task — do first.** This is the spec T-019 implements and the thing judges actually read. Six worked examples (demand / supply / technical / mix / seasonality / exogenous), each with headline, decomposition, localization, ruled-out block, and a "so what" line. Lands in `pitch/diagnosis-template.md`. |
+| T-027 | Channel classification rules: what evidence assigns a movement to which of the six channels | Biz | sam | doing | dev/sam/biz-specs | T-026 | Business-language decision table feeding T-018. E.g. "advertiser last-seen inside the window + unfilled requests up in their segment → demand change." Must be deterministic enough for Lane A to code without judgement calls. |
+| T-028 | Ruled-out phrasing standard + confidence language | Biz | sam | todo | — | T-026 | The demo's wow moment is a *negative*, so the wording carries it. "Checked and cleared at 6.1σ", never "probably fine". Also fixes how we say "insufficient data to call this" without sounding broken. |
+| T-029 | Positioning: propose § 1 amendment + a "why this is different" subsection | Biz | sam | todo | — | — | § 1 is LOCKED and T-001 is loges' — this goes to BROADCAST as a proposal, not a direct edit. Current one-liner describes the commodity (drill-down); the differentiator is cause-classification + dollar pricing + willingness to say "no action". Also proposes incident-memory as a § 5 second-act item. |
+| T-030 | Demo incident shortlist: query loaded data, pick the 3 incidents that best tell the story | Biz | sam | todo | — | T-008 | Business judgement on narrative, not just effect size. Needs one clean demand-change, one technical break, and the seasonality decoy. Feeds T-010 and T-025. |
+| T-031 | Confirm a mix-shift (Simpson's paradox) case exists in the data | Biz | sam | todo | — | T-008 | **Do this early — it is a risk, not a task.** Blended metric down while every segment is flat is our sharpest differentiator (D-010). If no such case is planted, we either construct a defensible one for the demo or drop that beat. Escalate to BROADCAST either way. |
+| T-032 | Like-for-like benchmark rules: what a fair comparison set is per vertical / tier / format | Biz | sam | todo | — | T-030 | Stops us comparing a tier_3 utility app to a tier_1 gaming app and calling the gap an anomaly. Feeds T-033. |
+| T-033 | Repeatability verdict thresholds: repeatable / event-dependent / saturated / declining + spend ceiling rule | Biz | sam | todo | — | T-032 | The "can I spend on this again" second act. Must state its own limits inline — efficiency and repeatability, not ROAS (R-011). Only if M3 lands early. |
+| T-034 | `external_events` taxonomy + the confirm-once labelling flow | Biz | sam | todo | — | — | Event *types* and the human-confirmation loop, per D-009. Note the dataset is synthetic, so no real-world calendar applies — this defines the shape and the flow, not real match dates. |
+| T-035 | Solution summary, ≤500 words | Biz | sam | todo | — | T-025 | Hard submission deliverable. Write after a real run exists so every number in it is true. |
+| T-036 | Pitch deck, ≤15 slides | Biz | sam | todo | — | T-029, T-030 | Hard submission deliverable. Lead with the "so what", not the architecture. |
+| T-037 | Demo video script: narration, beat timings, what is on screen when | Biz | sam | todo | — | T-010, T-030 | Distinct from T-011 (the recording). ≤5 min hard cap — script to 4:30 so the recording has slack. |
+| T-038 | Judging-rubric coverage checklist: map every deliverable to every scoring criterion | Biz | sam | todo | — | — | Cheap insurance. Five criteria, and "no trace, no credit" is absolute. Run it once at M3 and again at M4 to find gaps while there is still time to fix them. |
+| T-039 | Value quantification: leak-duration counterfactual for the deck | Biz | sam | todo | — | T-030 | "Detected 09:14 vs the human's 14:30 — 5h of leak avoided, $11k." Makes our own ROI a computed number rather than a claim. One slide, near-zero code. |
 
 ## Done
 
