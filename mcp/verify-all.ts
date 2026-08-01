@@ -54,6 +54,16 @@ const GATES: Gate[] = [
     summary: (o) => lastMatch(o, /gated accuracy\s+\S+\s+\S+/g),
   },
   {
+    name: "narrate",
+    what: "the narrating model obeys the contract — every printed number from the ledger",
+    cmd: ["bun", "run", "narrate"],
+    slow: true,
+    // Exit 2 = no API key configured. A setup state, not a defect.
+    skipCode: 2,
+    summary: (o) =>
+      lastMatch(o, /(Narrator obeys the contract[^\n]*|\d+ narration failure\(s\)[^\n]*|no API key configured[^\n]*)/g),
+  },
+  {
     name: "parity",
     what: "the same investigation, rollup vs raw — every recorded number identical",
     cmd: ["bun", "run", "parity"],

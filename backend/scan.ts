@@ -119,7 +119,23 @@ export interface ScanResult {
   segments: IncidentWindow[];
 }
 
-export const DEFAULT_METRICS = ["revenue", "requests", "fill_rate", "ecpm", "ctr"];
+/**
+ * Metrics the unprompted sweep looks at.
+ *
+ * `rpr` and `render_rate` were defined in metrics.ts and never swept, which left two real blind spots:
+ *
+ *   `rpr` (revenue per request) is the end-to-end money metric — revenue normalised for volume. A
+ *   quality collapse masked by a traffic increase moves rpr and leaves revenue flat, and revenue is
+ *   what we swept, so that incident was invisible by construction.
+ *
+ *   `render_rate` is a whole funnel stage: bought and then never displayed. The synthetic dataset
+ *   plants exactly that break and the sweep could not see it on its own metric — it surfaced only
+ *   through correlated windows on other metrics, which is luck rather than detection.
+ *
+ * `impressions` stays out deliberately: it is close to requests x fill_rate x render_rate, so it adds
+ * correlated firings without adding a signal, and precision is the weaker half of our score.
+ */
+export const DEFAULT_METRICS = ["revenue", "requests", "fill_rate", "ecpm", "ctr", "rpr", "render_rate"];
 
 export async function scanAll(metrics: string[] = DEFAULT_METRICS): Promise<ScanResult> {
   return withSpan(
