@@ -505,9 +505,18 @@ async function investigateInner(opts: InvestigateOptions): Promise<Investigation
         ? `no segment moved beyond its own normal range.`
         : `${metric} moved ${det.deltaPct.toFixed(1)}% but no segment cleared the significance gates.`;
 
-  // Nothing survived Stage 3b, so there is no cause to own and no action to assign. Saying so is
-  // the point: this is the path the seasonality decoy has to take.
+  // Nothing survived Stage 3b, so there is no cause to own. What that MEANS depends entirely on
+  // whether the platform itself moved.
+  //
+  //   platform inside its own band -> nothing happened. "No action." This is the decoy's path.
+  //   platform genuinely moved      -> something happened and we could not attribute it. That is
+  //                                    `not_localizable`, and it is owned by platform/on-call.
+  //
+  // Collapsing both into `no_anomaly` reported ctr on 2026-06-23 -- a real -8.8% platform move --
+  // as "No action.", which is a miss dressed as an all-clear. Failing to localize is not the same
+  // as finding nothing, and only one of the two is safe to stay quiet about.
   const noCause = !res.uniform && res.causes.length === 0;
+  const channel = noCause ? (platformInBand ? "no_anomaly" : "not_localizable") : cls.channel;
 
   if (platformInBand) {
     // The platform verdict is itself a finding, and it is the one that keeps the seasonality decoy
@@ -532,7 +541,7 @@ async function investigateInner(opts: InvestigateOptions): Promise<Investigation
 
   return {
     request: { metric, from, to },
-    primaryChannel: noCause ? "no_anomaly" : cls.channel,
+    primaryChannel: channel,
     headline: scopeNote + headline,
     findings,
     ruledOut,
