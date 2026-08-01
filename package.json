@@ -6,7 +6,7 @@
   "scripts": {
     "start": "bun run main.ts",
     "dev": "bun --watch main.ts",
-    "serve": "OTEL_SERVICE_NAME=clickhouse-inmobi-api bun run api/server.ts",
+    "serve": "bun run observability/collector.ts && OTEL_SERVICE_NAME=clickhouse-inmobi-api bun run api/server.ts",
     "serve:dev": "OTEL_SERVICE_NAME=clickhouse-inmobi-api bun --watch api/server.ts",
     "otel:collector": "bun run observability/collector.ts",
     "otel:collector:stop": "docker rm -f clickstack-collector",
