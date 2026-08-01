@@ -43,3 +43,42 @@ your Name cell in `AGENTS.md` §1. Note: this corrects an earlier informal draft
 (ClickStack) and dev-4 (LibreChat) swapped — if you were already working under the swapped
 assignment, stop and re-check which lane is actually yours.
 **Commit:** branch `dev/loges/kickoff-goal`
+
+### 2026-08-01 14:45 — sam — proposed scope addition: residualization (T-040), affects Lane A
+**What changed:** `goal.md` § 5 gains a residualization bullet, decision row **D-017** carries the
+evidence, and `TASKS.md` gains **T-040** (residualization) and **T-041** (mix-vs-rate split).
+Nothing in anyone's lane was edited. T-018 is untouched — T-040 sits *after* it, it does not
+replace it.
+
+**Why, with numbers.** I ran the drill-down by hand against the loaded data for the Jun 23–25
+fill-rate incident. A plain contribution-ranked sweep returns **21 segments** outside band:
+
+    os_version=Android 15   0.7837 -> 0.4333   -35.04pp   (9.6% of traffic)
+    region=EU               0.7850 -> 0.7300    -5.50pp
+    publisher_tier=tier_1   0.9121 -> 0.8732    -3.89pp
+    app_category=finance    0.7687 -> 0.7311    -3.76pp
+    ad_format=banner        0.8232 -> 0.7867    -3.65pp   ... and 16 more
+
+Re-running the identical sweep with `os_version != 'Android 15'` excluded:
+
+    region=EU               -0.07pp      publisher_tier=tier_1   +0.01pp
+    ad_format=banner        -0.15pp      publisher_tier=tier_3   -0.16pp
+    every dimension, every value:  within +/-0.24pp
+
+Twenty of those 21 were never causes. They were dilution — Android 15 is ~9.6% of traffic, so its
+collapse drags every blended slice it appears in down by ~3pp. **One cause, twenty false leads.**
+
+**Who is affected:** Lane A (`loges`) — this is your stage, your call. Lane D indirectly: the
+diagnosis message needs a "cleared" list, not just a cause list.
+
+**What you must do:** accept or reject T-040. If you reject it, please say so here so I stop
+building the demo narrative on it. My argument for accepting: reporting those 20 segments is
+precisely the "hallucinated segment" failure the rubric punishes hardest, it is an *algorithm*
+problem that no amount of better narration fixes, and the ruled-out list the rubric asks for as a
+bonus falls out of the deflation loop for free. Cost is ~2–4 extra ClickHouse round trips.
+
+**Caveat, stated plainly:** greedy deflation assumes one dominant cause per pass. Genuinely
+independent co-occurring causes need the loop to run to convergence rather than stopping at one —
+that is handled, but it is the part most likely to be wrong, and it is worth a test.
+
+**Commit:** branch `dev/sam/biz-specs`
