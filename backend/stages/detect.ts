@@ -32,6 +32,13 @@ export interface Detection {
   /** Percentage points, for ratio metrics only. */
   deltaPp: number | null;
   sigma: number;
+  /**
+   * The spread was the MIN_COEFF_VARIATION floor, not the observed MAD — so `sigma` above is
+   * `deltaPct / 0.5` by construction and carries no information the size gate did not already have.
+   * See the `floored` note in baseline.ts. A caller deciding how much to trust a bare platform move
+   * must read this: a floored detection passed one gate twice, not two gates once.
+   */
+  spreadFloored: boolean;
   anomalous: boolean;
   reason: string;
   evidenceIds: string[];
@@ -128,10 +135,11 @@ ORDER BY event_date`.trim();
   // Growth is estimated from every day the query returned, not from the baseline points alone —
   // four points cannot support a trend estimate (see estimateWeeklyGrowth).
   const wholeSeries = new Map(rows.map((r) => [r.d, num(r)]));
-  const { centre: baselineMean, spread: baselineStd } = trendAwareBaseline(
-    basePoints,
-    estimateWeeklyGrowth(wholeSeries),
-  );
+  const {
+    centre: baselineMean,
+    spread: baselineStd,
+    floored: spreadFloored,
+  } = trendAwareBaseline(basePoints, estimateWeeklyGrowth(wholeSeries));
 
   const deltaAbs = perDayIncident - baselineMean;
   const deltaPct = baselineMean === 0 ? 0 : (deltaAbs / baselineMean) * 100;
@@ -222,6 +230,7 @@ ORDER BY event_date`.trim();
       deltaPct,
       deltaPp,
       sigma,
+      spreadFloored,
       anomalous: false,
       reason: `Insufficient baseline: ${baseVals.length} same-weekday observation(s), need ${MIN_BASELINE_DAYS}.`,
       evidenceIds,
@@ -241,6 +250,9 @@ ORDER BY event_date`.trim();
     "app.detect.baseline_days": baseVals.length,
     "app.detect.delta_pct": Number(deltaPct.toFixed(4)),
     "app.detect.sigma": Number(sigma.toFixed(3)),
+    // Filterable, because "which of our detections were carried by the floor rather than by a
+    // measured spread" is the question that separates a real signal from a restated size gate.
+    "app.detect.spread_floored": spreadFloored,
     "app.detect.refused": false,
   });
 
@@ -256,6 +268,7 @@ ORDER BY event_date`.trim();
     deltaPct,
     deltaPp,
     sigma,
+    spreadFloored,
     anomalous,
     reason,
     evidenceIds,

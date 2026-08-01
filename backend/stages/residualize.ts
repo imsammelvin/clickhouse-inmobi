@@ -37,6 +37,45 @@ export const CAUSE_MIN_PP = 2.0;
 export const CAUSE_MIN_PCT = 5.0;
 export const CAUSE_MIN_SHARE_PCT = 0.5;
 
+/**
+ * Percentage points of the PLATFORM metric a segment must account for before it can be named the
+ * cause of a platform move.
+ *
+ * Everything else here asks "did this segment move?". This asks the question a reader actually
+ * means by *cause*: "if this segment had not moved, would the platform number look different?" A
+ * segment can clear every other gate and still answer no, because share is not in any of them.
+ *
+ * This is what let the seasonality decoy through. On 2026-06-27 platform revenue is up 4.4% —
+ * an ordinary Saturday whose sigma is manufactured by the spread floor (see baseline.ts) — and the
+ * top candidate was `country|ad_format='IN|banner'`, +9.7% on 2.1% of traffic. It cleared the size
+ * gate, the share gate, and 2.5 sigma against its own history at 19.4 sigma (also floored), and it
+ * moves the platform total by 0.20pp. Naming it the cause of a 4.4% move is a fabrication, and the
+ * rubric costs a fabricated figure more than a missed anomaly.
+ *
+ * Measured across everything we have, as |deltaPct| x share:
+ *
+ *     Android 15  -44.8% on 9.6%   4.30pp     <- real
+ *     finance     -35.0% on 7.2%   2.52pp     <- real
+ *     iOS 18.1    -11.6% on 9.8%   1.13pp     <- real, the weakest one
+ *     IN|banner    +9.7% on 2.1%   0.20pp     <- decoy
+ *     AE|banner   +10.0% on 1.7%   0.17pp     <- decoy
+ *     PH|rewarded +10.8% on 0.9%   0.10pp     <- decoy
+ *
+ * 0.5 sits between 0.20 and 1.13 at roughly their geometric mean, so it is not pressed against
+ * either side — the nearest real cause has 2.3x of headroom and the nearest decoy 2.5x. Note that
+ * no threshold on magnitude alone could do this: the decoys move ~10% and iOS 18.1 moves 11.6%.
+ * Share is the only thing that separates them, which is why it belongs in the gate and not just in
+ * the ranking.
+ */
+export const CAUSE_MIN_PLATFORM_PP = 0.5;
+
+/**
+ * Percentage points of the platform metric this segment's move accounts for.
+ * Share-weighted on purpose — a huge move on nothing is nothing.
+ */
+export const platformPointsMoved = (c: Candidate): number =>
+  Math.abs(c.deltaPct) * (c.sharePct / 100);
+
 /** Below this, a segment counts as "returned to normal" after deflation. */
 export const RESIDUAL_BAND_PP = 0.75;
 export const RESIDUAL_BAND_PCT = 2.0;
@@ -253,6 +292,8 @@ async function residualizeInner(
     if (!after.some((c) => qualifies(c, platformDelta))) break;
   }
 
+  await orderBySurvival(ledger, metric, from, to, causes);
+
   const causeKeys = new Set(causes.map((c) => `${c.dimension}|${c.value}`));
   const contamKeys = new Set(contamination.map((c) => `${c.dimension}|${c.value}`));
   const normal = initial.filter(
@@ -261,4 +302,70 @@ async function residualizeInner(
   );
 
   return { causes, contamination, normal, uniform: false, iterations };
+}
+
+/**
+ * Reorder surviving causes by how much of each is left once the OTHERS are excluded. In place.
+ *
+ * The loop above admits causes in contribution order, and contribution is the wrong tie-breaker
+ * between two causes that overlap. Incident C on its auto-detected window (ecpm, 2026-06-16..22) is
+ * the case: `ad_format='interstitial'` scores -7.5% x 17.4% = 1.31 and `app_category='finance'`
+ * scores -18.6% x 5.9% = 1.10, so interstitial leads by 19% and became the headline — while finance,
+ * the planted incident, was demoted to a second line. Hand the same investigation the narrower
+ * window a human would pick and finance wins; nothing about the data changed except which window
+ * the sweep derived, which is exactly the input nobody controls on the unseen dataset.
+ *
+ * Contribution cannot separate them because interstitial's move IS finance leaking into it —
+ * finance ads run heavily as interstitials, so the parent's collapse drags the format. Deflation
+ * already knows how to tell a cause from its shadow, and the answer is what survives exclusion:
+ *
+ *     finance      -34.5%  ->  -33.7%  with interstitial removed   (survives)
+ *     interstitial  -7.1%  ->   -4.7%  with finance removed        (two thirds of it was finance)
+ *
+ * So each cause is re-measured against a sweep with every other cause masked out, and they are
+ * ordered by what remains. This is the same test the loop already applies to contamination, turned
+ * on the survivors — the difference being that a survivor keeps its move and merely reorders, where
+ * contamination loses its move and is dropped.
+ *
+ * Costs one sweep per cause and only runs when there are at least two, so the single-cause case —
+ * incidents A and D — pays nothing.
+ */
+async function orderBySurvival(
+  ledger: Ledger,
+  metric: string,
+  from: string,
+  to: string,
+  causes: Candidate[],
+): Promise<void> {
+  if (causes.length < 2) return;
+
+  const key = (c: Candidate): string => `${c.dimension}|${c.value}`;
+  const survival = new Map<string, number>();
+
+  for (const c of causes) {
+    const others = causes.filter((o) => o !== c);
+    const mask = others.reduce<Mask>(
+      (m, o) =>
+        andMask(m, {
+          sql: segmentExclusion(o.dimension, o.value),
+          description: `excluding ${o.dimension} = '${o.value}'`,
+        }),
+      NO_MASK,
+    );
+    const after = await localize(ledger, metric, from, to, mask);
+    const self = after.find((a) => key(a) === key(c));
+    // Absent from the re-sweep means it fell under the volume floor once the others were removed,
+    // which is itself a failure to survive — rank it last rather than crediting its raw move.
+    survival.set(key(c), self ? magnitude(self) : 0);
+    ledger.record({
+      label: `survival.${c.dimension}.${c.value}`,
+      value: Number((self ? magnitude(self) : 0).toFixed(4)),
+      unit: c.deltaPp !== null ? "pp" : "pct",
+      sql: self?.sql ?? c.sql,
+      window: { from, to },
+      filters: { mask: mask.description },
+    });
+  }
+
+  causes.sort((a, b) => (survival.get(key(b)) ?? 0) - (survival.get(key(a)) ?? 0));
 }

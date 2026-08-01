@@ -11,7 +11,12 @@ import { METRICS } from "./metrics";
 import { detect } from "./stages/detect";
 import { decompose } from "./stages/decompose";
 import { localize } from "./stages/localize";
-import { qualifies, residualize } from "./stages/residualize";
+import {
+  CAUSE_MIN_PLATFORM_PP,
+  platformPointsMoved,
+  qualifies,
+  residualize,
+} from "./stages/residualize";
 import { classify } from "./stages/classify";
 import { clusterWindows, groupIntoIncidents, scanSegments } from "./segments";
 import {
@@ -307,6 +312,17 @@ async function investigateInner(opts: InvestigateOptions): Promise<Investigation
     });
   }
 
+  /**
+   * The segment the deflation loop actually excluded, captured BEFORE the list is rewritten below.
+   *
+   * `res.contamination` is defined relative to it — "was -6.4pp, is +0.2pp once X is removed" — and
+   * every one of those notes read `once undefined = 'undefined' is excluded` the moment confirm
+   * cleared the whole cause list, which the materiality gate made an ordinary outcome rather than an
+   * impossible one. The residuals were still measured against a real exclusion; only the name was
+   * lost, so the fix is to keep the name rather than to suppress the rows.
+   */
+  const deflatedAgainst = res.causes[0];
+
   // Replace the cause list with the confirmed one for every downstream stage.
   res.causes.length = 0;
   res.causes.push(...confirmed);
@@ -317,8 +333,23 @@ async function investigateInner(opts: InvestigateOptions): Promise<Investigation
   // with its numbers recorded as evidence first (the same pattern used for `res.contamination`
   // below) -- printing a number in a note without recording it is exactly the "grounding" failure
   // this codebase is built to prevent.
-  const material = res.causes.filter((c) => c.sharePct >= MIN_MATERIAL_SHARE_PCT);
-  const immaterial = res.causes.filter((c) => c.sharePct < MIN_MATERIAL_SHARE_PCT);
+  //
+  // Two ways to be material, and a cause needs only ONE of them. T-046's share floor is the first:
+  // a slice under 5% of traffic is not an incident however loudly it moves. The second is the
+  // platform points it accounts for, |deltaPct| x share — see CAUSE_MIN_PLATFORM_PP.
+  //
+  // OR, not AND, and the distinction decides Day-2 misses. Both tests reject the decoy
+  // (`country|ad_format='IN|banner'`, 2.1% share, 0.22pp) and both accept all four training
+  // incidents, so on everything measured they agree and the choice looks free. It is not: ANDing
+  // them takes the stricter of the two everywhere, which throws away the case the second test
+  // exists for — a narrow, violent segment. A 3%-share slice collapsing 50% moves 1.5pp of the
+  // platform, more than incident D's real cause does, and a bare share floor would file it as
+  // noise. The unseen slice is a fresh draw from the same universe; nothing promises its planted
+  // anomalies sit on the same 7-10% slices ours happened to.
+  const isMaterial = (c: (typeof res.causes)[number]): boolean =>
+    c.sharePct >= MIN_MATERIAL_SHARE_PCT || platformPointsMoved(c) >= CAUSE_MIN_PLATFORM_PP;
+  const material = res.causes.filter(isMaterial);
+  const immaterial = res.causes.filter((c) => !isMaterial(c));
   for (const c of immaterial) {
     ledger.record({
       label: `immaterial.${c.dimension}.${c.value}.delta`,
@@ -332,6 +363,16 @@ async function investigateInner(opts: InvestigateOptions): Promise<Investigation
       label: `immaterial.${c.dimension}.${c.value}.share_pct`,
       value: Number(c.sharePct.toFixed(4)),
       unit: "pct",
+      sql: c.sql,
+      window: { from, to },
+      filters: { segment: `${c.dimension}='${c.value}'` },
+    });
+    // The second test's figure. A cause is dropped only when BOTH fail, so a note quoting the share
+    // alone states half the reason -- and the half it omits is the one that answers "so what".
+    ledger.record({
+      label: `immaterial.${c.dimension}.${c.value}.platform_pp`,
+      value: Number(platformPointsMoved(c).toFixed(4)),
+      unit: "pp",
       sql: c.sql,
       window: { from, to },
       filters: { segment: `${c.dimension}='${c.value}'` },
@@ -350,8 +391,10 @@ async function investigateInner(opts: InvestigateOptions): Promise<Investigation
       evidenceIds: [],
       note:
         `moved ${fmtDelta(c.deltaPp, c.deltaPct)} against its own history, but on only ` +
-        `${c.sharePct.toFixed(2)}% of traffic — too small a slice to call an incident ` +
-        `(floor: ${MIN_MATERIAL_SHARE_PCT}%).`,
+        `${c.sharePct.toFixed(2)}% of traffic, accounting for ` +
+        `${platformPointsMoved(c).toFixed(2)}pp of the platform metric — too small a slice to call ` +
+        `an incident (floor: ${MIN_MATERIAL_SHARE_PCT}% of traffic or ` +
+        `${CAUSE_MIN_PLATFORM_PP.toFixed(2)}pp of the metric).`,
     });
   }
   // Distinct from `noCause` below: this is specifically "found something, but it doesn't matter",
@@ -365,6 +408,14 @@ async function investigateInner(opts: InvestigateOptions): Promise<Investigation
       value: MIN_MATERIAL_SHARE_PCT,
       unit: "pct",
       sql: "configuration: backend/orchestrate.ts MIN_MATERIAL_SHARE_PCT",
+      window: { from, to },
+      filters: {},
+    });
+    ledger.record({
+      label: "gate.cause_min_platform_pp",
+      value: CAUSE_MIN_PLATFORM_PP,
+      unit: "pp",
+      sql: "configuration: backend/stages/residualize.ts CAUSE_MIN_PLATFORM_PP",
       window: { from, to },
       filters: {},
     });
@@ -497,8 +548,8 @@ async function investigateInner(opts: InvestigateOptions): Promise<Investigation
       evidenceIds: [],
       note:
         `${fmtDelta(c.deltaPp, c.deltaPct)} on the raw sweep, ` +
-        `${fmtDelta(c.residualPp, c.residualDelta)} once ${res.causes[0]?.dimension} = ` +
-        `'${res.causes[0]?.value}' is excluded — dilution, not a cause.`,
+        `${fmtDelta(c.residualPp, c.residualDelta)} once ${deflatedAgainst?.dimension} = ` +
+        `'${deflatedAgainst?.value}' is excluded — dilution, not a cause.`,
     });
   }
 
@@ -591,11 +642,20 @@ async function investigateInner(opts: InvestigateOptions): Promise<Investigation
           `${cause.sharePct.toFixed(1)}% of traffic). Worth ${fmtUsd(revPerDay)}/day.`
       : platformInBand
         ? `no segment moved beyond its own normal range.`
-        : filteredForMateriality
+        : // Two different reasons for "nothing to report", and they are not interchangeable.
+          // Materiality is checked first because it is the more specific statement: we found a
+          // segment, measured it, and it was too small to matter. Flooring is the weaker claim —
+          // the platform move itself was never established. Saying the second when the first is
+          // true would drop the fact that something was actually found and dismissed.
+          filteredForMateriality
           ? `${metric} moved ${det.deltaPct.toFixed(1)}% over ${from}..${to}, but the only segment ` +
             `that cleared significance was too small a slice of traffic to call an incident ` +
             `(floor: ${MIN_MATERIAL_SHARE_PCT}%).`
-          : `${metric} moved ${det.deltaPct.toFixed(1)}% but no segment cleared the significance gates.`;
+          : platformDet.spreadFloored
+            ? `${metric} moved ${det.deltaPct.toFixed(1)}% over ${from}..${to}, but its baseline is ` +
+              `too stable to measure a spread against, so that move is not established as abnormal ` +
+              `— and no segment moved enough of the platform to explain it.`
+            : `${metric} moved ${det.deltaPct.toFixed(1)}% but no segment cleared the significance gates.`;
 
   // Nothing survived Stage 3b, so there is no cause to own. What that MEANS depends entirely on
   // whether the platform itself moved.
@@ -608,8 +668,31 @@ async function investigateInner(opts: InvestigateOptions): Promise<Investigation
   // as "No action.", which is a miss dressed as an all-clear. Failing to localize is not the same
   // as finding nothing, and only one of the two is safe to stay quiet about.
   const noCause = !res.uniform && res.causes.length === 0;
+  /**
+   * A third route to "no action", alongside `platformInBand` and T-046's materiality filter.
+   *
+   * `not_localizable` is a real verdict with a real owner (platform / on-call), and it is correct
+   * when the platform demonstrably moved — ctr on 2026-06-23 fell 8.8% at 7.1 sigma against a
+   * MEASURED spread, and staying quiet about that would be a miss dressed as an all-clear.
+   *
+   * But when the spread was floored, sigma restated the size gate instead of corroborating it (see
+   * detect.ts `spreadFloored`), so "the platform moved abnormally" was never actually established —
+   * one gate passed twice. The only thing that could still make it real is a segment big enough to
+   * have caused it, and `noCause` says there is none. Escalating on that pair is how 2026-06-27,
+   * a normal Saturday at +4.4%, became a paged supply_change owned by Publisher ops.
+   *
+   * This and `filteredForMateriality` catch that Saturday by different routes and neither subsumes
+   * the other: materiality fires when a segment was found and dismissed, this fires when the
+   * platform move was never credible to begin with — including when localization returns nothing at
+   * all and there is no segment to dismiss.
+   *
+   * Deliberately narrow: it needs BOTH a floored spread AND nothing material underneath. A floored
+   * detection with a real cause (incident A is floored at the platform level) still reports its
+   * cause, and an unfloored move with no cause is still `not_localizable`.
+   */
+  const unestablished = noCause && platformDet.spreadFloored;
   const channel = noCause
-    ? platformInBand || filteredForMateriality
+    ? platformInBand || filteredForMateriality || unestablished
       ? "no_anomaly"
       : "not_localizable"
     : cls.channel;
