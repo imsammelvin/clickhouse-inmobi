@@ -108,7 +108,7 @@ export const METRIC_EXPORT_INTERVAL_MS = 5_000;
 export const APP_WORKLOAD_INTERVAL_S = 15;
 
 /** Port the HTTP API listens on. */
-export const API_PORT = Number(process.env[EnvVar.Port] ?? 3000);
+export const API_PORT = Number(process.env[EnvVar.Port] ?? 2345);
 
 /**
  * How many consecutive ports to try when API_PORT is taken. A stale `bun run serve` holding the

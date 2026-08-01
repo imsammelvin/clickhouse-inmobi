@@ -396,13 +396,20 @@ const findIncidents: ToolDef = {
     const health = rollupHealth();
     const scan = health?.ready ? scanSegmentsRollup : scanSegments;
 
-    const firings = [];
-    for (const metric of metrics) {
-      // Growth is estimated from the whole daily series, never from a handful of baseline points:
-      // a 3-point fit once produced a phantom +213% at 427 sigma.
-      const growth = await weeklyGrowthFor(ledger, metric);
-      firings.push(...(await scan(ledger, metric, growth, window)));
-    }
+    // One metric's growth-estimate + segment sweep never depends on another's -- each is its own
+    // independent ClickHouse round trip against the same fixed window. Measured serially at 4.3-4.9s
+    // apiece for the raw-fallback path (~14s total for one find_incidents call); run concurrently.
+    // Same win applies whichever `scan` was picked above -- rollup makes each call cheap, this makes
+    // however many calls there are not stack serially.
+    const perMetric = await Promise.all(
+      metrics.map(async (metric) => {
+        // Growth is estimated from the whole daily series, never from a handful of baseline points:
+        // a 3-point fit once produced a phantom +213% at 427 sigma.
+        const growth = await weeklyGrowthFor(ledger, metric);
+        return scan(ledger, metric, growth, window);
+      }),
+    );
+    const firings = perMetric.flat();
     const windows = clusterWindows(groupIntoIncidents(firings));
 
     return {

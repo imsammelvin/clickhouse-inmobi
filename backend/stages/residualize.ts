@@ -339,22 +339,37 @@ async function orderBySurvival(
   if (causes.length < 2) return;
 
   const key = (c: Candidate): string => `${c.dimension}|${c.value}`;
-  const survival = new Map<string, number>();
 
-  for (const c of causes) {
-    const others = causes.filter((o) => o !== c);
-    const mask = others.reduce<Mask>(
-      (m, o) => andMask(m, exclusionMask(o.dimension, o.value)),
-      NO_MASK,
-    );
-    const after = await localize(ledger, metric, from, to, mask);
-    const self = after.find((a) => key(a) === key(c));
+  // Each cause's survival check excludes a different mask and reads nothing the others wrote --
+  // the sequential form paid one full localize() round trip per survivor back to back (measured:
+  // up to 4 extra 1.2-2.3s round trips stacked on a real trace). Independent, so run concurrently.
+  //
+  // The mask goes through `exclusionMask` rather than a literal: it records which dimensions the
+  // exclusion constrains, which is what lets a stage reading the rollup decide whether a
+  // materialised cut can express it (T-050). Both halves of this are load-bearing and they are
+  // orthogonal -- concurrency is about round trips, `dims` is about which table answers.
+  const checks = await Promise.all(
+    causes.map(async (c) => {
+      const others = causes.filter((o) => o !== c);
+      const mask = others.reduce<Mask>(
+        (m, o) => andMask(m, exclusionMask(o.dimension, o.value)),
+        NO_MASK,
+      );
+      const after = await localize(ledger, metric, from, to, mask);
+      const self = after.find((a) => key(a) === key(c));
+      return { c, mask, self };
+    }),
+  );
+
+  const survival = new Map<string, number>();
+  for (const { c, mask, self } of checks) {
     // Absent from the re-sweep means it fell under the volume floor once the others were removed,
     // which is itself a failure to survive — rank it last rather than crediting its raw move.
-    survival.set(key(c), self ? magnitude(self) : 0);
+    const value = self ? magnitude(self) : 0;
+    survival.set(key(c), value);
     ledger.record({
       label: `survival.${c.dimension}.${c.value}`,
-      value: Number((self ? magnitude(self) : 0).toFixed(4)),
+      value: Number(value.toFixed(4)),
       unit: c.deltaPp !== null ? "pp" : "pct",
       sql: self?.sql ?? c.sql,
       window: { from, to },

@@ -7,6 +7,7 @@
  */
 import { Ledger } from "./ledger";
 import { ensureDatasetBounds } from "./baseline";
+import { ensureRollupReady } from "../clickhouse/rollup";
 import { METRICS } from "./metrics";
 import { detect } from "./stages/detect";
 import { decompose } from "./stages/decompose";
@@ -112,6 +113,22 @@ async function investigateInner(opts: InvestigateOptions): Promise<Investigation
   const traceId = "";
   // Same reason as scanAll: bounds feed WHERE clauses downstream.
   await ensureDatasetBounds((sql) => ledger.run(sql));
+
+  /**
+   * Resolve rollup readiness here, for exactly the reason the bounds check is here.
+   *
+   * `planRollup` refuses to serve anything until the rollup has been proven to account for every
+   * event in `ad_events` — an unchecked rollup is treated as an absent one. That check lived only in
+   * `Session.ready()` on the MCP path, so `investigate()` reached directly — `bun run explain`,
+   * `criteria`, `parity`, any test — left it unresolved and **every stage silently fell back to the
+   * raw scan.** Not a wrong answer, but the whole point of T-050 was missing on half the entry
+   * points, and it was invisible because the numbers are identical either way.
+   *
+   * Found by sam's `bun run parity`, which reported `[raw]` while the MCP path was demonstrably
+   * rollup-served. That gate exists to catch a rollup that changes a number; it caught a rollup that
+   * was not being read at all, which is the failure one layer up.
+   */
+  await ensureRollupReady((sql) => ledger.run(sql));
   const findings: Finding[] = [];
   const ruledOut: Finding[] = [];
 
