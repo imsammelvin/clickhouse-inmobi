@@ -380,3 +380,55 @@ before declaring the load good.**
 filter validation and took the whole investigation down. Training data never produced a pair cause.
 
 **Commit:** on `dev/sam/mcp-confidentiality`
+
+### 2026-08-01 23:30 — sam — RETRACTION: three of the five defects I reported at 22:40 do not exist
+
+**loges, samarth — please read this before acting on my 22:40 entry.** I reported that the engine
+fabricates a cause on a uniform collapse and that "it can return zero causes" does not generalise.
+**That was wrong, and the fault was mine.**
+
+**What happened.** My synthetic dataset ran 40k events/day. The real one runs ~257k. At a sixth of
+production volume, segment-level sampling noise is large enough to manufacture an apparent cause inside
+a genuinely uniform move — so the harness was measuring its own noise and I read it as an engine
+defect. I also planted two deviations inside the first two weeks, where a same-weekday baseline cannot
+exist yet (`MIN_BASELINE_DAYS` needs two prior observations, so nothing before day 14 is detectable by
+construction), and read those misses as detector failures too.
+
+**Rebuilt at 260k events/day with the deviations moved past day 14 — 9.6M rows, same seed, same
+planted spec, same engine code:**
+
+    P1  fill collapse on os_version='iOS 18.4'   FOUND, localized, technical_break
+    P2  eCPM drop on app_category='banking'      FOUND, localized, demand_change
+    P3  uniform platform-wide request collapse   FOUND, not_localizable, NAMED NO SEGMENT
+    P4  CTR raised 65% on region='ISLANDS'       FOUND, named no segment
+    P5  render break on ad_format='rewarded'     FOUND, localized, technical_break
+    4 quiet days                                  all no_anomaly
+    0 unplanted windows touching a weekend        seasonality fully absorbed
+    gated failures                                0
+
+Unattributed windows fell from 29-of-50 to **4-of-20**, and all four are metrics moving UP, which the
+digest does not escalate.
+
+**So, corrected:**
+
+- **Finding 1 (fabricates a cause on a uniform collapse) — WITHDRAWN.** It returns `not_localizable`
+  and names nothing, exactly as designed. Your headline claim holds on a dataset it has never seen.
+- **Finding 2 (a rise diagnosed as a break) — WITHDRAWN.** Names no segment at production volume.
+- **Finding 3 (`render_rate` never swept) — DOWNGRADED.** It is genuinely absent from
+  `DEFAULT_METRICS`, but the break surfaces through correlated windows on other metrics and
+  `investigate` localizes it correctly to `ad_format='rewarded'`. Worth adding for directness; not the
+  blind spot I described.
+- **Finding 4 (precision) — DOWNGRADED** to 20% unattributed, all of them rises.
+- **Finding 5 (dictionary `LIFETIME(0)` serving blank dimensions) — STANDS, and is the one to act on.**
+  Unrelated to scale. samarth: `ch:verify` asserting a sample `dictGet` is non-empty would have saved
+  me an hour and would stop a Day-2 load looking clean while every dimension is empty.
+
+**One new finding worth keeping, and it is not a bug:** the first ~14 days of any slice are
+undetectable, because a same-weekday baseline needs two prior weeks. On the Day-2 slice, anything
+planted in its first fortnight is invisible to us. That is inherent to like-for-like baselining and
+the right response is to say so, not to widen the baseline.
+
+**Harness hardened so this cannot recur:** default volume now matches production, `verify.ts` refuses
+to score when dimensions are blank, and `spec.ts` documents the blind zone with the two false reports
+that taught me it. My lesson, plainly: **a test harness sized below production measures its own noise**,
+and I should have run the scale sensitivity before writing a defect report, not after.

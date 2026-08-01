@@ -200,7 +200,12 @@ LIFETIME(MIN 30 MAX 60)`,
  */
 function eventStatement(): string {
   const maxGrowth = (1 + SHAPE.weeklyGrowth) ** (SHAPE.days / 7);
-  const pool = Math.round(SHAPE.baseEventsPerDay * SHAPE.days * 1.2);
+  // Overridable so the same planted deviations can be scored at production scale. Segment-level
+  // sampling noise shrinks with volume, so a uniformity or significance test can pass at 250k
+  // events/day and fail at 40k — which is a fact about the test, not about the engine, and the only
+  // way to tell them apart is to run both.
+  const perDay = Number(arg("events-per-day") ?? SHAPE.baseEventsPerDay);
+  const pool = Math.round(perDay * SHAPE.days * 1.2);
 
   const weekend =
     `if(toDayOfWeek(toDate('${SHAPE.from}') + day_idx) IN (6, 7), ${SHAPE.weekendVolumeFactor}, 1.0)`;

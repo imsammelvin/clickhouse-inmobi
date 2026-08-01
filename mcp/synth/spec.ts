@@ -35,8 +35,19 @@ export const SHAPE = {
   seed: 20260802,
   from: "2026-09-01",
   days: 35,
-  /** Before weekend, growth and planted effects are applied. */
-  baseEventsPerDay: 40_000,
+  /**
+   * Before weekend, growth and planted effects are applied.
+   *
+   * Matched to the real dataset's ~257k/day on purpose, and this is not a detail. The first version
+   * used 40k, and at that volume segment-level sampling noise manufactured a "cause" inside a
+   * genuinely uniform collapse and inside a metric that had merely risen — so the harness reported two
+   * fabrication defects that do not exist, and I passed them to the team. At 260k both cases come back
+   * correct, and unattributed windows fall from 29-of-50 to 4-of-20.
+   *
+   * A test harness sized below production does not test production; it measures its own noise. Override
+   * with `--events-per-day` to explore the sensitivity deliberately, never by accident.
+   */
+  baseEventsPerDay: 260_000,
   apps: 1_200,
   advertisers: 400,
   geoDevices: 3_000,
@@ -148,8 +159,8 @@ export const PLANTED: Planted[] = [
   {
     id: "P4-ctr-rise-region",
     what: "CTR on region='ISLANDS' raised to 165% of normal for 2 days",
-    fromDay: 9,
-    toDay: 10,
+    fromDay: 19,
+    toDay: 20,
     segment: { dimension: "region", value: "ISLANDS" },
     metric: "ctr",
     factor: 1.65,
@@ -167,8 +178,8 @@ export const PLANTED: Planted[] = [
   {
     id: "P5-render-break-format",
     what: "render rate on ad_format='rewarded' cut to 70% of normal for 2 days",
-    fromDay: 4,
-    toDay: 5,
+    fromDay: 32,
+    toDay: 33,
     segment: { dimension: "ad_format", value: "rewarded" },
     metric: "render_rate",
     factor: 0.7,
@@ -183,8 +194,28 @@ export const PLANTED: Planted[] = [
   },
 ];
 
-/** Days that carry no planted deviation at all — nothing here may be reported as an incident. */
-export const CLEAN_DAYS: number[] = [1, 2, 20, 33];
+/**
+ * Days that carry no planted deviation — nothing here may be reported as an incident.
+ *
+ * All chosen at day 14 or later, for the same reason the deviations are: see BLIND_ZONE_DAYS.
+ */
+export const CLEAN_DAYS: number[] = [14, 21, 28, 34];
+
+/**
+ * The first two weeks of any dataset are undetectable, and that is a property of the method rather
+ * than a bug.
+ *
+ * Detection compares a day against the same weekday in preceding weeks and requires two such
+ * observations (`MIN_BASELINE_DAYS`). Day 0 has none, day 7 has one, and only from day 14 does a
+ * second exist. So nothing planted before day 14 can be found, by construction.
+ *
+ * This cost two false bug reports. P4 was planted on day 9 and P5 on day 4, both missed, and both
+ * looked like detector failures — one of them looked like proof that a whole metric was unswept. The
+ * dataset simply had no baseline there. Anything planted from here on sits at day 14 or later, and the
+ * same caveat applies to the real Day-2 slice: incidents in its first fortnight are invisible, which is
+ * worth saying out loud rather than discovering under time pressure.
+ */
+export const BLIND_ZONE_DAYS = 14;
 
 /** Weekend day offsets, for the seasonality assertion. */
 export function weekendOffsets(): number[] {

@@ -229,12 +229,32 @@ async function resolveStatus(
    * fired it. Being above normal is not a failure to recover from a drop — and the growth trend can
    * only ever push a day the harmless way.
    */
-  const incidentDeviation = median(
-    [...byDay.keys()]
-      .filter((d) => d >= from && d <= to)
-      .map(deviation)
-      .filter((v): v is number => v !== null),
-  );
+  const windowDeviations = [...byDay.keys()]
+    .filter((d) => d >= from && d <= to)
+    .map(deviation)
+    .filter((v): v is number => v !== null);
+
+  /**
+   * No baseline is not the same as no movement.
+   *
+   * `median([])` returns 0, so an empty list silently became "+0.0% from its same-weekday normal,
+   * inside the band" — a confident measurement, produced by having measured nothing. It happens
+   * whenever a window is early in the dataset: a Thursday in week two has exactly one prior Thursday,
+   * below the two-observation floor, so every day in the window yields null. Caught on the synthetic
+   * set at 2026-09-10, and it would hit any incident in the first fortnight of a fresh Day-2 slice.
+   */
+  if (windowDeviations.length === 0) {
+    return {
+      status: "not_applicable",
+      detail:
+        `No same-weekday history for ${from}..${to} — the window is too early in the loaded data to ` +
+        `have ${MIN_BASELINE_DAYS} prior observations of the same weekday, so whether this has ` +
+        `recovered cannot be established either way. This is missing evidence, not a normal reading.`,
+      daysRunning: null,
+    };
+  }
+
+  const incidentDeviation = median(windowDeviations);
   const dropped = incidentDeviation < 0;
 
   /**
