@@ -187,7 +187,12 @@ const getMetric: ToolDef = {
     "answer a level question ('what was fill rate for Android 15 in the EU last week, by day?'). " +
     "For 'did it change?' use compare_periods; for 'which is worst?' use rank_segments; for 'why " +
     "did it change?' use investigate. Rows below the reliability floor are returned with " +
-    "reliable=false and a note rather than dropped — report the caveat, do not quote the number bare.",
+    "reliable=false and a note rather than dropped — report the caveat, do not quote the number bare. " +
+    // Repeated here rather than left to describe_data: a model that jumps straight to this tool never
+    // sees the caveat otherwise, and averaging a rate across rows is the easiest way to produce a
+    // confidently wrong number from correct data.
+    "Every ratio is sum/sum over its own group: never average these values across rows or days to " +
+    "get a total — call again without group_by, or at the granularity you want.",
   inputSchema: {
     type: "object",
     properties: {
@@ -238,9 +243,14 @@ const comparePeriodsTool: ToolDef = {
     "Compare a metric between a window and a baseline, and rank what moved. This is the 'did it " +
     "change / how does this week compare / what moved the most' tool. By default the baseline is " +
     "the same weekday(s) in preceding weeks, which is the only like-for-like comparison in this " +
-    "data — pass baseline_from/baseline_to only if the user named a specific comparison period. " +
-    "Group by a dimension to get the biggest movers. It tells you WHAT moved; it does not " +
-    "distinguish a cause from its shadow — use investigate for that.",
+    "data — traffic has a strong weekly cycle, so comparing a Saturday against the preceding weekdays " +
+    "invents an incident every weekend. Pass baseline_from/baseline_to only if the user named a " +
+    "specific comparison period. Group by a dimension to get the biggest movers. " +
+    // Also stated in describe_data, but a model that starts here would not have seen it, and this is
+    // the tool whose output most invites reading a trend as a break.
+    "The dataset has a real +6.4% growth trend across its span: a rise of a few percent is usually " +
+    "that trend, not an incident. It tells you WHAT moved; it does not distinguish a cause from its " +
+    "shadow — use investigate for that.",
   inputSchema: {
     type: "object",
     properties: {

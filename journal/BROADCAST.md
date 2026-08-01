@@ -245,3 +245,36 @@ per session inside `Session.run` now, so no entry point can forget it. samarth: 
 constants into SQL should confirm they call it.**
 
 **Commits:** `b61762d` and predecessors on `dev/sam/mcp-server`
+
+### 2026-08-01 21:20 — sam — Lane D: check whether LibreChat surfaces `instructions`, and how to fix it if not
+
+**One thing to verify on the first real connection, and a one-command fallback.**
+
+The MCP server returns an `instructions` block from `initialize`. That is the answer-style contract the
+narrator reads before any tool result — lead with the verdict and the dollars, plain English, never
+re-derive a number, report "no anomaly" as the answer. It is what makes chat answers crisp instead of
+JSON dumps.
+
+**`instructions` is advisory in the MCP spec.** A client may surface it, ignore it, or truncate it, and
+several ignore it outright. I have not verified LibreChat's behaviour and cannot from here. If it is
+dropped the tools still work perfectly — the failure is silent and cosmetic-looking, but it means
+nothing is telling the model to stop re-deriving numbers, which is a criterion-2 risk, not a styling one.
+
+**How to check:** connect, ask something vague like "how are we doing?", and see whether the answer
+leads with a verdict and dollars or with a restatement of the question and a wall of JSON.
+
+**If it is dropped:**
+
+    bun run mcp:prompt > sys.md      # then paste into the agent's system prompt
+
+That prints the exact string the server serves, from the single place it is defined — verified
+byte-identical to the wire. **Please do not retype or summarise it into a config file**, or the served
+contract and the pasted one drift and nobody notices which is live.
+
+**Also hardened, no action needed from you:** the two data caveats that could otherwise produce a
+confidently wrong answer from correct numbers are now repeated in the descriptions of the tools they
+apply to, so they arrive whether or not the model calls `describe_data` first — ratios are sum/sum and
+must never be averaged across rows (`get_metric`), and the dataset's real +6.4% growth trend means a
+few percent up is the trend not an incident (`compare_periods`). Cost ~75 tokens.
+
+**Commit:** on `dev/sam/mcp-server`

@@ -21,6 +21,7 @@
     "diagnose": "OTEL_SERVICE_NAME=clickhouse-inmobi-diagnose bun run mcp/diagnose.ts",
     "mcp:stdio": "OTEL_SERVICE_NAME=clickhouse-inmobi-mcp bun run mcp/server.ts --transport stdio",
     "mcp:http": "OTEL_SERVICE_NAME=clickhouse-inmobi-mcp bun run mcp/server.ts --transport http",
+    "mcp:prompt": "bun run mcp/prompt.ts",
     "mcp:eval": "OTEL_SERVICE_NAME=clickhouse-inmobi-mcp-eval bun run mcp/eval/run.ts",
     "typecheck": "tsc --noEmit",
     "criteria": "bun run backend/criteria.ts",

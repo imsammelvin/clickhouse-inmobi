@@ -21,6 +21,7 @@ bun run diagnose            # THE unattended path: sweep -> rank -> investigate 
 bun run mcp:http            # LibreChat and anything else with a URL -> :3333/mcp
 bun run mcp:stdio           # local desktop client
 bun run mcp:eval            # accuracy scorecard, exits non-zero on a gated miss
+bun run mcp:prompt          # print the answer-style contract (for a client that ignores it)
 ```
 
 ## `bun run diagnose` — the unattended path
@@ -169,6 +170,29 @@ It is load-bearing, not documentation: lead with the verdict and the dollars, pl
 re-derive a number, never quote an unreliable row bare, report a no-anomaly verdict as *the answer*.
 The wording follows [`pitch/diagnosis-template.md`](../pitch/diagnosis-template.md) § 1 so the chat
 and the deck say the same thing the same way.
+
+> ⚠️ **`instructions` is advisory in the MCP spec** — a client may surface it, ignore it, or truncate
+> it, and several ignore it. If LibreChat drops it, the tools still work but nothing tells the model to
+> be crisp or to stop re-deriving numbers. **Check this on the first real connection.** If it is
+> dropped, paste the contract into the agent's system prompt using
+> `bun run mcp:prompt > sys.md` — that command prints the exact string the server serves, from the one
+> place it is defined, so a pasted copy cannot drift. Do not retype it into a config file.
+
+### Where the model's context actually comes from
+
+| Source | Size | Arrives |
+| --- | --- | --- |
+| `initialize` → `instructions` — how to answer | ~640 tok | once, at handshake (advisory — see above) |
+| `tools/list` → tool descriptions — when to call what | ~3.5k tok | once, always |
+| `describe_data` → date range, formulas, dimensions, caveats | ~600 tok | on demand, **only if called** |
+| `prompts/get` → `diagnose` / `daily_briefing` | small | when a user picks one |
+
+Because `describe_data` is opt-in, the two caveats that would otherwise produce a confidently wrong
+answer are repeated in the descriptions of the tools they apply to, where the model always sees them:
+ratios are sum/sum over their own group and must never be averaged across rows (`get_metric`), and the
+dataset's real +6.4% growth trend means a rise of a few percent is the trend rather than an incident
+(`compare_periods`). The `advertiser_id` trap needs no such help — it is enforced in code as a
+refusal.
 
 Two prompts ship the same style as one-click entry points: `diagnose` (metric + window) and
 `daily_briefing` (sweep, then diagnose the most valuable window — the unattended path).
