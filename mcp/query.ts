@@ -217,33 +217,6 @@ function reliability(
 
 const num = (v: unknown): number => Number(v ?? 0);
 
-/**
- * Rewrite a metric expression into its conditional form so two windows are aggregated in one pass:
- * `sum(revenue)` -> `sumIf(revenue, is_a)`.
- *
- * Deliberately stricter than the equivalent in backend/stages/localize.ts, which regex-replaces and
- * would silently mangle an expression shape it did not anticipate. Every current METRICS entry is
- * one of the three forms below; a future metric that is not fails loudly here instead of returning
- * a wrong number quietly. (Not shared with localize.ts because backend/ is another lane's file.)
- */
-function conditional(expr: string, cond: string): string {
-  if (expr === "1") return "1";
-  if (expr === "count()") return `countIf(${cond})`;
-  const m = /^sum\(([A-Za-z_][A-Za-z0-9_]*)\)$/.exec(expr.trim());
-  if (m) return `sumIf(${m[1]}, ${cond})`;
-  throw new QueryError(
-    `Cannot express metric expression "${expr}" as a conditional aggregate. ` +
-      `Add an explicit case to mcp/query.ts rather than comparing windows in two passes.`,
-  );
-}
-
-const conditionalMetric = (def: MetricDef, cond: string): string => {
-  const n = conditional(def.numerator, cond);
-  if (def.kind === "absolute") return n;
-  const d = conditional(def.denominator, cond);
-  return `${n} / nullIf(${d}, 0)${def.scale !== 1 ? ` * ${def.scale}` : ""}`;
-};
-
 // ---------------------------------------------------------------------------------------------
 // measure
 // ---------------------------------------------------------------------------------------------
@@ -464,23 +437,67 @@ export async function comparePeriods(ledger: Ledger, args: CompareArgs): Promise
   const isCur = `event_date BETWEEN '${current.from}' AND '${current.to}'`;
   const isBase = `event_date IN (${sqlDateList(baseDates)})`;
 
-  // Per-day medians on the baseline side, not a pooled mean: a prior incident sitting in the
-  // baseline window wrecks a mean, and this dataset has one (Jun 21) inside several baselines.
+  /**
+   * Aggregate PER DAY first, then take the median across days on each side.
+   *
+   * The obvious one-pass form — `sumIf(revenue, is_base)` against `sumIf(revenue, is_cur)` — is
+   * wrong for any absolute metric, and wrong by a factor of (baseline days / window days). It cost
+   * an afternoon to find: comparing one Saturday against its three same-weekday priors reported
+   * platform revenue at -65%, because it was comparing one day's revenue with three days' total.
+   * Ratio metrics hid the bug completely, being scale-invariant in the number of days pooled, so
+   * fill-rate answers looked correct throughout.
+   *
+   * The median across days is the second reason for this shape: a prior incident inside the
+   * baseline wrecks a mean, and this dataset has one (Jun 21) sitting in several baselines. Ratios
+   * are formed from the median numerator over the median denominator, componentwise — the same
+   * construction backend/stages/decompose.ts settled on, so the two agree by design rather than by
+   * coincidence, and ratios stay sum/sum within a day as the glossary requires.
+   */
+  const ratio = def.kind === "ratio";
+  const value = (side: string): string =>
+    ratio
+      ? `${side}_num / nullIf(${side}_den, 0)${def.scale !== 1 ? ` * ${def.scale}` : ""}`
+      : `${side}_num`;
+
   const sql = `
 SELECT ${[
     ...groupDims,
-    `${conditionalMetric(def, isCur)} AS cur_v`,
-    `${conditionalMetric(def, isBase)} AS base_v`,
-    `countIf(${isCur}) AS requests`,
-    `${conditional(def.numerator, isCur)} AS numerator`,
-    `${conditional(def.denominator, isCur)} AS denominator`,
-    `countIf(${isCur}) * 100.0 / nullIf(sum(countIf(${isCur})) OVER (), 0) AS share_pct`,
+    `${value("cur")} AS cur_v`,
+    `${value("base")} AS base_v`,
+    "cur_num, cur_den, base_num, base_den, requests, total_numerator, total_denominator",
+    "requests * 100.0 / nullIf(sum(requests) OVER (), 0) AS share_pct",
   ].join(",\n       ")}
-FROM ad_events_enriched
-WHERE (${isCur} OR ${isBase})
-  AND (${scope.sql})
-${groupDims.length ? `GROUP BY ${groupDims.join(", ")}` : ""}
-${groupDims.length ? "HAVING requests > 0" : ""}
+FROM (
+  SELECT ${[
+    ...groupDims,
+    // Median of each component across the days on each side, so both sides are per-day figures.
+    "quantileExactIf(0.5)(num_d, is_cur)  AS cur_num",
+    "quantileExactIf(0.5)(den_d, is_cur)  AS cur_den",
+    "quantileExactIf(0.5)(num_d, is_base) AS base_num",
+    "quantileExactIf(0.5)(den_d, is_base) AS base_den",
+    // Window totals, not medians: the reliability floors ask how many events actually landed.
+    "sumIf(reqs_d, is_cur) AS requests",
+    "sumIf(num_d, is_cur)  AS total_numerator",
+    "sumIf(den_d, is_cur)  AS total_denominator",
+  ].join(",\n         ")}
+  FROM (
+    SELECT ${[
+      ...groupDims,
+      "event_date AS d",
+      `${def.numerator} AS num_d`,
+      `${def.denominator} AS den_d`,
+      "count() AS reqs_d",
+      `(${isCur}) AS is_cur`,
+      `(${isBase}) AS is_base`,
+    ].join(",\n           ")}
+    FROM ad_events_enriched
+    WHERE (${isCur} OR ${isBase})
+      AND (${scope.sql})
+    GROUP BY ${[...groupDims, "event_date"].join(", ")}
+  )
+  ${groupDims.length ? `GROUP BY ${groupDims.join(", ")}` : ""}
+  ${groupDims.length ? "HAVING requests > 0" : ""}
+)
 ORDER BY ${groupDims.length ? "abs(cur_v - base_v) * requests DESC" : "1"}
 LIMIT ${limit + 1}`.trim();
 
@@ -493,8 +510,9 @@ LIMIT ${limit + 1}`.trim();
     const base = r.base_v === null ? null : num(r.base_v);
     const deltaPct = cur === null || base === null || base === 0 ? null : ((cur - base) / base) * 100;
     const deltaPp = def.kind === "ratio" && cur !== null && base !== null ? (cur - base) * 100 : null;
-    const numerator = num(r.numerator);
-    const denominator = num(r.denominator);
+    // Window totals, so the floors measure events that actually landed rather than a daily median.
+    const numerator = num(r.total_numerator);
+    const denominator = num(r.total_denominator);
     const { reliable, note } = reliability(def, numerator, denominator);
     const suffix = groupDims.length
       ? `.${groupDims.map((d) => `${d}=${group[d]}`).join(".")}`
