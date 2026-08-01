@@ -96,8 +96,8 @@ const describeData: ToolDef = {
     "sliceable dimension, and the data caveats that make certain questions unanswerable. Call it " +
     "once at the start of a conversation rather than guessing a metric or column name.",
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
-  handler: async (_args, ledger) => {
-    const o = await datasetOverview(ledger);
+  handler: async (_args, ledger, session) => {
+    const o = await session.getOverview(() => datasetOverview(ledger));
     return {
       summary: `${o.days} days, ${o.requests.toLocaleString()} requests`,
       payload: {

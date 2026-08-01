@@ -74,6 +74,8 @@ export class Session {
   private readonly tracePath: string;
   /** Memoized dataset-bounds resolution — see `ready()`. */
   private bounds?: Promise<unknown>;
+  /** Memoized `describe_data` result — see `getOverview()`. */
+  private overview?: Promise<unknown>;
 
   constructor(client?: ClickHouseClient, runId?: string) {
     this.client = client ?? makeClient();
@@ -100,6 +102,18 @@ export class Session {
       return bootstrap.run(sql);
     });
     return this.bounds;
+  }
+
+  /**
+   * Memoize a call-scoped read that is pure for the life of the session — the model is told to call
+   * `describe_data` once at the start of a conversation, but nothing stops it (or a multi-turn agent
+   * loop) asking again, and each ask was a full `ad_events_enriched` scan for the same fixed answer.
+   * Generic rather than typed to `DatasetOverview` specifically, same reason `bounds` above isn't:
+   * one memoization slot, reused for whichever pure per-session read needs it.
+   */
+  getOverview<T>(compute: () => Promise<T>): Promise<T> {
+    this.overview ??= compute();
+    return this.overview as Promise<T>;
   }
 
   private append(line: unknown): void {
@@ -220,7 +234,10 @@ export class Session {
   export(): { path: string; trace: SessionTrace } {
     const trace = this.snapshot();
     const path = join(TRACE_DIR, `trace-${this.runId}.json`);
-    writeFileSync(path, `${JSON.stringify({ ...trace, evidence: this.evidenceIndex() }, null, 2)}\n`);
+    writeFileSync(
+      path,
+      `${JSON.stringify({ ...trace, evidence: this.evidenceIndex() }, null, 2)}\n`,
+    );
     return { path, trace };
   }
 
@@ -240,7 +257,11 @@ export class Session {
   }
 
   async close(): Promise<void> {
-    this.append({ type: "session_end", at: new Date().toISOString(), totals: this.snapshot().totals });
+    this.append({
+      type: "session_end",
+      at: new Date().toISOString(),
+      totals: this.snapshot().totals,
+    });
     await this.client.close();
   }
 }
