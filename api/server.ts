@@ -127,6 +127,8 @@ const handleAdEventsCount = async (traceId: string): Promise<Response> => {
   if (!row.ok) {
     log.error("ad_events count failed", { "error.message": row.error.message });
 
+    log.info("Fetching ad_events count");
+
     const body: CountResponse = {
       status: "error",
       table: Table.AdEvents,
@@ -154,6 +156,10 @@ const handleAdEventsCount = async (traceId: string): Promise<Response> => {
     latencyMs: row.ms,
     traceId,
   };
+  log.info("Successfully fetched ad events count");
+  log.error("Sample error msg");
+  log.warn("Sample warn msg");
+  log.debug("Sample warn msg");
   return json(body, 200, traceId);
 };
 
