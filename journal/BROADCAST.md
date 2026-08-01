@@ -106,3 +106,60 @@ a channel and an owner. Suppressing it needs a materiality rule; dollars alone c
 from incident D ($1.50/day), share of traffic can (1.7% vs 9.8%). I deliberately did not ship a
 threshold tuned to split those two.
 **Commit:** `4e8a318` on `dev/samarth/relevance-fixes`
+
+### 2026-08-01 19:55 — sam — MCP server is up (T-021), one cross-lane defect found, two shared files touched
+
+**What changed:** new directory `mcp/` — MCP server exposing the engine as 10 tools, on branch
+`dev/sam/mcp-server`. This is the front door: LibreChat talks to it, it talks to `backend/`.
+Contract, tool table and JSON shapes are in **`mcp/README.md`** — that is the file to read, not this
+entry.
+
+**Lane note:** `mcp/` is Lane B's directory per goal.md § 6 and T-021 was unclaimed. I claimed it and
+built it because the front door was the gap, not the engine. Commits carry `Crosses-lane: dev-2`.
+samarth — if you want it back, say so here and I will stop.
+
+**Two shared files touched, announcing as § 2 requires:**
+- `package.json` — three new scripts, nothing else edited: `mcp:stdio`, `mcp:http`, `mcp:eval`.
+- `.gitignore` — ignores `mcp/traces/` (a trace is written on every tool call; keep an exhibit by
+  copying it into `pitch/` deliberately).
+
+---
+
+**A defect in `backend/orchestrate.ts`, which is not my file — reporting, not fixing (§ 9).**
+
+`investigate(metric='revenue', from='2026-06-27', to='2026-06-27')` returns channel
+`supply_change` and names `country|ad_format='IN|banner'` as the cause. Verified independently
+with three separate tool calls:
+
+    platform revenue Jun 27      434.42  vs  416.23 same-weekday baseline   =  +4.4%
+    Jun 20 (prev Saturday)       416.23 / 224,327 requests
+    Jun 27                       434.42 / 228,266 requests
+    Jul 04 (next Saturday)       440.87 / 232,726 requests
+    country|ad_format=IN|banner    2.13  vs    1.95                         =  +9.7%
+                                 4,764 of 228,266 requests                  =  2.09% of traffic
+
+Jun 27 is an ordinary Saturday, and the segment we blame moved **up 9.7% on 2.09% of traffic**,
+worth $2.13/day. So we emit a cause, a channel and an owner for a normal day. This is the
+seasonality-decoy failure the rubric punishes hardest, and it is the materiality gap samarth already
+flagged in the 18:20 entry ("dollars alone cannot separate it from incident D; share of traffic can")
+— this is a second, independently-found instance of it, on a different date and metric.
+
+**Who is affected:** loges (`backend/` owner), samarth (you flagged the underlying gap). Lane D
+indirectly: a chat client that renders `channel` and `findings` will show a cause on a normal day
+even when the narrative says the platform was in band.
+
+**What you must do:** nothing for me — my lane is unblocked and the eval reports it rather than
+hiding it. But this is worth a materiality rule before the demo. The input it needs is already in the
+payload: every finding carries `segmentSharePct`, and 2.09% vs incident D's 9.8% separates cleanly
+where dollars ($2.13 vs $1.50) do not. **Added as unclaimed T-046 in TASKS.md** — deliberately not
+claimed by me, since it is a threshold decision in your stage and your call.
+
+**Also worth knowing — a bug of the same family that WAS mine, now fixed (`10fc971`).**
+`compare_periods` aggregated each side with one conditional sum, so an absolute metric compared one
+day against the *total* of its three same-weekday priors: platform revenue on Jun 27 read **-65%**
+when it is +4.4%. Ratio metrics are scale-invariant in the number of days pooled and hid it
+completely — every fill-rate answer looked correct throughout, including one I had hand-checked
+against the dossier. Now aggregated per day with a median across days, ratios formed componentwise,
+matching `decompose.ts`. **If you compare windows anywhere else, check for this shape.**
+
+**Commits:** `ae94f77`, `4dd9416`, `10fc971` on `dev/sam/mcp-server`
