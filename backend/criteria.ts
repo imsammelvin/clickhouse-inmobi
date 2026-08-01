@@ -106,6 +106,65 @@ async function criterion1(): Promise<Outcome> {
   };
 }
 
+/**
+ * Criterion 1b — the same incidents, through the path a judge actually runs.
+ *
+ * This exists because the gate and the product disagreed. `scanAll` reported recall 4/4 while
+ * `bun run explain` answered "No anomaly. No action." for two of those same incidents, because
+ * segment detection lived only in the scan and `investigate` tested the platform series alone.
+ * The gate was verifying the scan; nobody scores the scan.
+ *
+ * Same lesson as the grounding check verifying arithmetic rather than relevance: a check is only
+ * worth what it actually exercises.
+ */
+async function criterion1b(): Promise<Outcome> {
+  const detail: string[] = [];
+  let pass = true;
+
+  for (const k of KNOWN_INCIDENTS) {
+    const from = k.dates[0]!;
+    const to = k.dates[k.dates.length - 1]!;
+    const ledger = new Ledger();
+    try {
+      const inv = await investigate({ metric: k.metric, from, to, ledger });
+      const surfaced = inv.primaryChannel !== "no_anomaly";
+      if (!surfaced) pass = false;
+      detail.push(
+        `  ${surfaced ? "OK  " : "FAIL"}  ${k.label.padEnd(28)} -> ${inv.primaryChannel}`,
+      );
+    } finally {
+      await ledger.close();
+    }
+  }
+
+  // The decoy has to survive the same path: a day where nothing happened must not become a finding.
+  const ledger = new Ledger();
+  try {
+    const inv = await investigate({
+      metric: "requests",
+      from: "2026-06-28",
+      to: "2026-06-28",
+      ledger,
+    });
+    const quiet =
+      !inv.headline.toLowerCase().includes("platform requests was normal") === false ||
+      inv.primaryChannel === "no_anomaly";
+    if (!quiet) pass = false;
+    detail.push(
+      `  ${quiet ? "OK  " : "FAIL"}  ${"E weekend decoy stays quiet".padEnd(28)} -> ${inv.primaryChannel}`,
+    );
+  } finally {
+    await ledger.close();
+  }
+
+  return {
+    id: 4,
+    name: "1b. Same incidents through the PRODUCT path (bun run explain), not just the scan",
+    pass,
+    detail,
+  };
+}
+
 async function criterion2(): Promise<Outcome> {
   const detail: string[] = [];
   let pass = true;
@@ -173,7 +232,12 @@ async function criterion3(): Promise<Outcome> {
 async function main(): Promise<void> {
   log.info("\nJUDGING CRITERIA GATE\n" + "=".repeat(72));
 
-  const outcomes = [await criterion1(), await criterion2(), await criterion3()];
+  const outcomes = [
+    await criterion1(),
+    await criterion1b(),
+    await criterion2(),
+    await criterion3(),
+  ];
 
   for (const o of outcomes) {
     // The verdict carries attributes so ClickStack can chart pass rate over time; the detail lines

@@ -89,7 +89,11 @@ interface Row {
  * inside the baseline window — the failure that produced a 427-sigma phantom when this was
  * attempted with a least-squares style fit.
  */
-function detectionSql(metric: string, weeklyGrowth: number): string {
+function detectionSql(
+  metric: string,
+  weeklyGrowth: number,
+  window?: { from: string; to: string },
+): string {
   const def = METRICS[metric]!;
   const dims = dimensionsFor(metric);
   const single = dims.map((d) => `('${d}', ${d})`);
@@ -139,6 +143,7 @@ FROM (
   )
 )
 WHERE abs(pct) >= ${SEGMENT_MIN_PCT} AND abs(sigma) >= ${SEGMENT_MIN_SIGMA}
+${window ? `  AND day BETWEEN '${window.from}' AND '${window.to}'` : ""}
 ORDER BY day, abs(pct) DESC`.trim();
 }
 
@@ -146,8 +151,10 @@ export async function scanSegments(
   ledger: Ledger,
   metric: string,
   weeklyGrowth: number,
+  window?: { from: string; to: string },
 ): Promise<SegmentFiring[]> {
-  const rows = await ledger.run<Row>(detectionSql(metric, weeklyGrowth));
+  // The baseline still needs the full history; only the OUTPUT is restricted to the window.
+  const rows = await ledger.run<Row>(detectionSql(metric, weeklyGrowth, window));
   return rows.map((r) => ({
     metric,
     dimension: r.dim,

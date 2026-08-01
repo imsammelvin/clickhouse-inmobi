@@ -18,7 +18,7 @@
  */
 import type { Ledger } from "../ledger";
 import { type Candidate, localize } from "./localize";
-import { type Mask, NO_MASK, andMask } from "../types";
+import { type Mask, NO_MASK, andMask, segmentExclusion } from "../types";
 
 export interface ResidualizeResult {
   causes: Candidate[];
@@ -60,8 +60,20 @@ export function qualifies(c: Candidate): boolean {
  * localized: the platform moved and every slice inherited it. Incident B sits at roughly -45% +/-2
  * across 40 values, which is unmistakably this shape.
  */
+/** Share below which a segment is too small to inform the uniformity verdict. */
+const UNIFORMITY_MIN_SHARE_PCT = 1;
+
+/** Single predicate for "counts toward the uniformity verdict", used by the test and its evidence. */
+const informsUniformity = (c: Candidate): boolean =>
+  magnitude(c) > 1 && c.sharePct >= UNIFORMITY_MIN_SHARE_PCT;
+
 function isUniform(cands: Candidate[]): { uniform: boolean; note: string } {
-  const moved = cands.filter((c) => magnitude(c) > 1);
+  // Judged only on segments large enough to be meaningful. Adding app_id put 2,000 thinly-traded
+  // candidates into the sweep, whose magnitudes scatter widely, and that scatter alone pushed the
+  // spread ratio past the threshold — so incident B stopped being recognised as uniform and the
+  // engine went back to naming a top segment. The platform-wide collapse is visible in the big
+  // slices; the long tail only adds noise to the test.
+  const moved = cands.filter(informsUniformity);
   if (moved.length < 8) return { uniform: false, note: "" };
 
   const mags = moved.map(magnitude).sort((a, b) => a - b);
@@ -96,7 +108,11 @@ export async function residualize(
   if (uniformity.uniform) {
     // The uniformity verdict quotes six figures in prose. Each is a claim about the data and each
     // must resolve, or the most important sentence we produce would be ungrounded.
-    const moved = initial.filter((c) => magnitude(c) > 1);
+    //
+    // MUST use the same predicate isUniform used. When the share floor was added there, this was
+    // left filtering on magnitude alone, so the recorded evidence described a different set of
+    // segments than the sentence did and three numerals went ungrounded. Shared predicate now.
+    const moved = initial.filter(informsUniformity);
     const mags = moved.map(magnitude).sort((a, b) => a - b);
     const med = mags[Math.floor(mags.length / 2)] ?? 0;
     const sqlRef = initial[0]?.sql ?? "";
@@ -143,7 +159,9 @@ export async function residualize(
     iterations++;
 
     mask = andMask(mask, {
-      sql: `${top.dimension} != '${top.value.replace(/'/g, "\\'")}'`,
+      // Via the shared builder: a pair dimension has to be split back into its two columns, and
+      // hand-rolling that here emitted `country|ad_format != 'ES|native'`, which is a syntax error.
+      sql: segmentExclusion(top.dimension, top.value),
       description: `excluding ${top.dimension} = '${top.value}'`,
     });
 

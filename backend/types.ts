@@ -96,6 +96,29 @@ export interface Mask {
 
 export const NO_MASK: Mask = { sql: "1", description: "no exclusions" };
 
+const esc = (v: string): string => v.replace(/'/g, "\\'");
+
+/**
+ * SQL predicate matching one segment, including the synthetic pair dimensions.
+ *
+ * Pairs are swept as `('region|os_version', concat(region,'|',os_version))`, which reads back as a
+ * single dimension called `region|os_version` with values like `EU|Android 15`. Naively rendering
+ * that as `region|os_version = 'EU|Android 15'` is a syntax error — a pair has to be split back
+ * into its two columns. Both the segment scope and residualize's exclusion mask go through here so
+ * there is exactly one place that has to be right.
+ */
+export function segmentPredicate(dimension: string, value: string): string {
+  const [dimA, dimB] = dimension.split("|");
+  if (!dimB) return `${dimension} = '${esc(value)}'`;
+  const [valA, valB] = value.split("|");
+  return `${dimA} = '${esc(valA ?? "")}' AND ${dimB} = '${esc(valB ?? "")}'`;
+}
+
+/** Its negation, for excluding a cause during deflation. */
+export function segmentExclusion(dimension: string, value: string): string {
+  return `NOT (${segmentPredicate(dimension, value)})`;
+}
+
 export function andMask(a: Mask, b: Mask): Mask {
   if (a.sql === "1") return b;
   return {

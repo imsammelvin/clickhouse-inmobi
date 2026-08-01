@@ -19,7 +19,13 @@ export interface Candidate {
   deltaAbs: number;
   deltaPct: number;
   deltaPp: number | null;
-  /** Share of in-window requests carried by this segment. */
+  /**
+   * Share of in-window PLATFORM requests carried by this segment.
+   *
+   * Deliberately not relative to the current mask. Scoped to a segment, a mask-relative share
+   * reported the cause as "on 100.0% of traffic", which is true of the scope and meaningless to a
+   * reader. "-39.64pp on 2.1% of traffic" is the fact that matters.
+   */
   sharePct: number;
   /**
    * Share of the platform-level delta this segment accounts for, given its size. This — not raw
@@ -84,7 +90,7 @@ SELECT
   ${conditional(expr, "is_inc")}  AS inc_v,
   countIf(is_inc)                 AS inc_reqs,
   (SELECT count() FROM ad_events_enriched
-    WHERE (${mask.sql}) AND event_date BETWEEN '${from}' AND '${to}') AS total_reqs
+    WHERE event_date BETWEEN '${from}' AND '${to}') AS total_reqs
 FROM (
   SELECT *,
          event_date BETWEEN '${from}' AND '${to}' AS is_inc,
