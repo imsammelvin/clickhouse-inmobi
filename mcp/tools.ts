@@ -474,7 +474,20 @@ const investigateTool: ToolDef = {
     const narrative = renderNarrative(inv);
     // The same check the criteria gate runs, on the same string a reader sees. Reported per answer
     // rather than only in CI: a caller is entitled to know whether this specific text is grounded.
+    // Computed against the FULL narrative/ruledOut, before the cap below -- capping is about what
+    // gets inlined into the tool result, not about what gets checked for trustworthiness.
     const grounding = checkGrounding(narrative, inv.evidence);
+
+    // `ruledOut` can run into the hundreds -- residualize can clear 800+ segments as dilution on a
+    // single window (observed: 832, on the flagship incident), and inlining every one as a full
+    // JSON object was the single largest driver of oversized LLM context seen in practice (one
+    // `investigate` call alone reached ~98k input tokens with this uncapped). Capped the same way
+    // `evidenceIds` already is below: top N in the order the engine found them, a count, and a
+    // pointer to where the rest live -- not a silent drop. `narrative` already states the true
+    // total ("N false lead(s) eliminated") regardless of this cap, so the human-readable answer
+    // does not change, only what gets inlined as raw JSON.
+    const SHOWN_RULED_OUT = 15;
+    const ruledOutShown = inv.ruledOut.slice(0, SHOWN_RULED_OUT);
 
     return {
       summary: `${inv.primaryChannel}: ${inv.headline.slice(0, 90)}`,
@@ -494,7 +507,16 @@ const investigateTool: ToolDef = {
         },
         action,
         findings: inv.findings,
-        ruledOut: inv.ruledOut,
+        ruledOut: ruledOutShown,
+        ruledOutCount: inv.ruledOut.length,
+        ...(inv.ruledOut.length > SHOWN_RULED_OUT
+          ? {
+              ruledOutNote:
+                `${inv.ruledOut.length - SHOWN_RULED_OUT} further ruled-out segment(s) not shown ` +
+                `here (each with its residual as proof) -- narrative above already states the true ` +
+                `total; call export_trace for the full list.`,
+            }
+          : {}),
         planSteps: inv.planSteps,
         evidenceCount: inv.evidence.length,
         traceId: inv.traceId,
