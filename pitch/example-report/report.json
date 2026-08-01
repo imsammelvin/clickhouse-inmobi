@@ -1,7 +1,7 @@
 {
-  "runId": "3ca0fdb4",
-  "generatedAt": "2026-08-01T15:20:27.156Z",
-  "wallMs": 90898,
+  "runId": "03bf6c2e",
+  "generatedAt": "2026-08-01T16:07:47.532Z",
+  "wallMs": 91743,
   "dataset": {
     "from": "2026-06-01",
     "to": "2026-07-05",
@@ -64,49 +64,49 @@
       "planSteps": [
         {
           "stage": "detect",
-          "startedAt": 1785597584519,
-          "ms": 74,
+          "startedAt": 1785600424470,
+          "ms": 76,
           "queries": 1,
           "summary": "-3.2% move at -6.4 sigma against 12 same-weekday days."
         },
         {
           "stage": "decompose",
-          "startedAt": 1785597584593,
-          "ms": 132,
+          "startedAt": 1785600424546,
+          "ms": 127,
           "queries": 2,
           "summary": "requests carries $22.64/day of $5.10/day."
         },
         {
           "stage": "localize",
-          "startedAt": 1785597584725,
-          "ms": 1435,
+          "startedAt": 1785600424673,
+          "ms": 1352,
           "queries": 1,
           "summary": "164 segment(s) outside band on a raw ranked sweep."
         },
         {
           "stage": "residualize",
-          "startedAt": 1785597586160,
-          "ms": 4283,
+          "startedAt": 1785600426025,
+          "ms": 4386,
           "queries": 4,
           "summary": "164 raw candidate(s) reduced to 4 cause(s); 824 cleared as contamination."
         },
         {
           "stage": "confirm",
-          "startedAt": 1785597590443,
-          "ms": 479,
+          "startedAt": 1785600430411,
+          "ms": 511,
           "queries": 4,
           "summary": "3 of 4 cause(s) significant against their own history; 1 within their own normal range."
         },
         {
           "stage": "classify",
-          "startedAt": 1785597591115,
-          "ms": 307,
+          "startedAt": 1785600431104,
+          "ms": 305,
           "queries": 2,
           "summary": "technical_break — owner: Engineering"
         },
         {
           "stage": "price",
-          "startedAt": 1785597591422,
+          "startedAt": 1785600431409,
           "ms": 0,
           "queries": 0,
           "summary": "-$20.45/day over 4 day(s)."
@@ -606,9 +606,9 @@
       ],
       "evidenceTotal": 1731,
       "callId": "c6",
-      "ms": 6909,
+      "ms": 6945,
       "queries": 16,
-      "otelTraceId": "3545cfe522ceb7590231d6732e644dbf"
+      "otelTraceId": "cfc534c79041be05594d0819cdfd775b"
     },
     {
       "rank": 2,
@@ -646,49 +646,49 @@
       "planSteps": [
         {
           "stage": "detect",
-          "startedAt": 1785597602616,
-          "ms": 4579,
+          "startedAt": 1785600442343,
+          "ms": 4592,
           "queries": 3,
           "summary": "platform series in band; segment sweep found app_category|ad_format='finance|interstitial' at -40.2% — investigating that. -21.3% move at -10.1 sigma against 15 same-weekday days."
         },
         {
           "stage": "decompose",
-          "startedAt": 1785597607195,
-          "ms": 133,
+          "startedAt": 1785600446935,
+          "ms": 150,
           "queries": 2,
           "summary": "requests carries $15.72/day of $16.45/day."
         },
         {
           "stage": "localize",
-          "startedAt": 1785597607328,
-          "ms": 2347,
+          "startedAt": 1785600447085,
+          "ms": 2617,
           "queries": 1,
           "summary": "35 segment(s) outside band on a raw ranked sweep."
         },
         {
           "stage": "residualize",
-          "startedAt": 1785597609675,
-          "ms": 7264,
+          "startedAt": 1785600449702,
+          "ms": 7411,
           "queries": 4,
           "summary": "35 raw candidate(s) reduced to 4 cause(s); 9 cleared as contamination."
         },
         {
           "stage": "confirm",
-          "startedAt": 1785597616939,
-          "ms": 564,
+          "startedAt": 1785600457113,
+          "ms": 601,
           "queries": 4,
           "summary": "2 of 4 cause(s) significant against their own history; 2 within their own normal range."
         },
         {
           "stage": "classify",
-          "startedAt": 1785597617648,
-          "ms": 233,
+          "startedAt": 1785600457945,
+          "ms": 235,
           "queries": 2,
           "summary": "demand_change — owner: Sales / account management"
         },
         {
           "stage": "price",
-          "startedAt": 1785597617881,
+          "startedAt": 1785600458180,
           "ms": 0,
           "queries": 0,
           "summary": "-$5.40/day over 7 day(s)."
@@ -1192,9 +1192,9 @@
       ],
       "evidenceTotal": 100,
       "callId": "c8",
-      "ms": 15267,
+      "ms": 15840,
       "queries": 18,
-      "otelTraceId": "4cf875dd61790011e27bf23b7aa69a2b"
+      "otelTraceId": "2e001e3bde605972ce6acc19a8e9f5b3"
     },
     {
       "rank": 3,
@@ -1233,49 +1233,49 @@
       "planSteps": [
         {
           "stage": "detect",
-          "startedAt": 1785597591433,
-          "ms": 3345,
+          "startedAt": 1785600431419,
+          "ms": 3262,
           "queries": 3,
           "summary": "platform series in band; segment sweep found region|os_version='APAC|iOS 18.1' at -51.3% — investigating that. -49.5% move at -28.6 sigma against 11 same-weekday days."
         },
         {
           "stage": "decompose",
-          "startedAt": 1785597594778,
-          "ms": 341,
+          "startedAt": 1785600434681,
+          "ms": 195,
           "queries": 2,
           "summary": "requests carries $27.17/day of $29.49/day."
         },
         {
           "stage": "localize",
-          "startedAt": 1785597595119,
-          "ms": 1272,
+          "startedAt": 1785600434876,
+          "ms": 1293,
           "queries": 1,
           "summary": "28 segment(s) outside band on a raw ranked sweep."
         },
         {
           "stage": "residualize",
-          "startedAt": 1785597596391,
-          "ms": 5260,
+          "startedAt": 1785600436169,
+          "ms": 5070,
           "queries": 4,
           "summary": "28 raw candidate(s) reduced to 4 cause(s); 13 cleared as contamination."
         },
         {
           "stage": "confirm",
-          "startedAt": 1785597601651,
-          "ms": 517,
+          "startedAt": 1785600441239,
+          "ms": 592,
           "queries": 4,
           "summary": "1 of 4 cause(s) significant against their own history; 3 within their own normal range."
         },
         {
           "stage": "classify",
-          "startedAt": 1785597602337,
-          "ms": 274,
+          "startedAt": 1785600442004,
+          "ms": 334,
           "queries": 2,
           "summary": "technical_break — owner: Engineering"
         },
         {
           "stage": "price",
-          "startedAt": 1785597602611,
+          "startedAt": 1785600442338,
           "ms": 0,
           "queries": 0,
           "summary": "-$1.50/day over 3 day(s)."
@@ -1777,9 +1777,9 @@
       ],
       "evidenceTotal": 112,
       "callId": "c7",
-      "ms": 11180,
+      "ms": 10922,
       "queries": 18,
-      "otelTraceId": "2fb60edac5fc905621f2181dae6d41d5"
+      "otelTraceId": "5713175931321e930752af739d10b48e"
     },
     {
       "rank": 4,
@@ -1814,49 +1814,49 @@
       "planSteps": [
         {
           "stage": "detect",
-          "startedAt": 1785597568197,
-          "ms": 96,
+          "startedAt": 1785600408109,
+          "ms": 101,
           "queries": 1,
           "summary": "-9.6% move at -2.7 sigma against 18 same-weekday days."
         },
         {
           "stage": "decompose",
-          "startedAt": 1785597568293,
-          "ms": 147,
+          "startedAt": 1785600408210,
+          "ms": 152,
           "queries": 2,
           "summary": "requests carries $23.42/day of $10.95/day."
         },
         {
           "stage": "localize",
-          "startedAt": 1785597568440,
-          "ms": 2317,
+          "startedAt": 1785600408362,
+          "ms": 2102,
           "queries": 1,
           "summary": "47 segment(s) outside band on a raw ranked sweep."
         },
         {
           "stage": "residualize",
-          "startedAt": 1785597570757,
-          "ms": 7717,
+          "startedAt": 1785600410464,
+          "ms": 7742,
           "queries": 4,
           "summary": "47 raw candidate(s) reduced to 4 cause(s); 1 cleared as contamination."
         },
         {
           "stage": "confirm",
-          "startedAt": 1785597578474,
-          "ms": 724,
+          "startedAt": 1785600418206,
+          "ms": 784,
           "queries": 4,
           "summary": "0 of 4 cause(s) significant against their own history; 4 within their own normal range."
         },
         {
           "stage": "classify",
-          "startedAt": 1785597579198,
+          "startedAt": 1785600418991,
           "ms": 1,
           "queries": 0,
           "summary": "no_anomaly — owner: Nobody"
         },
         {
           "stage": "price",
-          "startedAt": 1785597579199,
+          "startedAt": 1785600418992,
           "ms": 0,
           "queries": 0,
           "summary": "$10.95/day over 8 day(s)."
@@ -2090,9 +2090,9 @@
       ],
       "evidenceTotal": 50,
       "callId": "c3",
-      "ms": 11004,
+      "ms": 10888,
       "queries": 12,
-      "otelTraceId": "69beb1bf03acaba8bc55c18b6c71d08d"
+      "otelTraceId": "65a4189ca5bb38fd71cf83f94bda05d1"
     },
     {
       "rank": 5,
@@ -2125,49 +2125,49 @@
       "planSteps": [
         {
           "stage": "detect",
-          "startedAt": 1785597579202,
-          "ms": 46,
+          "startedAt": 1785600418996,
+          "ms": 50,
           "queries": 1,
           "summary": "-22.9% move at -3.2 sigma against 5 same-weekday days."
         },
         {
           "stage": "decompose",
-          "startedAt": 1785597579248,
-          "ms": 96,
+          "startedAt": 1785600419046,
+          "ms": 160,
           "queries": 2,
           "summary": "requests carries -$81.52/day of -$89.40/day."
         },
         {
           "stage": "localize",
-          "startedAt": 1785597579344,
-          "ms": 635,
+          "startedAt": 1785600419206,
+          "ms": 681,
           "queries": 1,
           "summary": "0 segment(s) outside band on a raw ranked sweep."
         },
         {
           "stage": "residualize",
-          "startedAt": 1785597579979,
-          "ms": 0,
+          "startedAt": 1785600419887,
+          "ms": 1,
           "queries": 0,
           "summary": "0 raw candidate(s) reduced to 0 cause(s); 0 cleared as contamination."
         },
         {
           "stage": "confirm",
-          "startedAt": 1785597579979,
+          "startedAt": 1785600419888,
           "ms": 0,
           "queries": 0,
           "summary": "0 of 0 cause(s) significant against their own history; 0 within their own normal range."
         },
         {
           "stage": "classify",
-          "startedAt": 1785597579979,
+          "startedAt": 1785600419888,
           "ms": 0,
           "queries": 0,
           "summary": "no_anomaly — owner: Nobody"
         },
         {
           "stage": "price",
-          "startedAt": 1785597579979,
+          "startedAt": 1785600419888,
           "ms": 0,
           "queries": 0,
           "summary": "-$89.40/day over 2 day(s)."
@@ -2385,9 +2385,9 @@
       ],
       "evidenceTotal": 19,
       "callId": "c4",
-      "ms": 778,
+      "ms": 893,
       "queries": 4,
-      "otelTraceId": "909ce5c650395df8fa87794da955d387"
+      "otelTraceId": "9c57427e0600034827ec532bccfb8481"
     },
     {
       "rank": 6,
@@ -2418,8 +2418,8 @@
       "planSteps": [
         {
           "stage": "detect",
-          "startedAt": 1785597579981,
-          "ms": 4537,
+          "startedAt": 1785600419890,
+          "ms": 4579,
           "queries": 3,
           "summary": "Within band: -7.2% (gate 3%), -1.9 sigma (gate 2.5)."
         }
@@ -2528,9 +2528,9 @@
       ],
       "evidenceTotal": 12,
       "callId": "c5",
-      "ms": 4538,
+      "ms": 4579,
       "queries": 3,
-      "otelTraceId": "f2f0562b8ffb774282e590fa51c96875"
+      "otelTraceId": "42d04074c09d2f26c490f5795cfb5654"
     }
   ],
   "skipped": [
@@ -2839,25 +2839,34 @@
         "callId": "c1",
         "stage": "describe_data",
         "queries": 1,
-        "serverMs": 86,
+        "serverMs": 85,
         "readRows": 9000000,
         "readBytes": 126299678,
-        "peakMemoryBytes": 203421761
+        "peakMemoryBytes": 201712591
       },
       {
         "callId": "c2",
         "stage": "find_incidents",
         "queries": 10,
-        "serverMs": 31092,
+        "serverMs": 31390,
         "readRows": 135000000,
         "readBytes": 1821861457,
-        "peakMemoryBytes": 889357445
+        "peakMemoryBytes": 889358469
+      },
+      {
+        "callId": "c3",
+        "stage": "detect",
+        "queries": 1,
+        "serverMs": 62,
+        "readRows": 6642335,
+        "readBytes": 79708020,
+        "peakMemoryBytes": 67542232
       },
       {
         "callId": "c3",
         "stage": "localize",
         "queries": 1,
-        "serverMs": 2081,
+        "serverMs": 2028,
         "readRows": 6642336,
         "readBytes": 72487796,
         "peakMemoryBytes": 682174085
@@ -2866,7 +2875,7 @@
         "callId": "c3",
         "stage": "confirm",
         "queries": 4,
-        "serverMs": 567,
+        "serverMs": 560,
         "readRows": 26569340,
         "readBytes": 205593876,
         "peakMemoryBytes": 98252442
@@ -2875,37 +2884,28 @@
         "callId": "c3",
         "stage": "residualize",
         "queries": 4,
-        "serverMs": 7371,
+        "serverMs": 7391,
         "readRows": 26569344,
         "readBytes": 341441879,
-        "peakMemoryBytes": 396636113
+        "peakMemoryBytes": 396636273
       },
       {
         "callId": "c3",
         "stage": "decompose",
         "queries": 2,
-        "serverMs": 81,
+        "serverMs": 80,
         "readRows": 6642335,
         "readBytes": 92992690,
-        "peakMemoryBytes": 89094872
-      },
-      {
-        "callId": "c3",
-        "stage": "detect",
-        "queries": 1,
-        "serverMs": 63,
-        "readRows": 6642335,
-        "readBytes": 79708020,
-        "peakMemoryBytes": 67542232
+        "peakMemoryBytes": 89093944
       },
       {
         "callId": "c4",
         "stage": "localize",
         "queries": 1,
-        "serverMs": 599,
+        "serverMs": 595,
         "readRows": 1663619,
         "readBytes": 18235291,
-        "peakMemoryBytes": 605546825
+        "peakMemoryBytes": 605546681
       },
       {
         "callId": "c4",
@@ -2923,58 +2923,49 @@
         "serverMs": 34,
         "readRows": 1663618,
         "readBytes": 23290652,
-        "peakMemoryBytes": 42353876
+        "peakMemoryBytes": 42353908
       },
       {
         "callId": "c5",
         "stage": "detect",
         "queries": 3,
-        "serverMs": 4341,
+        "serverMs": 4419,
         "readRows": 21212331,
         "readBytes": 384154753,
-        "peakMemoryBytes": 619330188
-      },
-      {
-        "callId": "c6",
-        "stage": "confirm",
-        "queries": 6,
-        "serverMs": 467,
-        "readRows": 21603085,
-        "readBytes": 216530204,
-        "peakMemoryBytes": 110798155
-      },
-      {
-        "callId": "c6",
-        "stage": "residualize",
-        "queries": 4,
-        "serverMs": 3981,
-        "readRows": 17282472,
-        "readBytes": 256679168,
-        "peakMemoryBytes": 390836999
+        "peakMemoryBytes": 619278389
       },
       {
         "callId": "c6",
         "stage": "localize",
         "queries": 1,
-        "serverMs": 1343,
+        "serverMs": 1285,
         "readRows": 4320618,
         "readBytes": 51700884,
-        "peakMemoryBytes": 676640787
+        "peakMemoryBytes": 676654416
+      },
+      {
+        "callId": "c6",
+        "stage": "residualize",
+        "queries": 4,
+        "serverMs": 3991,
+        "readRows": 17282472,
+        "readBytes": 256679168,
+        "peakMemoryBytes": 390774233
       },
       {
         "callId": "c6",
         "stage": "classify",
         "queries": 2,
-        "serverMs": 221,
+        "serverMs": 218,
         "readRows": 8641234,
         "readBytes": 125923018,
-        "peakMemoryBytes": 141553350
+        "peakMemoryBytes": 139106693
       },
       {
         "callId": "c6",
         "stage": "detect",
         "queries": 1,
-        "serverMs": 32,
+        "serverMs": 33,
         "readRows": 4320617,
         "readBytes": 21603085,
         "peakMemoryBytes": 46296134
@@ -2983,34 +2974,52 @@
         "callId": "c6",
         "stage": "decompose",
         "queries": 2,
-        "serverMs": 53,
+        "serverMs": 56,
         "readRows": 4320617,
         "readBytes": 60488638,
-        "peakMemoryBytes": 76314956
+        "peakMemoryBytes": 76325964
       },
       {
-        "callId": "c7",
-        "stage": "localize",
-        "queries": 1,
-        "serverMs": 1194,
-        "readRows": 3567285,
-        "readBytes": 42444352,
-        "peakMemoryBytes": 650173519
+        "callId": "c6",
+        "stage": "confirm",
+        "queries": 6,
+        "serverMs": 467,
+        "readRows": 21603085,
+        "readBytes": 216530204,
+        "peakMemoryBytes": 110837559
       },
       {
         "callId": "c7",
         "stage": "residualize",
+        "queries": 4,
+        "serverMs": 4680,
+        "readRows": 14269140,
+        "readBytes": 212359849,
+        "peakMemoryBytes": 352916968
+      },
+      {
+        "callId": "c7",
+        "stage": "confirm",
+        "queries": 6,
+        "serverMs": 491,
+        "readRows": 17836420,
+        "readBytes": 201858047,
+        "peakMemoryBytes": 94935948
+      },
+      {
+        "callId": "c7",
+        "stage": "classify",
         "queries": 2,
-        "serverMs": 2313,
-        "readRows": 7134570,
-        "readBytes": 97830639,
-        "peakMemoryBytes": 363993672
+        "serverMs": 204,
+        "readRows": 7134568,
+        "readBytes": 103787048,
+        "peakMemoryBytes": 107291236
       },
       {
         "callId": "c7",
         "stage": "detect",
         "queries": 3,
-        "serverMs": 3218,
+        "serverMs": 3154,
         "readRows": 16943695,
         "readBytes": 164015185,
         "peakMemoryBytes": 767610259
@@ -3019,30 +3028,48 @@
         "callId": "c7",
         "stage": "decompose",
         "queries": 2,
-        "serverMs": 53,
+        "serverMs": 50,
         "readRows": 3567284,
         "readBytes": 49941976,
-        "peakMemoryBytes": 63606832
+        "peakMemoryBytes": 63597552
+      },
+      {
+        "callId": "c7",
+        "stage": "localize",
+        "queries": 1,
+        "serverMs": 1199,
+        "readRows": 3567285,
+        "readBytes": 42444352,
+        "peakMemoryBytes": 650173519
+      },
+      {
+        "callId": "c8",
+        "stage": "detect",
+        "queries": 1,
+        "serverMs": 58,
+        "readRows": 5528253,
+        "readBytes": 71867289,
+        "peakMemoryBytes": 82554198
       }
     ],
     "totals": {
-      "queries": 55,
-      "serverMs": 59232,
-      "readRows": 343970353,
-      "readBytes": 4295877713,
-      "peakMemoryBytes": 889357445
+      "queries": 66,
+      "serverMs": 62572,
+      "readRows": 381604164,
+      "readBytes": 4787919307,
+      "peakMemoryBytes": 889358469
     }
   },
   "trace": {
-    "runId": "3ca0fdb4",
-    "startedAt": "2026-08-01T15:18:56.259Z",
+    "runId": "03bf6c2e",
+    "startedAt": "2026-08-01T16:06:15.789Z",
     "calls": [
       {
         "callId": "c1",
         "tool": "describe_data",
         "args": {},
         "ok": true,
-        "ms": 120,
+        "ms": 127,
         "queries": 1,
         "rowsReturned": [
           1
@@ -3050,9 +3077,9 @@
         "evidenceIds": [],
         "sqlHashes": [],
         "summary": "35 days, 9,000,000 requests",
-        "at": "2026-08-01T15:18:56.579Z",
-        "otelTraceId": "064474b331b192ef906f3781e676ea68",
-        "otelSpanId": "b7326423acfe942d"
+        "at": "2026-08-01T16:06:16.157Z",
+        "otelTraceId": "095e2a4ed37ddb4af407643787207844",
+        "otelSpanId": "079639a937b2f411"
       },
       {
         "callId": "c2",
@@ -3061,7 +3088,7 @@
           "limit": 50
         },
         "ok": true,
-        "ms": 31615,
+        "ms": 31947,
         "queries": 10,
         "rowsReturned": [
           35,
@@ -3078,9 +3105,9 @@
         "evidenceIds": [],
         "sqlHashes": [],
         "summary": "46 incident window(s) across 5 metric(s)",
-        "at": "2026-08-01T15:19:28.194Z",
-        "otelTraceId": "947e96586f44f5b3ef7bb8eb43606212",
-        "otelSpanId": "62eee3abe5685a85"
+        "at": "2026-08-01T16:06:48.104Z",
+        "otelTraceId": "2f9440bcb586566de2a184bcf850532f",
+        "otelSpanId": "73fb953b3f24bb7a"
       },
       {
         "callId": "c3",
@@ -3091,7 +3118,7 @@
           "to": "2026-06-26"
         },
         "ok": true,
-        "ms": 11004,
+        "ms": 10888,
         "queries": 12,
         "rowsReturned": [
           26,
@@ -3176,9 +3203,9 @@
           "5c1bca85a18e"
         ],
         "summary": "not_localizable: revenue moved -9.6% but no segment cleared the significance gates.",
-        "at": "2026-08-01T15:19:39.200Z",
-        "otelTraceId": "69beb1bf03acaba8bc55c18b6c71d08d",
-        "otelSpanId": "f584e5c0beeaebae"
+        "at": "2026-08-01T16:06:58.994Z",
+        "otelTraceId": "65a4189ca5bb38fd71cf83f94bda05d1",
+        "otelSpanId": "c53c2fe0fb2c45ae"
       },
       {
         "callId": "c4",
@@ -3189,7 +3216,7 @@
           "to": "2026-06-22"
         },
         "ok": true,
-        "ms": 778,
+        "ms": 893,
         "queries": 4,
         "rowsReturned": [
           7,
@@ -3226,9 +3253,9 @@
           "eb972d0a69f1"
         ],
         "summary": "not_localizable: requests moved -22.9% but no segment cleared the significance gates.",
-        "at": "2026-08-01T15:19:39.980Z",
-        "otelTraceId": "909ce5c650395df8fa87794da955d387",
-        "otelSpanId": "0d7ca1ff9af49788"
+        "at": "2026-08-01T16:06:59.889Z",
+        "otelTraceId": "9c57427e0600034827ec532bccfb8481",
+        "otelSpanId": "7f614e8dd4080183"
       },
       {
         "callId": "c5",
@@ -3239,7 +3266,7 @@
           "to": "2026-06-21"
         },
         "ok": true,
-        "ms": 4538,
+        "ms": 4579,
         "queries": 3,
         "rowsReturned": [
           21,
@@ -3267,9 +3294,9 @@
           "ef594bd03981"
         ],
         "summary": "no_anomaly: No anomaly. revenue was 463.39 against a same-weekday baseline of 499.61 (-1.9 sigma).",
-        "at": "2026-08-01T15:19:44.518Z",
-        "otelTraceId": "f2f0562b8ffb774282e590fa51c96875",
-        "otelSpanId": "87c524793878fe83"
+        "at": "2026-08-01T16:07:04.470Z",
+        "otelTraceId": "42d04074c09d2f26c490f5795cfb5654",
+        "otelSpanId": "3a495014890c65ef"
       },
       {
         "callId": "c6",
@@ -3280,7 +3307,7 @@
           "to": "2026-06-26"
         },
         "ok": true,
-        "ms": 6909,
+        "ms": 6945,
         "queries": 16,
         "rowsReturned": [
           16,
@@ -5052,9 +5079,9 @@
           "0de42f9702b2"
         ],
         "summary": "technical_break: fill_rate moved -3.2% over 2026-06-23..2026-06-26, driven by os_version = 'Android 15' (-2",
-        "at": "2026-08-01T15:19:51.429Z",
-        "otelTraceId": "3545cfe522ceb7590231d6732e644dbf",
-        "otelSpanId": "ac490c12da0c5f93"
+        "at": "2026-08-01T16:07:11.415Z",
+        "otelTraceId": "cfc534c79041be05594d0819cdfd775b",
+        "otelSpanId": "438384d67e2faa81"
       },
       {
         "callId": "c7",
@@ -5065,7 +5092,7 @@
           "to": "2026-06-30"
         },
         "ok": true,
-        "ms": 11180,
+        "ms": 10922,
         "queries": 18,
         "rowsReturned": [
           14,
@@ -5221,9 +5248,9 @@
           "ddd7affbb7ef"
         ],
         "summary": "technical_break: Platform fill_rate was normal (-0.5%, -1.0 sigma, within band). Below it, os_version = 'iO",
-        "at": "2026-08-01T15:20:02.613Z",
-        "otelTraceId": "2fb60edac5fc905621f2181dae6d41d5",
-        "otelSpanId": "4a86fcaeb09d417a"
+        "at": "2026-08-01T16:07:22.341Z",
+        "otelTraceId": "5713175931321e930752af739d10b48e",
+        "otelSpanId": "57838124c248a8ca"
       },
       {
         "callId": "c8",
@@ -5234,7 +5261,7 @@
           "to": "2026-06-22"
         },
         "ok": true,
-        "ms": 15267,
+        "ms": 15840,
         "queries": 18,
         "rowsReturned": [
           22,
@@ -5378,15 +5405,15 @@
           "d47b9da81309"
         ],
         "summary": "demand_change: Platform ecpm was normal (-1.2%, -2.5 sigma, within band). Below it, ad_format = 'intersti",
-        "at": "2026-08-01T15:20:17.883Z",
-        "otelTraceId": "4cf875dd61790011e27bf23b7aa69a2b",
-        "otelSpanId": "b2c03117b27c7669"
+        "at": "2026-08-01T16:07:38.184Z",
+        "otelTraceId": "2e001e3bde605972ce6acc19a8e9f5b3",
+        "otelSpanId": "000a4b85f1012ec0"
       }
     ],
     "totals": {
       "calls": 8,
       "queries": 82,
-      "ms": 81411,
+      "ms": 82141,
       "evidence": 2024
     }
   },

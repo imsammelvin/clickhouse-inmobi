@@ -1,11 +1,11 @@
 # Automated diagnosis — 2026-06-01 to 2026-07-05
 
-Produced unattended by `bun run diagnose` in 90.9s. Nobody supplied a metric or a window: the sweep found the incidents, ranked them, and investigated the top 6.
+Produced unattended by `bun run diagnose` in 91.7s. Nobody supplied a metric or a window: the sweep found the incidents, ranked them, and investigated the top 6.
 
 **Data:** 2026-06-01 to 2026-07-05 · 35 days · 9,000,000 requests · $17,020 revenue.
 **Sweep:** revenue, requests, fill_rate, ecpm, ctr · 46 firing window(s) → 30 distinct incident(s) after joining across metrics → 6 investigated.
 **Gates:** abs(change) >= 10% AND abs(sigma) >= 5, min 150 requests/day/segment
-**Run:** `3ca0fdb4`
+**Run:** `03bf6c2e`
 
 ## Summary
 
@@ -96,12 +96,12 @@ Diagnosed in 6.9s across 16 queries. 42/42 numerals in the text above resolve to
 
 | Stage | ms | Queries | Result |
 | --- | --- | --- | --- |
-| detect | 74 | 1 | -3.2% move at -6.4 sigma against 12 same-weekday days. |
-| decompose | 132 | 2 | requests carries $22.64/day of $5.10/day. |
-| localize | 1435 | 1 | 164 segment(s) outside band on a raw ranked sweep. |
-| residualize | 4283 | 4 | 164 raw candidate(s) reduced to 4 cause(s); 824 cleared as contamination. |
-| confirm | 479 | 4 | 3 of 4 cause(s) significant against their own history; 1 within their own normal range. |
-| classify | 307 | 2 | technical_break — owner: Engineering |
+| detect | 76 | 1 | -3.2% move at -6.4 sigma against 12 same-weekday days. |
+| decompose | 127 | 2 | requests carries $22.64/day of $5.10/day. |
+| localize | 1352 | 1 | 164 segment(s) outside band on a raw ranked sweep. |
+| residualize | 4386 | 4 | 164 raw candidate(s) reduced to 4 cause(s); 824 cleared as contamination. |
+| confirm | 511 | 4 | 3 of 4 cause(s) significant against their own history; 1 within their own normal range. |
+| classify | 305 | 2 | technical_break — owner: Engineering |
 | price | 0 | 0 | -$20.45/day over 4 day(s). |
 
 ## 2. ecpm — 2026-06-16 to 2026-06-22
@@ -138,7 +138,7 @@ RULED OUT
       ... and 3 more
 ```
 
-Diagnosed in 15.3s across 18 queries. 36/36 numerals in the text above resolve to a recorded evidence row.
+Diagnosed in 15.8s across 18 queries. 36/36 numerals in the text above resolve to a recorded evidence row.
 
 ### Receipts (30 of 100 rows)
 
@@ -179,12 +179,12 @@ Diagnosed in 15.3s across 18 queries. 36/36 numerals in the text above resolve t
 
 | Stage | ms | Queries | Result |
 | --- | --- | --- | --- |
-| detect | 4579 | 3 | platform series in band; segment sweep found app_category|ad_format='finance|interstitial' at -40.2% — investigating that. -21.3% move at -10.1 sigma against 15 same-weekday days. |
-| decompose | 133 | 2 | requests carries $15.72/day of $16.45/day. |
-| localize | 2347 | 1 | 35 segment(s) outside band on a raw ranked sweep. |
-| residualize | 7264 | 4 | 35 raw candidate(s) reduced to 4 cause(s); 9 cleared as contamination. |
-| confirm | 564 | 4 | 2 of 4 cause(s) significant against their own history; 2 within their own normal range. |
-| classify | 233 | 2 | demand_change — owner: Sales / account management |
+| detect | 4592 | 3 | platform series in band; segment sweep found app_category|ad_format='finance|interstitial' at -40.2% — investigating that. -21.3% move at -10.1 sigma against 15 same-weekday days. |
+| decompose | 150 | 2 | requests carries $15.72/day of $16.45/day. |
+| localize | 2617 | 1 | 35 segment(s) outside band on a raw ranked sweep. |
+| residualize | 7411 | 4 | 35 raw candidate(s) reduced to 4 cause(s); 9 cleared as contamination. |
+| confirm | 601 | 4 | 2 of 4 cause(s) significant against their own history; 2 within their own normal range. |
+| classify | 235 | 2 | demand_change — owner: Sales / account management |
 | price | 0 | 0 | -$5.40/day over 7 day(s). |
 
 ## 3. fill_rate — 2026-06-28 to 2026-06-30
@@ -225,7 +225,7 @@ RULED OUT
       ... and 7 more
 ```
 
-Diagnosed in 11.2s across 18 queries. 46/46 numerals in the text above resolve to a recorded evidence row.
+Diagnosed in 10.9s across 18 queries. 46/46 numerals in the text above resolve to a recorded evidence row.
 
 ### Receipts (30 of 112 rows)
 
@@ -266,12 +266,12 @@ Diagnosed in 11.2s across 18 queries. 46/46 numerals in the text above resolve t
 
 | Stage | ms | Queries | Result |
 | --- | --- | --- | --- |
-| detect | 3345 | 3 | platform series in band; segment sweep found region|os_version='APAC|iOS 18.1' at -51.3% — investigating that. -49.5% move at -28.6 sigma against 11 same-weekday days. |
-| decompose | 341 | 2 | requests carries $27.17/day of $29.49/day. |
-| localize | 1272 | 1 | 28 segment(s) outside band on a raw ranked sweep. |
-| residualize | 5260 | 4 | 28 raw candidate(s) reduced to 4 cause(s); 13 cleared as contamination. |
-| confirm | 517 | 4 | 1 of 4 cause(s) significant against their own history; 3 within their own normal range. |
-| classify | 274 | 2 | technical_break — owner: Engineering |
+| detect | 3262 | 3 | platform series in band; segment sweep found region|os_version='APAC|iOS 18.1' at -51.3% — investigating that. -49.5% move at -28.6 sigma against 11 same-weekday days. |
+| decompose | 195 | 2 | requests carries $27.17/day of $29.49/day. |
+| localize | 1293 | 1 | 28 segment(s) outside band on a raw ranked sweep. |
+| residualize | 5070 | 4 | 28 raw candidate(s) reduced to 4 cause(s); 13 cleared as contamination. |
+| confirm | 592 | 4 | 1 of 4 cause(s) significant against their own history; 3 within their own normal range. |
+| classify | 334 | 2 | technical_break — owner: Engineering |
 | price | 0 | 0 | -$1.50/day over 3 day(s). |
 
 ## 4. revenue — 2026-06-19 to 2026-06-26
@@ -296,7 +296,7 @@ RULED OUT
       app_category|os_version = 'news|iOS 17.5'  -3.1% on the raw sweep, -1.6% once undefined = 'undefined' is excluded — dilution, not a cause.
 ```
 
-Diagnosed in 11.0s across 12 queries. 16/16 numerals in the text above resolve to a recorded evidence row.
+Diagnosed in 10.9s across 12 queries. 16/16 numerals in the text above resolve to a recorded evidence row.
 
 ### Receipts (14 of 50 rows)
 
@@ -321,11 +321,11 @@ Diagnosed in 11.0s across 12 queries. 16/16 numerals in the text above resolve t
 
 | Stage | ms | Queries | Result |
 | --- | --- | --- | --- |
-| detect | 96 | 1 | -9.6% move at -2.7 sigma against 18 same-weekday days. |
-| decompose | 147 | 2 | requests carries $23.42/day of $10.95/day. |
-| localize | 2317 | 1 | 47 segment(s) outside band on a raw ranked sweep. |
-| residualize | 7717 | 4 | 47 raw candidate(s) reduced to 4 cause(s); 1 cleared as contamination. |
-| confirm | 724 | 4 | 0 of 4 cause(s) significant against their own history; 4 within their own normal range. |
+| detect | 101 | 1 | -9.6% move at -2.7 sigma against 18 same-weekday days. |
+| decompose | 152 | 2 | requests carries $23.42/day of $10.95/day. |
+| localize | 2102 | 1 | 47 segment(s) outside band on a raw ranked sweep. |
+| residualize | 7742 | 4 | 47 raw candidate(s) reduced to 4 cause(s); 1 cleared as contamination. |
+| confirm | 784 | 4 | 0 of 4 cause(s) significant against their own history; 4 within their own normal range. |
 | classify | 1 | 0 | no_anomaly — owner: Nobody |
 | price | 0 | 0 | $10.95/day over 8 day(s). |
 
@@ -347,7 +347,7 @@ RULED OUT
   x ecpm moved -2.1%, worth -$8.31/day — not the driver.
 ```
 
-Diagnosed in 0.8s across 4 queries. 6/6 numerals in the text above resolve to a recorded evidence row.
+Diagnosed in 0.9s across 4 queries. 6/6 numerals in the text above resolve to a recorded evidence row.
 
 ### Receipts (13 of 19 rows)
 
@@ -371,10 +371,10 @@ Diagnosed in 0.8s across 4 queries. 6/6 numerals in the text above resolve to a 
 
 | Stage | ms | Queries | Result |
 | --- | --- | --- | --- |
-| detect | 46 | 1 | -22.9% move at -3.2 sigma against 5 same-weekday days. |
-| decompose | 96 | 2 | requests carries -$81.52/day of -$89.40/day. |
-| localize | 635 | 1 | 0 segment(s) outside band on a raw ranked sweep. |
-| residualize | 0 | 0 | 0 raw candidate(s) reduced to 0 cause(s); 0 cleared as contamination. |
+| detect | 50 | 1 | -22.9% move at -3.2 sigma against 5 same-weekday days. |
+| decompose | 160 | 2 | requests carries -$81.52/day of -$89.40/day. |
+| localize | 681 | 1 | 0 segment(s) outside band on a raw ranked sweep. |
+| residualize | 1 | 0 | 0 raw candidate(s) reduced to 0 cause(s); 0 cleared as contamination. |
 | confirm | 0 | 0 | 0 of 0 cause(s) significant against their own history; 0 within their own normal range. |
 | classify | 0 | 0 | no_anomaly — owner: Nobody |
 | price | 0 | 0 | -$89.40/day over 2 day(s). |
@@ -395,7 +395,7 @@ RULED OUT
   x Within band: -7.2% (gate 3%), -1.9 sigma (gate 2.5).
 ```
 
-Diagnosed in 4.5s across 3 queries. 7/7 numerals in the text above resolve to a recorded evidence row.
+Diagnosed in 4.6s across 3 queries. 7/7 numerals in the text above resolve to a recorded evidence row.
 
 ### Receipts (6 of 12 rows)
 
@@ -412,7 +412,7 @@ Diagnosed in 4.5s across 3 queries. 7/7 numerals in the text above resolve to a 
 
 | Stage | ms | Queries | Result |
 | --- | --- | --- | --- |
-| detect | 4537 | 3 | Within band: -7.2% (gate 3%), -1.9 sigma (gate 2.5). |
+| detect | 4579 | 3 | Within band: -7.2% (gate 3%), -1.9 sigma (gate 2.5). |
 
 ## Seen and not escalated
 
@@ -447,6 +447,6 @@ These fired the detector but were not worth an investigation. Listed rather than
 
 ## Cost
 
-Measured from `system.query_log`: 343,970,353 rows read, 4096.9 MiB, 59,232ms server time, 848.2 MiB peak memory across 55 queries.
+Measured from `system.query_log`: 381,604,164 rows read, 4566.1 MiB, 62,572ms server time, 848.2 MiB peak memory across 66 queries.
 
 Full trace: 8 tool call(s), 82 queries, 2024 evidence rows. See `report.json` for the complete record.
