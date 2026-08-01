@@ -44,10 +44,7 @@ export type Channel =
  * moved, and the distinction is the differentiator (D-017).
  */
 export type FindingStatus =
-  | "found"
-  | "cleared_as_normal"
-  | "cleared_as_contamination"
-  | "cleared_insufficient_data";
+  "found" | "cleared_as_normal" | "cleared_as_contamination" | "cleared_insufficient_data";
 
 export interface Segment {
   dimension: string;

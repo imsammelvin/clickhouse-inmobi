@@ -78,7 +78,9 @@ export function renderNarrative(inv: Investigation): string {
 export function renderFull(inv: Investigation): string {
   const L = [renderNarrative(inv), "", "PLAN"];
   for (const s of inv.planSteps) {
-    L.push(`  ${s.stage.padEnd(12)} ${String(s.ms).padStart(6)}ms  ${s.queries} query(s)  ${s.summary}`);
+    L.push(
+      `  ${s.stage.padEnd(12)} ${String(s.ms).padStart(6)}ms  ${s.queries} query(s)  ${s.summary}`,
+    );
   }
   L.push("", `evidence: ${inv.evidence.length} rows   trace: ${inv.traceId}`, "");
   return L.join("\n");

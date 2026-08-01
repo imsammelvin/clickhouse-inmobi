@@ -16,6 +16,7 @@
 import { writeFileSync, readFileSync, existsSync } from "node:fs";
 import { Ledger } from "./ledger";
 import { investigate } from "./orchestrate";
+import { log } from "../utils/telemetryUtils";
 
 /** The scenarios we benchmark. Deliberately the three demo cases — cheap, and representative. */
 const SCENARIOS = [
@@ -117,7 +118,9 @@ GROUP BY run, stage`.trim();
       for (const list of byRun.values()) list.sort((a, b) => b.ms - a.ms);
       return byRun;
     }
-    process.stdout.write(`\r  waiting for query_log flush… ${seen}/${expectedTotal} queries visible`);
+    process.stdout.write(
+      `\r  waiting for query_log flush… ${seen}/${expectedTotal} queries visible`,
+    );
     await new Promise((r) => setTimeout(r, 5000));
   }
   throw new Error(
@@ -127,9 +130,19 @@ GROUP BY run, stage`.trim();
 }
 
 const fmtN = (n: number): string =>
-  n >= 1e9 ? `${(n / 1e9).toFixed(2)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n);
+  n >= 1e9
+    ? `${(n / 1e9).toFixed(2)}B`
+    : n >= 1e6
+      ? `${(n / 1e6).toFixed(2)}M`
+      : n >= 1e3
+        ? `${(n / 1e3).toFixed(1)}k`
+        : String(n);
 const fmtB = (n: number): string =>
-  n >= 1 << 30 ? `${(n / (1 << 30)).toFixed(2)} GiB` : n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(2)} MiB` : `${(n / 1024).toFixed(1)} KiB`;
+  n >= 1 << 30
+    ? `${(n / (1 << 30)).toFixed(2)} GiB`
+    : n >= 1 << 20
+      ? `${(n / (1 << 20)).toFixed(2)} MiB`
+      : `${(n / 1024).toFixed(1)} KiB`;
 
 function sum(stages: StageCost[]): Omit<StageCost, "stage"> {
   return {
@@ -165,46 +178,62 @@ async function runScenario(s: (typeof SCENARIOS)[number]): Promise<RunHandle> {
 }
 
 function print(report: Report, baseline?: Report): void {
-  console.log(`\n=== ${report.label} · ${report.capturedAt} ===\n`);
+  log.info(`\n=== ${report.label} · ${report.capturedAt} ===\n`);
 
   for (const s of report.scenarios) {
-    console.log(`${s.name}  (${s.metric}, ${s.window})   wall ${s.wallMs}ms, ${s.clientQueries} queries`);
-    console.log(`  ${"stage".padEnd(14)}${"q".padStart(3)}${"ms".padStart(8)}${"rows".padStart(10)}${"bytes".padStart(12)}${"peak mem".padStart(12)}`);
+    log.info(
+      `${s.name}  (${s.metric}, ${s.window})   wall ${s.wallMs}ms, ${s.clientQueries} queries`,
+    );
+    log.info(
+      `  ${"stage".padEnd(14)}${"q".padStart(3)}${"ms".padStart(8)}${"rows".padStart(10)}${"bytes".padStart(12)}${"peak mem".padStart(12)}`,
+    );
     for (const st of s.stages) {
-      console.log(
+      log.info(
         `  ${st.stage.padEnd(14)}${String(st.queries).padStart(3)}${String(st.ms).padStart(8)}` +
           `${fmtN(st.rows).padStart(10)}${fmtB(st.bytes).padStart(12)}${fmtB(st.peakMemBytes).padStart(12)}`,
       );
     }
-    console.log(
+    log.info(
       `  ${"TOTAL".padEnd(14)}${String(s.totals.queries).padStart(3)}${String(s.totals.ms).padStart(8)}` +
         `${fmtN(s.totals.rows).padStart(10)}${fmtB(s.totals.bytes).padStart(12)}${fmtB(s.totals.peakMemBytes).padStart(12)}\n`,
     );
   }
 
   const g = report.grand;
-  console.log(`GRAND TOTAL   ${g.queries} queries, ${g.ms}ms server, ${fmtN(g.rows)} rows, ${fmtB(g.bytes)} read`);
+  log.info(
+    `GRAND TOTAL   ${g.queries} queries, ${g.ms}ms server, ${fmtN(g.rows)} rows, ${fmtB(g.bytes)} read`,
+    {
+      "bench.label": report.label,
+      "bench.queries": g.queries,
+      "bench.server_ms": g.ms,
+      "bench.rows_read": g.rows,
+      "bench.bytes_read": g.bytes,
+      "bench.peak_mem_bytes": g.peakMemBytes,
+      "bench.scenarios": report.scenarios.length,
+    },
+  );
 
   // The headline claim, stated as a ratio so it survives a change of cluster size.
   const perInvestigation = g.rows / report.scenarios.length;
-  console.log(
+  log.info(
     `\nRows read per investigation: ${fmtN(perInvestigation)} (mean over ${report.scenarios.length} scenarios)`,
   );
-  console.log(
+  log.info(
     `This is the scalability number. It must stop growing with event volume once the rollups\n` +
       `land (T-013/T-043) — that, not milliseconds, is what makes the design survive scale.`,
   );
 
   if (baseline) {
     const b = baseline.grand;
-    const pct = (now: number, was: number) => (was === 0 ? "n/a" : `${(((now - was) / was) * 100).toFixed(1)}%`);
-    console.log(`\n--- vs ${baseline.label} (${baseline.capturedAt}) ---`);
-    console.log(`  rows read   ${fmtN(b.rows)} -> ${fmtN(g.rows)}   ${pct(g.rows, b.rows)}`);
-    console.log(`  bytes read  ${fmtB(b.bytes)} -> ${fmtB(g.bytes)}   ${pct(g.bytes, b.bytes)}`);
-    console.log(`  server ms   ${b.ms} -> ${g.ms}   ${pct(g.ms, b.ms)}`);
-    console.log(`  queries     ${b.queries} -> ${g.queries}`);
+    const pct = (now: number, was: number) =>
+      was === 0 ? "n/a" : `${(((now - was) / was) * 100).toFixed(1)}%`;
+    log.info(`\n--- vs ${baseline.label} (${baseline.capturedAt}) ---`);
+    log.info(`  rows read   ${fmtN(b.rows)} -> ${fmtN(g.rows)}   ${pct(g.rows, b.rows)}`);
+    log.info(`  bytes read  ${fmtB(b.bytes)} -> ${fmtB(g.bytes)}   ${pct(g.bytes, b.bytes)}`);
+    log.info(`  server ms   ${b.ms} -> ${g.ms}   ${pct(g.ms, b.ms)}`);
+    log.info(`  queries     ${b.queries} -> ${g.queries}`);
   }
-  console.log("");
+  log.info("");
 }
 
 async function main(): Promise<void> {
@@ -213,11 +242,16 @@ async function main(): Promise<void> {
   const cmpIdx = argv.indexOf("--compare");
   const label = saveIdx >= 0 ? (argv[saveIdx + 1] ?? "baseline") : "current";
 
-  console.log(`running ${SCENARIOS.length} scenarios…`);
+  log.info(`running ${SCENARIOS.length} scenarios…`);
   const handles: RunHandle[] = [];
   for (const s of SCENARIOS) {
     const h = await runScenario(s);
-    console.log(`  ${s.name.padEnd(18)} ${h.wallMs}ms wall, ${h.clientQueries} queries`);
+    log.info(`  ${s.name.padEnd(18)} ${h.wallMs}ms wall, ${h.clientQueries} queries`, {
+      "bench.scenario": s.name,
+      "bench.metric": s.metric,
+      "bench.wall_ms": h.wallMs,
+      "bench.client_queries": h.clientQueries,
+    });
     handles.push(h);
   }
 
@@ -239,7 +273,10 @@ async function main(): Promise<void> {
     return {
       name: h.scenario.name,
       metric: h.scenario.metric,
-      window: h.scenario.from === h.scenario.to ? h.scenario.from : `${h.scenario.from}..${h.scenario.to}`,
+      window:
+        h.scenario.from === h.scenario.to
+          ? h.scenario.from
+          : `${h.scenario.from}..${h.scenario.to}`,
       wallMs: h.wallMs,
       clientQueries: h.clientQueries,
       stages,
@@ -258,7 +295,7 @@ async function main(): Promise<void> {
   if (cmpIdx >= 0) {
     const path = argv[cmpIdx + 1];
     if (path && existsSync(path)) baseline = JSON.parse(readFileSync(path, "utf8")) as Report;
-    else console.error(`(no baseline at ${path}; printing current only)`);
+    else log.warn(`(no baseline at ${path}; printing current only)`);
   }
 
   print(report, baseline);
@@ -266,13 +303,13 @@ async function main(): Promise<void> {
   if (saveIdx >= 0) {
     const out = `pitch/bench-${label}.json`;
     writeFileSync(out, JSON.stringify(report, null, 2));
-    console.log(`written: ${out}\n`);
+    log.info(`written: ${out}\n`);
   }
 }
 
 if (import.meta.main) {
   main().catch((e) => {
-    console.error(e instanceof Error ? e.message : e);
+    log.error(String(e instanceof Error ? e.message : e));
     process.exit(1);
   });
 }
