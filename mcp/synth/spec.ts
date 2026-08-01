@@ -368,3 +368,27 @@ export function weekendOffsets(): number[] {
   }
   return out;
 }
+
+/**
+ * A fingerprint of everything that determines what is in the data.
+ *
+ * Written into the synthetic database at build time and checked before scoring, because the harness
+ * has twice now blamed the engine for a dataset that no longer matched this file. The second time,
+ * `rca_synth` held a 35-day build while the spec had moved to 42: seven assertions failed, one of them
+ * reporting a FABRICATED cause on a "clean" day that the older spec had genuinely planted a break on.
+ * Every one of those was the scorer marking its own staleness as an engine defect.
+ *
+ * Checking the start date was not enough — that matched. Anything that changes the data has to be in
+ * here, so a stale database is caught rather than scored.
+ */
+export function specFingerprint(): string {
+  const shape = [SHAPE.seed, SHAPE.from, SHAPE.days, SHAPE.baseEventsPerDay, SHAPE.baseFillRate,
+    SHAPE.baseRenderRate, SHAPE.baseCtr, SHAPE.baseEcpmUsd, SHAPE.weekendVolumeFactor,
+    SHAPE.weeklyGrowth, SHAPE.apps, SHAPE.advertisers, SHAPE.geoDevices].join(":");
+  const planted = PLANTED.map((p) =>
+    [p.id, p.fromDay, p.toDay, p.metric, p.factor,
+      (p.conditions ?? []).map((c) => `${c.dimension}=${c.value}`).join("+")].join(":"),
+  ).join("|");
+  return `${shape}||${planted}`;
+}
+

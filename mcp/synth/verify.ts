@@ -22,7 +22,7 @@
  */
 import { callTool } from "../tools";
 import { Session } from "../trace";
-import { CLEAN_DAYS, DIMS, PLANTED, SHAPE, dateOf, weekendOffsets } from "./spec";
+import { CLEAN_DAYS, DIMS, PLANTED, SHAPE, dateOf, specFingerprint, weekendOffsets } from "./spec";
 import { initObservability, shutdownObservability } from "../../utils/telemetryUtils";
 
 const say = (s = ""): void => {
@@ -82,9 +82,37 @@ async function main(): Promise<void> {
     const vol = overview.data.volumes as { requests: number; revenueUsd: number };
     say(`\nSYNTHETIC DATASET  ${db}`);
     say(`  ${w.from}..${w.to}, ${w.days} days, ${vol.requests.toLocaleString()} requests, $${vol.revenueUsd.toLocaleString()}`);
-    if (w.from !== SHAPE.from) {
-      fail(`dataset starts ${w.from}, spec says ${SHAPE.from} — rebuild with \`bun run synth:build --reset\``);
+    /**
+     * Refuse a database the spec has moved on from.
+     *
+     * Checking the start date alone was not enough and the gap bit twice: a 35-day build scored
+     * against a 42-day spec produced seven failures, including a "fabricated cause" on a clean day
+     * that the older spec had genuinely planted a break on. Every one was the harness marking its own
+     * staleness as an engine defect, which is worse than no harness — it manufactures bug reports.
+     */
+    const meta = await session
+      .costLedger()
+      .run<{ fingerprint: string }>(`SELECT fingerprint FROM synth_meta ORDER BY built_at DESC LIMIT 1`)
+      .catch(() => [] as Array<{ fingerprint: string }>);
+    const built = meta[0]?.fingerprint;
+    if (built !== specFingerprint()) {
+      say(``);
+      say(`STALE DATASET — refusing to score.`);
+      say(``);
+      say(built === undefined
+        ? `  The database carries no build fingerprint, so it predates this check.`
+        : `  The database was built from a different spec than the one in mcp/synth/spec.ts.`);
+      say(`  Loaded: ${w.from}..${w.to} (${w.days} days). Spec: ${SHAPE.from}..${dateOf(SHAPE.days - 1)} (${SHAPE.days} days).`);
+      say(``);
+      say(`  Fix:  bun run synth:build -- --reset`);
+      say(``);
+      say(`  Scoring a stale dataset does not merely fail — it manufactures bug reports. A window the`);
+      say(`  spec plants on day 40 falls outside a 35-day build, and a day the spec calls quiet may`);
+      say(`  hold a deviation an older spec planted there, which reads as the engine inventing causes.`);
+      process.exitCode = 2;
+      return;
     }
+    say(`  spec fingerprint matches the build`);
 
     /**
      * PREFLIGHT. Refuse to score anything if the dictionary-derived dimensions are blank.
