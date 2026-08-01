@@ -59,10 +59,13 @@ export class Ledger {
    * Run a SELECT. This is the only place SQL reaches the server.
    *
    * Traced here rather than only in `clickhouse.select` underneath, because this is the layer that
-   * knows the *stage* and the *run id*. The child span carries the SQL; this one carries what the
-   * query was for, which is what makes a trace readable as an investigation rather than a list of
-   * SELECTs. The same tag goes into the SQL comment for `system.query_log`, so the ClickStack trace
-   * and the benchmark's server-side cost table join on the same two keys.
+   * knows the *stage* and the *run id*. The same tag goes into the SQL comment for
+   * `system.query_log`, so the ClickStack trace and the benchmark's server-side cost table join on
+   * the same two keys.
+   *
+   * The exact text sent — tag and all — is on the span, not just the caller's `sql`. Those differ,
+   * and the tagged form is the one you would paste into `system.query_log` to find the server-side
+   * cost of this precise execution.
    */
   async run<T>(sql: string): Promise<T[]> {
     this.queryCount++;
@@ -77,6 +80,9 @@ export class Ledger {
         "app.run_id": this.runId,
         "app.stage": this.stage,
         "app.query.seq": seq,
+        "db.system": "clickhouse",
+        "db.query.text": tagged,
+        "db.query.length": String(tagged.length),
       },
       async (span) => {
         try {
@@ -84,7 +90,13 @@ export class Ledger {
           // Recorded for criterion 3: if a stage pulls back thousands of rows, the analysis has
           // migrated out of ClickHouse and into the client, which is exactly what judges look for.
           this.rowsReturned.push(rows.length);
-          span.setAttribute("app.query.rows_returned", rows.length);
+          // Both spellings: `db.response.returned_rows` matches the child span and semconv so the
+          // two levels can be charted together; `app.query.rows_returned` is the stage-scoped name
+          // the criterion-3 invariant is described in.
+          span.setAttributes({
+            "db.response.returned_rows": rows.length,
+            "app.query.rows_returned": rows.length,
+          });
           return rows;
         } catch (err) {
           // Surface the SQL. A failing query with no text is unusable at 3am.

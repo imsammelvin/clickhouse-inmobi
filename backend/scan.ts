@@ -145,6 +145,11 @@ async function scanAllInner(metrics: string[]): Promise<ScanResult> {
   const segmentFirings = [];
   try {
     for (const metric of metrics) {
+      // Name the stage before each query. Without this the ledger sits on its "init" default for
+      // the whole scan, so every span came out as `ledger.run.init` and — the part that actually
+      // costs something — every SQL comment read `stage=init`, which is the key benchmark.ts
+      // groups server-side cost on. Both halves of the scan were landing in one unlabelled bucket.
+      ledger.beginStage("scan.series");
       const series = await seriesFor(ledger, metric);
       // Estimated once per metric from the full series, then applied to every day.
       const weeklyGrowth = estimateWeeklyGrowth(series);
@@ -153,6 +158,7 @@ async function scanAllInner(metrics: string[]): Promise<ScanResult> {
         if (r.fired) fired.push({ metric, day, pct: r.pct, sigma: r.sigma });
       }
       // One extra query per metric, all detection server-side, only firings returned.
+      ledger.beginStage("scan.segments");
       segmentFirings.push(...(await scanSegments(ledger, metric, weeklyGrowth)));
     }
   } finally {
