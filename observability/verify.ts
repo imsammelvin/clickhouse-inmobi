@@ -23,12 +23,7 @@ import { makeTelemetryClient, select, selectOne } from "../clickhouse/client";
 import { CLICKSTACK_URL, OTEL_ENDPOINT, SERVICE_NAME } from "../constants";
 import * as Q from "../constants/queries";
 import { CheckStatus, VerifyFlag } from "../enums";
-import type {
-  LogCorrelation,
-  PublishedMetric,
-  SignalCount,
-  TraceSpanRow,
-} from "../interfaces";
+import type { LogCorrelation, PublishedMetric, SignalCount, TraceSpanRow } from "../interfaces";
 import { flagValue, fmt, runScript } from "../utils/common.utils";
 import { log } from "../utils/telemetryUtils";
 
@@ -37,8 +32,7 @@ import { log } from "../utils/telemetryUtils";
  * `clickhouse-inmobi-api`, the ingest scripts as `clickhouse-inmobi-ingest`), so verifying the
  * wrong one reports an empty pipeline that is actually working fine.
  */
-const service =
-  flagValue(process.argv.slice(2), VerifyFlag.Service) ?? SERVICE_NAME;
+const service = flagValue(process.argv.slice(2), VerifyFlag.Service) ?? SERVICE_NAME;
 
 let failures = 0;
 
@@ -51,9 +45,7 @@ const check = (name: string, ok: boolean, detail: string): void => {
 const main = async (): Promise<void> => {
   const client = makeTelemetryClient();
 
-  log.info(
-    `service "${service}"  ingest ${OTEL_ENDPOINT}  store ${CLICKSTACK_URL}\n`,
-  );
+  log.info(`service "${service}"  ingest ${OTEL_ENDPOINT}  store ${CLICKSTACK_URL}\n`);
 
   try {
     // 1. every signal arrived -------------------------------------------------
@@ -62,20 +54,13 @@ const main = async (): Promise<void> => {
 
     for (const { signal, rows, latest } of signals) {
       const n = Number(rows);
-      check(
-        signal,
-        n > 0,
-        n > 0 ? `${fmt(n)} rows, latest ${latest}` : "no rows",
-      );
+      check(signal, n > 0, n > 0 ? `${fmt(n)} rows, latest ${latest}` : "no rows");
     }
     console.log();
 
     // 2. logs point back at their span ---------------------------------------
     log.info("== trace <-> log correlation ==");
-    const correlation = await selectOne<LogCorrelation>(
-      client,
-      Q.logTraceCorrelation(service),
-    );
+    const correlation = await selectOne<LogCorrelation>(client, Q.logTraceCorrelation(service));
 
     const logs = Number(correlation.logs);
     const correlated = Number(correlation.correlated);
@@ -89,10 +74,7 @@ const main = async (): Promise<void> => {
 
     // 3. the trace is a tree --------------------------------------------------
     log.info("== latest trace ==");
-    const spans = await select<TraceSpanRow>(
-      client,
-      Q.latestTraceTree(service),
-    );
+    const spans = await select<TraceSpanRow>(client, Q.latestTraceTree(service));
 
     for (const span of spans) {
       log.info(
@@ -113,21 +95,14 @@ const main = async (): Promise<void> => {
 
     // 4. what the dashboards can plot ----------------------------------------
     log.info("== published metrics ==");
-    const published = await select<PublishedMetric>(
-      client,
-      Q.publishedMetrics(service),
-    );
+    const published = await select<PublishedMetric>(client, Q.publishedMetrics(service));
 
     for (const metric of published) {
       log.info(
         `  ${metric.metric.padEnd(30)} ${fmt(Number(metric.points)).padStart(8)} points  latest ${metric.latest}`,
       );
     }
-    check(
-      "metrics published",
-      published.length > 0,
-      `${published.length} names`,
-    );
+    check("metrics published", published.length > 0, `${published.length} names`);
     console.log();
   } finally {
     await client.close();

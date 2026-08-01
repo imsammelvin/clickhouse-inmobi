@@ -8,11 +8,7 @@ import { DATABASE, exec, makeClient } from "../clickhouse/client";
 import { SCHEMA_FILE } from "../constants";
 import { runScript } from "../utils/common.utils";
 import { splitStatements, statementLabel } from "../utils/sql.utils";
-import {
-  initObservability,
-  shutdownObservability,
-  withSpan,
-} from "../utils/telemetryUtils";
+import { initObservability, shutdownObservability, withSpan } from "../utils/telemetryUtils";
 import { log } from "../utils/telemetryUtils";
 
 const main = async (): Promise<void> => {
@@ -21,22 +17,16 @@ const main = async (): Promise<void> => {
   const client = makeClient();
 
   try {
-    log.info(
-      `Applying ${statements.length} statements to database "${DATABASE}"\n`,
-    );
+    log.info(`Applying ${statements.length} statements to database "${DATABASE}"\n`);
 
-    await withSpan(
-      "schema.run",
-      { "schema.statements": statements.length },
-      async () => {
-        for (const [index, statement] of statements.entries()) {
-          const tag = `[${String(index + 1).padStart(2, " ")}/${statements.length}]`;
-          process.stdout.write(`${tag} ${statementLabel(statement)} ... `);
-          await exec(client, statement);
-          log.info("ok");
-        }
-      },
-    );
+    await withSpan("schema.run", { "schema.statements": statements.length }, async () => {
+      for (const [index, statement] of statements.entries()) {
+        const tag = `[${String(index + 1).padStart(2, " ")}/${statements.length}]`;
+        process.stdout.write(`${tag} ${statementLabel(statement)} ... `);
+        await exec(client, statement);
+        log.info("ok");
+      }
+    });
 
     log.info("\nSchema applied. Next: bun run ch:load");
   } finally {

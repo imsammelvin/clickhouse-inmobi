@@ -41,8 +41,7 @@ const run = async (args: string[]): Promise<string> => {
     new Response(proc.stderr).text(),
     proc.exited,
   ]);
-  if (code !== 0)
-    throw new Error(`docker ${args[0]} failed:\n${stderr || stdout}`);
+  if (code !== 0) throw new Error(`docker ${args[0]} failed:\n${stderr || stdout}`);
   return stdout.trim();
 };
 

@@ -21,14 +21,7 @@
  */
 import { createReadStream, existsSync, mkdirSync, rmSync } from "node:fs";
 import type { ClickHouseClient } from "@clickhouse/client";
-import {
-  DATABASE,
-  exec,
-  insert,
-  makeClient,
-  select,
-  selectOne,
-} from "../clickhouse/client";
+import { DATABASE, exec, insert, makeClient, select, selectOne } from "../clickhouse/client";
 import {
   CHUNK_DATE_PATTERN,
   CHUNK_DIR,
@@ -41,13 +34,7 @@ import {
 } from "../constants";
 import * as Q from "../constants/queries";
 import { DataFormat, Dictionary, LoadFlag, Table } from "../enums";
-import type {
-  CountRow,
-  DayChunk,
-  LoadOptions,
-  PartitionRow,
-  VersionRow,
-} from "../interfaces";
+import type { CountRow, DayChunk, LoadOptions, PartitionRow, VersionRow } from "../interfaces";
 import {
   assertDuckdb,
   duckdb,
@@ -77,14 +64,8 @@ import {
 // ---------------------------------------------------------------------------
 
 export const parseArgs = (argv: string[]): LoadOptions => {
-  const concurrency = Number(
-    flagValue(argv, LoadFlag.Concurrency) ?? DEFAULT_CONCURRENCY,
-  );
-  if (
-    !Number.isInteger(concurrency) ||
-    concurrency < 1 ||
-    concurrency > MAX_CONCURRENCY
-  ) {
+  const concurrency = Number(flagValue(argv, LoadFlag.Concurrency) ?? DEFAULT_CONCURRENCY);
+  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > MAX_CONCURRENCY) {
     throw new Error(
       `${LoadFlag.Concurrency} must be an integer between 1 and ${MAX_CONCURRENCY}, ` +
         `got "${concurrency}"`,
@@ -126,12 +107,7 @@ const loadDimensions = async (client: ClickHouseClient): Promise<void> => {
       // ingest -- queries hit the dictionaries, which only pick up new contents on the RELOAD below.
       await withRetry(`load ${table}`, RETRY_ATTEMPTS, async () => {
         await exec(client, Q.truncate(table));
-        await insert(
-          client,
-          table,
-          createReadStream(path),
-          DataFormat.CsvWithNames,
-        );
+        await insert(client, table, createReadStream(path), DataFormat.CsvWithNames);
       });
     });
 
@@ -155,8 +131,7 @@ const loadDimensions = async (client: ClickHouseClient): Promise<void> => {
 // ---------------------------------------------------------------------------
 
 const extractChunks = async (options: LoadOptions): Promise<DayChunk[]> => {
-  if (!existsSync(FACT_FILE))
-    throw new Error(`Missing source file: ${FACT_FILE}`);
+  if (!existsSync(FACT_FILE)) throw new Error(`Missing source file: ${FACT_FILE}`);
 
   if (options.skipExtract) {
     log.info("== extract (skipped, reusing existing chunks) ==");
@@ -168,19 +143,15 @@ const extractChunks = async (options: LoadOptions): Promise<DayChunk[]> => {
     mkdirSync(CHUNK_DIR, { recursive: true });
     await duckdb(Q.srcSplitByDay(FACT_FILE, CHUNK_DIR));
 
-    log.info(
-      `  split ${relPath(FACT_FILE)} by day in ${secondsSince(startedAt)}`,
-    );
+    log.info(`  split ${relPath(FACT_FILE)} by day in ${secondsSince(startedAt)}`);
   }
 
   const meta = await parquetFileMeta(CHUNK_GLOB);
-  if (meta.length === 0)
-    throw new Error(`No chunks found under ${relPath(CHUNK_DIR)}`);
+  if (meta.length === 0) throw new Error(`No chunks found under ${relPath(CHUNK_DIR)}`);
 
   const chunks: DayChunk[] = meta.map(({ file_name, num_rows }) => {
     const match = CHUNK_DATE_PATTERN.exec(file_name);
-    if (!match)
-      throw new Error(`Cannot infer date from chunk path: ${file_name}`);
+    if (!match) throw new Error(`Cannot infer date from chunk path: ${file_name}`);
 
     const date = match[1]!;
     return {
@@ -208,12 +179,9 @@ const extractChunks = async (options: LoadOptions): Promise<DayChunk[]> => {
  */
 const assertOneFilePerDay = (chunks: DayChunk[]): void => {
   const perDay = new Map<string, number>();
-  for (const chunk of chunks)
-    perDay.set(chunk.date, (perDay.get(chunk.date) ?? 0) + 1);
+  for (const chunk of chunks) perDay.set(chunk.date, (perDay.get(chunk.date) ?? 0) + 1);
 
-  const split = [...perDay]
-    .filter(([, count]) => count > 1)
-    .map(([date]) => date);
+  const split = [...perDay].filter(([, count]) => count > 1).map(([date]) => date);
   if (split.length > 0) {
     throw new Error(
       `DuckDB wrote multiple files for ${split.join(", ")}. ` +
@@ -227,9 +195,7 @@ const assertOneFilePerDay = (chunks: DayChunk[]): void => {
 // ---------------------------------------------------------------------------
 
 /** Live row count per partition, straight from system.parts. */
-const partitionCounts = async (
-  client: ClickHouseClient,
-): Promise<Map<string, number>> => {
+const partitionCounts = async (client: ClickHouseClient): Promise<Map<string, number>> => {
   const rows = await select<PartitionRow>(client, Q.partitionCounts(DATABASE));
   return new Map(rows.map((row) => [row.partition, Number(row.rows)]));
 };
@@ -252,63 +218,41 @@ const selectPending = (
   });
 };
 
-const loadDay = async (
-  client: ClickHouseClient,
-  chunk: DayChunk,
-): Promise<void> => {
-  await withSpan(
-    "load.day",
-    { "load.date": chunk.date, "load.rows": chunk.rows },
-    async () => {
-      // Drop, insert and confirm are retried as one unit: if the confirmation fails we do not know
-      // which half went wrong, and redoing both is always safe because the drop comes first.
-      await withRetry(`load ${chunk.date}`, RETRY_ATTEMPTS, async () => {
-        // Drop first so a retry after a partially-consumed body cannot leave duplicate rows behind.
-        // alter_sync = 2 waits for every replica to apply the drop -- without it the drop can land
-        // *after* the insert that follows it and silently wipe the day we just loaded.
-        await exec(client, Q.dropPartition(chunk.partition), {
-          alter_sync: "2",
-        });
-
-        await insert(
-          client,
-          Table.AdEvents,
-          createReadStream(chunk.path),
-          DataFormat.Parquet,
-        );
-
-        // Confirm the partition holds exactly the rows the source file claimed. Ingest that silently
-        // loses rows is worse than ingest that fails.
-        const { n } = await selectOne<CountRow>(
-          client,
-          Q.partitionRowCount(chunk.partition),
-        );
-        if (Number(n) !== chunk.rows) {
-          throw new Error(
-            `expected ${fmt(chunk.rows)} rows in partition ${chunk.partition}, found ${fmt(Number(n))}`,
-          );
-        }
+const loadDay = async (client: ClickHouseClient, chunk: DayChunk): Promise<void> => {
+  await withSpan("load.day", { "load.date": chunk.date, "load.rows": chunk.rows }, async () => {
+    // Drop, insert and confirm are retried as one unit: if the confirmation fails we do not know
+    // which half went wrong, and redoing both is always safe because the drop comes first.
+    await withRetry(`load ${chunk.date}`, RETRY_ATTEMPTS, async () => {
+      // Drop first so a retry after a partially-consumed body cannot leave duplicate rows behind.
+      // alter_sync = 2 waits for every replica to apply the drop -- without it the drop can land
+      // *after* the insert that follows it and silently wipe the day we just loaded.
+      await exec(client, Q.dropPartition(chunk.partition), {
+        alter_sync: "2",
       });
-    },
-  );
+
+      await insert(client, Table.AdEvents, createReadStream(chunk.path), DataFormat.Parquet);
+
+      // Confirm the partition holds exactly the rows the source file claimed. Ingest that silently
+      // loses rows is worse than ingest that fails.
+      const { n } = await selectOne<CountRow>(client, Q.partitionRowCount(chunk.partition));
+      if (Number(n) !== chunk.rows) {
+        throw new Error(
+          `expected ${fmt(chunk.rows)} rows in partition ${chunk.partition}, found ${fmt(Number(n))}`,
+        );
+      }
+    });
+  });
 };
 
-const loadFacts = async (
-  client: ClickHouseClient,
-  options: LoadOptions,
-): Promise<void> => {
+const loadFacts = async (client: ClickHouseClient, options: LoadOptions): Promise<void> => {
   await assertDuckdb();
 
   let chunks = await extractChunks(options);
 
   if (options.only) {
-    const unknown = options.only.filter(
-      (date) => !chunks.some((chunk) => chunk.date === date),
-    );
+    const unknown = options.only.filter((date) => !chunks.some((chunk) => chunk.date === date));
     if (unknown.length > 0) {
-      throw new Error(
-        `${LoadFlag.Only} names days with no data: ${unknown.join(", ")}`,
-      );
+      throw new Error(`${LoadFlag.Only} names days with no data: ${unknown.join(", ")}`);
     }
     const wanted = new Set(options.only);
     chunks = chunks.filter((chunk) => wanted.has(chunk.date));

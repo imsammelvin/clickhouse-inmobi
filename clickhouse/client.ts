@@ -102,10 +102,7 @@ export const exec = async (
 };
 
 /** Run a SELECT and return typed rows. */
-export const select = async <T>(
-  client: ClickHouseClient,
-  query: string,
-): Promise<T[]> => {
+export const select = async <T>(client: ClickHouseClient, query: string): Promise<T[]> => {
   return withSpan("clickhouse.select", dbAttributes(query), async () => {
     const rs = await client.query({ query, format: DataFormat.JsonEachRow });
     return (await rs.json()) as T[];
@@ -113,10 +110,7 @@ export const select = async <T>(
 };
 
 /** Run a SELECT expected to return exactly one row. */
-export const selectOne = async <T>(
-  client: ClickHouseClient,
-  query: string,
-): Promise<T> => {
+export const selectOne = async <T>(client: ClickHouseClient, query: string): Promise<T> => {
   const [row] = await select<T>(client, query);
   if (!row) throw new Error(`Query returned no rows:\n${query}`);
   return row;

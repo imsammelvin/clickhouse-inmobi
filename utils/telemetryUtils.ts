@@ -34,30 +34,14 @@ import {
   type Histogram,
   type Span,
 } from "@opentelemetry/api";
-import {
-  logs,
-  SeverityNumber,
-  type LogAttributes,
-} from "@opentelemetry/api-logs";
+import { logs, SeverityNumber, type LogAttributes } from "@opentelemetry/api-logs";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { resourceFromAttributes } from "@opentelemetry/resources";
-import {
-  ATTR_SERVICE_NAME,
-  ATTR_SERVICE_VERSION,
-} from "@opentelemetry/semantic-conventions";
-import {
-  BasicTracerProvider,
-  BatchSpanProcessor,
-} from "@opentelemetry/sdk-trace-base";
-import {
-  MeterProvider,
-  PeriodicExportingMetricReader,
-} from "@opentelemetry/sdk-metrics";
-import {
-  BatchLogRecordProcessor,
-  LoggerProvider,
-} from "@opentelemetry/sdk-logs";
+import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
+import { BasicTracerProvider, BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
+import { MeterProvider, PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
+import { BatchLogRecordProcessor, LoggerProvider } from "@opentelemetry/sdk-logs";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http";
 import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
@@ -107,10 +91,7 @@ const enableDiagnostics = (): void => {
     debug: DiagLogLevel.DEBUG,
     verbose: DiagLogLevel.VERBOSE,
   };
-  diag.setLogger(
-    new DiagConsoleLogger(),
-    levels[level.toLowerCase()] ?? DiagLogLevel.INFO,
-  );
+  diag.setLogger(new DiagConsoleLogger(), levels[level.toLowerCase()] ?? DiagLogLevel.INFO);
 };
 
 /**
@@ -126,9 +107,7 @@ export const initObservability = (): void => {
 
   enableDiagnostics();
 
-  context.setGlobalContextManager(
-    new AsyncLocalStorageContextManager().enable(),
-  );
+  context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
 
   // W3C `traceparent`. Lets an inbound HTTP request continue a caller's trace instead of starting
   // a disconnected one, and lets our own outbound calls pass the trace on.
@@ -144,9 +123,7 @@ export const initObservability = (): void => {
   tracerProvider = new BasicTracerProvider({
     resource,
     spanProcessors: [
-      new BatchSpanProcessor(
-        new OTLPTraceExporter({ url: url(OtlpPath.Traces), headers }),
-      ),
+      new BatchSpanProcessor(new OTLPTraceExporter({ url: url(OtlpPath.Traces), headers })),
     ],
   });
   trace.setGlobalTracerProvider(tracerProvider);
@@ -210,8 +187,7 @@ export const flushObservability = async (): Promise<void> => {
 
 /** What a span produced: the value, or the error, plus how long it took. */
 export type SpanOutcome<T> =
-  | { ok: true; value: T; ms: number }
-  | { ok: false; error: Error; ms: number };
+  { ok: true; value: T; ms: number } | { ok: false; error: Error; ms: number };
 
 /**
  * Run `fn` inside a span and return the outcome as a value. The span's own timing is measured and
@@ -319,11 +295,7 @@ export const counter = (name: string, description: string): (() => Counter) => {
  * A histogram instrument under this repo's meter. Lazy, so it is safe to create at module top
  * level. Call the returned function at record time: `duration().record(ms, { route })`.
  */
-export const histogram = (
-  name: string,
-  description: string,
-  unit?: string,
-): (() => Histogram) => {
+export const histogram = (name: string, description: string, unit?: string): (() => Histogram) => {
   return lazyInstrument(() =>
     metrics.getMeter(INSTRUMENTATION_SCOPE).createHistogram(name, {
       description,
@@ -383,8 +355,7 @@ const emit = (
     attributes: recordAttributes,
   });
 
-  const detail =
-    Object.keys(attributes).length > 0 ? ` ${format(attributes)}` : "";
+  const detail = Object.keys(attributes).length > 0 ? ` ${format(attributes)}` : "";
   (consoleSink[severityText] ?? console.log)(`${message}${detail}`);
 };
 

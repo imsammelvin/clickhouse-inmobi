@@ -90,19 +90,16 @@ export const RATIO_UPPER_BOUND = 1.0001;
  * and it is the first thing you filter on in the UI. Override per process with OTEL_SERVICE_NAME
  * so the ingest scripts and the app show up as separate services.
  */
-export const SERVICE_NAME =
-  process.env[EnvVar.OtelServiceName] ?? "clickhouse-inmobi-ingest";
+export const SERVICE_NAME = process.env[EnvVar.OtelServiceName] ?? "clickhouse-inmobi-ingest";
 
 /** Shown in ClickStack alongside the service name; lets you tell a local run from a deployed one. */
-export const DEPLOYMENT_ENVIRONMENT =
-  process.env[EnvVar.DeploymentEnv] ?? "local";
+export const DEPLOYMENT_ENVIRONMENT = process.env[EnvVar.DeploymentEnv] ?? "local";
 
 /** Bumped by hand. Useful for "did this regression start with the version I shipped?" queries. */
 export const SERVICE_VERSION = "0.1.0";
 
 /** OTLP/HTTP endpoint of the local ClickStack collector (docker-compose maps 4318). */
-export const OTEL_ENDPOINT =
-  process.env[EnvVar.OtelEndpoint] ?? "http://localhost:4318";
+export const OTEL_ENDPOINT = process.env[EnvVar.OtelEndpoint] ?? "http://localhost:4318";
 
 /** How often the metric reader ships a batch to the collector. */
 export const METRIC_EXPORT_INTERVAL_MS = 5_000;
@@ -126,8 +123,7 @@ export const API_PORT_SCAN = 10;
  * ClickStack all-in-one container writes its signals to its own bundled ClickHouse, so
  * observability/verify.ts has to look somewhere else than the app does. Defaults to that container.
  */
-export const CLICKSTACK_URL =
-  process.env[EnvVar.ClickStackUrl] ?? "http://localhost:8123";
+export const CLICKSTACK_URL = process.env[EnvVar.ClickStackUrl] ?? "http://localhost:8123";
 
 /**
  * Standalone ClickStack collector (observability/collector.ts). Ports are offset by one from the
@@ -139,14 +135,9 @@ export const COLLECTOR_HTTP_PORT = 4319;
 export const COLLECTOR_GRPC_PORT = 4320;
 
 /** DDL for ClickStack's otel_* tables, applied by observability/schema.ts. */
-export const CLICKSTACK_SCHEMA_FILE = join(
-  REPO_ROOT,
-  "observability",
-  "clickstack-schema.sql",
-);
+export const CLICKSTACK_SCHEMA_FILE = join(REPO_ROOT, "observability", "clickstack-schema.sql");
 export const CLICKSTACK_USER = process.env[EnvVar.ClickStackUser] ?? "api";
-export const CLICKSTACK_PASSWORD =
-  process.env[EnvVar.ClickStackPassword] ?? "api";
+export const CLICKSTACK_PASSWORD = process.env[EnvVar.ClickStackPassword] ?? "api";
 
 /**
  * ClickStack generates an ingestion token at startup; the collector's bearer-token extension

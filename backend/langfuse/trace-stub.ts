@@ -58,7 +58,9 @@ const MOCK_RANKING = {
 
 const NARRATION_MODEL = "claude-haiku-4-5-20251001";
 
-async function narrate(input: object): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
+async function narrate(
+  input: object,
+): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
   const apiKey = process.env[NarrationEnvVar.AnthropicApiKey];
   if (!apiKey) {
     const text =

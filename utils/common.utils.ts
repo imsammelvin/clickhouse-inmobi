@@ -2,12 +2,7 @@
  * Functions shared across scripts/. Values live in constants/, shapes in interfaces/.
  */
 import { join } from "node:path";
-import {
-  DATA_DIR,
-  FLOAT_TOLERANCE,
-  REPO_ROOT,
-  retryBackoffMs,
-} from "../constants";
+import { DATA_DIR, FLOAT_TOLERANCE, REPO_ROOT, retryBackoffMs } from "../constants";
 import { srcParquetFileMeta } from "../constants/queries";
 import type { SourceFile } from "../enums";
 import type { ParquetFileMeta } from "../interfaces";
@@ -19,15 +14,13 @@ import type { ParquetFileMeta } from "../interfaces";
 export const sourcePath = (file: SourceFile): string => join(DATA_DIR, file);
 
 /** Path relative to the repo root, for readable log lines. */
-export const relPath = (path: string): string =>
-  path.replace(`${REPO_ROOT}/`, "");
+export const relPath = (path: string): string => path.replace(`${REPO_ROOT}/`, "");
 
 // ---------------------------------------------------------------------------
 // formatting
 // ---------------------------------------------------------------------------
 
-export const sleep = (ms: number): Promise<void> =>
-  new Promise((r) => setTimeout(r, ms));
+export const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 /** 9000000 -> "9,000,000" */
 export const fmt = (n: number): string => n.toLocaleString("en-US");
@@ -36,15 +29,11 @@ export const fmt = (n: number): string => n.toLocaleString("en-US");
 export const elapsed = (t0: number): number => (performance.now() - t0) / 1000;
 
 /** Seconds since a performance.now() mark, as "6.4s". */
-export const secondsSince = (t0: number): string =>
-  `${elapsed(t0).toFixed(1)}s`;
+export const secondsSince = (t0: number): string => `${elapsed(t0).toFixed(1)}s`;
 
 /** Relative float comparison -- see FLOAT_TOLERANCE for why exact equality is the wrong test. */
-export const closeEnough = (
-  a: number,
-  b: number,
-  tolerance = FLOAT_TOLERANCE,
-): boolean => Math.abs(a - b) <= Math.abs(a) * tolerance;
+export const closeEnough = (a: number, b: number, tolerance = FLOAT_TOLERANCE): boolean =>
+  Math.abs(a - b) <= Math.abs(a) * tolerance;
 
 // ---------------------------------------------------------------------------
 // control flow
@@ -69,9 +58,7 @@ export const withRetry = async <T>(
       if (attempt === attempts) break;
 
       const backoff = retryBackoffMs(attempt);
-      console.warn(
-        `  ! ${what} failed (attempt ${attempt}/${attempts}): ${asMessage(error)}`,
-      );
+      console.warn(`  ! ${what} failed (attempt ${attempt}/${attempts}): ${asMessage(error)}`);
       console.warn(`    retrying in ${backoff}ms`);
       await sleep(backoff);
     }
@@ -97,9 +84,7 @@ export const pool = async <T, R>(
     }
   };
 
-  await Promise.all(
-    Array.from({ length: Math.min(limit, items.length) }, worker),
-  );
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
   return results;
 };
 
@@ -127,8 +112,7 @@ export const duckdb = async (sql: string): Promise<string> => {
     proc.exited,
   ]);
 
-  if (code !== 0)
-    throw new Error(`duckdb failed (exit ${code}):\n${stderr || stdout}`);
+  if (code !== 0) throw new Error(`duckdb failed (exit ${code}):\n${stderr || stdout}`);
   return stdout;
 };
 
@@ -157,8 +141,7 @@ export const assertDuckdb = async (): Promise<void> => {
 // ---------------------------------------------------------------------------
 
 /** True if `flag` is present in argv. */
-export const hasFlag = (argv: string[], flag: string): boolean =>
-  argv.includes(flag);
+export const hasFlag = (argv: string[], flag: string): boolean => argv.includes(flag);
 
 /** Value of `--flag=value`, or undefined. */
 export const flagValue = (argv: string[], flag: string): string | undefined =>

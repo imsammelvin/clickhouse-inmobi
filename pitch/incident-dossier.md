@@ -4,8 +4,8 @@
 **Source:** ClickHouse Cloud, `ad_events_enriched`, 9,000,000 rows, 2026-06-01 → 2026-07-05.
 Every number below was computed against the loaded data. Nothing here is estimated.
 
-Read with [`diagnosis-template.md`](diagnosis-template.md) — this file is the *evidence*, that one is
-the *output format*.
+Read with [`diagnosis-template.md`](diagnosis-template.md) — this file is the _evidence_, that one is
+the _output format_.
 
 ---
 
@@ -16,30 +16,30 @@ with a slow upward growth trend in requests (264k/day on Jun 1 → 288k/day on J
 ~20% below weekdays. Against that flatness, five things stand out.
 
 > **Scale note.** Total revenue is ~$500/day across the whole platform in this synthetic set. Dollar
-> impacts are therefore small in absolute terms — quote percentages *and* dollars, and never inflate
+> impacts are therefore small in absolute terms — quote percentages _and_ dollars, and never inflate
 > the dollars to make the demo sound bigger. R-001 applies to our own slides.
 
 ---
 
 ## A — Android 15 fill-rate collapse · **the flagship**
 
-| | |
-|---|---|
-| **Window** | 2026-06-23 → 2026-06-25 (3 days, Tue–Thu) |
-| **Headline** | Blended fill rate 0.785 → 0.750 (−3.5pp, −4.4%) |
-| **True cause** | `os_version = 'Android 15'` — fill rate **0.7837 → 0.4333, −35.04pp** |
-| **Segment size** | 9.6% of requests |
-| **Channel** | **Technical break** — engineering owns it |
-| **Revenue** | ~$512/day actual vs ~$530 expected ≈ **−$18/day, −3.4%** |
+|                  |                                                                       |
+| ---------------- | --------------------------------------------------------------------- |
+| **Window**       | 2026-06-23 → 2026-06-25 (3 days, Tue–Thu)                             |
+| **Headline**     | Blended fill rate 0.785 → 0.750 (−3.5pp, −4.4%)                       |
+| **True cause**   | `os_version = 'Android 15'` — fill rate **0.7837 → 0.4333, −35.04pp** |
+| **Segment size** | 9.6% of requests                                                      |
+| **Channel**      | **Technical break** — engineering owns it                             |
+| **Revenue**      | ~$512/day actual vs ~$530 expected ≈ **−$18/day, −3.4%**              |
 
 **Why technical, not demand** — all four checks point the same way:
 
-| Check | Baseline | Incident | Reading |
-|---|---|---|---|
-| Distinct advertisers bidding | 500 | 500 | Nobody left |
-| Render rate (imps/fills) | 0.9797 | 0.9790 | Rendering is fine |
-| eCPM | 2.482 | 2.456 | Price is fine |
-| Requests/day | 24,987 | 26,933 | Supply is **up** 7.8% |
+| Check                        | Baseline | Incident | Reading               |
+| ---------------------------- | -------- | -------- | --------------------- |
+| Distinct advertisers bidding | 500      | 500      | Nobody left           |
+| Render rate (imps/fills)     | 0.9797   | 0.9790   | Rendering is fine     |
+| eCPM                         | 2.482    | 2.456    | Price is fine         |
+| Requests/day                 | 24,987   | 26,933   | Supply is **up** 7.8% |
 
 Demand present, supply present, rendering fine — but the match stopped happening on one OS version.
 That is an SDK/targeting/compatibility failure, not a market event.
@@ -78,13 +78,13 @@ D-017 and T-040 (residualization).
 
 ## B — Global request collapse · **the "not localizable" case**
 
-| | |
-|---|---|
-| **Window** | 2026-06-21 (single day, Sunday) |
-| **Headline** | Requests 126,052 vs ~225k expected for a Sunday (**−44%**) |
+|                |                                                                   |
+| -------------- | ----------------------------------------------------------------- |
+| **Window**     | 2026-06-21 (single day, Sunday)                                   |
+| **Headline**   | Requests 126,052 vs ~225k expected for a Sunday (**−44%**)        |
 | **True cause** | **None localizable — the drop is uniform across every dimension** |
-| **Channel** | **Supply change**, platform-wide |
-| **Revenue** | $235 vs ~$435 expected ≈ **−$200/day, −46%** |
+| **Channel**    | **Supply change**, platform-wide                                  |
+| **Revenue**    | $235 vs ~$435 expected ≈ **−$200/day, −46%**                      |
 
 Every dimension moves together, within a couple of points of −45%:
 
@@ -97,10 +97,10 @@ country=AE      -45.8%     app_category=gaming    -45.3%
 country=ZA      -45.6%     os_version=Android 15  -45.3%
 ```
 
-**Why this case matters more than it looks.** It is the *opposite* failure mode to incident A. A
+**Why this case matters more than it looks.** It is the _opposite_ failure mode to incident A. A
 naive top-segment ranker names **BR (−47.2%)** as the cause — but BR is not special, it is just the
-noisiest draw from a uniform −45%. The correct diagnosis is *"uniform across all dimensions; this is
-platform-level, not a segment problem."*
+noisiest draw from a uniform −45%. The correct diagnosis is _"uniform across all dimensions; this is
+platform-level, not a segment problem."_
 
 Fill rate (0.7855), eCPM (2.419) and CTR (0.0109) are all **normal** — this is purely volume. So
 the residualization loop must be able to terminate with **zero** localized causes and say so, rather
@@ -111,14 +111,14 @@ would otherwise have been missed.**
 
 ## C — Finance eCPM drop
 
-| | |
-|---|---|
-| **Window** | 2026-06-19 → 2026-06-22 (4 days) |
-| **Headline** | Blended eCPM 2.475 → ~2.416 (−2.4%); RPR 0.0019 → 0.00186 |
-| **True cause** | `app_category = 'finance'` — eCPM **2.472 → 1.613, −34.75%** |
-| **Segment size** | 7.0% of impressions |
+|                   |                                                                                |
+| ----------------- | ------------------------------------------------------------------------------ |
+| **Window**        | 2026-06-19 → 2026-06-22 (4 days)                                               |
+| **Headline**      | Blended eCPM 2.475 → ~2.416 (−2.4%); RPR 0.0019 → 0.00186                      |
+| **True cause**    | `app_category = 'finance'` — eCPM **2.472 → 1.613, −34.75%**                   |
+| **Segment size**  | 7.0% of impressions                                                            |
 | **Contamination** | `ad_format = interstitial` shows −5.17% — finance inventory skews interstitial |
-| **Channel** | **Demand change** (price), pending advertiser-level confirmation |
+| **Channel**       | **Demand change** (price), pending advertiser-level confirmation               |
 
 Same one-cause/one-false-lead shape as incident A, on a **different metric family** (price rather
 than fill). Useful precisely because it proves the pipeline is metric-agnostic — which is R-005, the
@@ -136,13 +136,13 @@ rewarded 8.26% → 8.17%, video 11.79% → 11.88%). This is a rate move, not a m
 
 ## D — Mild fill dip
 
-| | |
-|---|---|
-| **Window** | 2026-06-28 → 2026-06-30 |
+|              |                                 |
+| ------------ | ------------------------------- |
+| **Window**   | 2026-06-28 → 2026-06-30         |
 | **Headline** | Fill rate 0.785 → ~0.776 (−1pp) |
-| **Status** | **Not yet localized** |
+| **Status**   | **Not yet localized**           |
 
-Notable because revenue *rose* over this window ($444 → $543 → $546) on the growth trend, so the
+Notable because revenue _rose_ over this window ($444 → $543 → $546) on the growth trend, so the
 fill dip is **masked at the revenue level**. A revenue-only detector misses it entirely. Good
 regression test for whether detection is genuinely metric-agnostic; low priority for the demo.
 
@@ -164,18 +164,18 @@ way every week. A flat-average baseline flags all eight as anomalies. A trailing
 baseline (D-012) flags none.
 
 The glossary states at least one planted movement is pure seasonality. **This is it**, and `/scan`
-must return it as *cleared*, not alarmed. Success criterion in `goal.md` § 10.
+must return it as _cleared_, not alarmed. Success criterion in `goal.md` § 10.
 
 ---
 
 ## Recommended demo set
 
-| Order | Incident | What it proves |
-|---|---|---|
-| 1 | **A — Android 15** | Localization + residualization. 1 cause vs 21. The differentiator. |
-| 2 | **E — weekend decoy** | We don't cry wolf. Trust through refusal. |
-| 3 | **B — Jun 21 global** | We say "not localizable" instead of blaming BR. Honesty under a different failure mode. |
-| reserve | **C — finance eCPM** | Metric-agnostic, if a follow-up question needs it |
+| Order   | Incident              | What it proves                                                                          |
+| ------- | --------------------- | --------------------------------------------------------------------------------------- |
+| 1       | **A — Android 15**    | Localization + residualization. 1 cause vs 21. The differentiator.                      |
+| 2       | **E — weekend decoy** | We don't cry wolf. Trust through refusal.                                               |
+| 3       | **B — Jun 21 global** | We say "not localizable" instead of blaming BR. Honesty under a different failure mode. |
+| reserve | **C — finance eCPM**  | Metric-agnostic, if a follow-up question needs it                                       |
 
 Beats 1–3 map onto `goal.md` § 4 beats 2, 3 and 5. Feeds T-010 (demo script), T-025 (rehearsal) and
 T-037 (video script).
@@ -187,7 +187,7 @@ T-037 (video script).
 - **C** needs advertiser-level attribution to confirm its channel.
 - **D** is unlocalized.
 - **No pure mix-shift incident found** (T-031). The Simpson's-paradox pattern appears in this data as
-  *localization contamination* (incident A), not as a metric-level mix shift. T-041 is therefore
+  _localization contamination_ (incident A), not as a metric-level mix shift. T-041 is therefore
   justified by the unseen incident rather than by a found training case — a weaker footing than
   D-017, and it should be stated that way rather than implied.
 - Incidents A and C were found by hand. **Detection (T-014) must find them independently** — if the

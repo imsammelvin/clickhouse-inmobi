@@ -21,12 +21,7 @@
  * so a caller that is already tracing gets one continuous trace across the hop rather than two
  * disconnected ones.
  */
-import {
-  SpanKind,
-  SpanStatusCode,
-  context,
-  propagation,
-} from "@opentelemetry/api";
+import { SpanKind, SpanStatusCode, context, propagation } from "@opentelemetry/api";
 import { DATABASE, makeClient, selectOne } from "../clickhouse/client";
 import {
   API_PORT,
@@ -58,16 +53,9 @@ import {
 // instruments -- lazy, see counter()/histogram()
 // ---------------------------------------------------------------------------
 
-const requestCounter = counter(
-  "http.server.requests",
-  "HTTP requests served, by route and status",
-);
+const requestCounter = counter("http.server.requests", "HTTP requests served, by route and status");
 
-const requestDuration = histogram(
-  "http.server.duration",
-  "HTTP request duration",
-  "ms",
-);
+const requestDuration = histogram("http.server.duration", "HTTP request duration", "ms");
 
 // ---------------------------------------------------------------------------
 // setup
@@ -89,10 +77,8 @@ const json = (body: unknown, status: number, traceId: string): Response =>
 // ---------------------------------------------------------------------------
 
 const handlePing = async (traceId: string): Promise<Response> => {
-  const info = await trySpan(
-    "db.server_info",
-    { "db.system": "clickhouse" },
-    () => selectOne<ServerInfo>(client, SERVER_INFO),
+  const info = await trySpan("db.server_info", { "db.system": "clickhouse" }, () =>
+    selectOne<ServerInfo>(client, SERVER_INFO),
   );
 
   if (!info.ok) {
@@ -186,11 +172,7 @@ const handleHealth = (traceId: string): Response => {
 // request pipeline
 // ---------------------------------------------------------------------------
 
-const route = async (
-  request: Request,
-  path: string,
-  traceId: string,
-): Promise<Response> => {
+const route = async (request: Request, path: string, traceId: string): Promise<Response> => {
   if (request.method !== "GET") {
     return json({ error: "method not allowed" }, 405, traceId);
   }
@@ -203,11 +185,7 @@ const route = async (
     case ApiRoute.Health:
       return handleHealth(traceId);
     default:
-      return json(
-        { error: "not found", routes: Object.values(ApiRoute) },
-        404,
-        traceId,
-      );
+      return json({ error: "not found", routes: Object.values(ApiRoute) }, 404, traceId);
   }
 };
 
@@ -220,10 +198,7 @@ const handle = async (request: Request): Promise<Response> => {
   const url = new URL(request.url);
   const path = url.pathname;
 
-  const parent = propagation.extract(
-    context.active(),
-    Object.fromEntries(request.headers),
-  );
+  const parent = propagation.extract(context.active(), Object.fromEntries(request.headers));
 
   let traceId = "";
 

@@ -53,7 +53,5 @@ export const splitStatements = (sql: string): string[] => {
   }
   statements.push(buffer);
 
-  return statements
-    .map(stripComments)
-    .filter((statement) => statement.length > 0);
+  return statements.map(stripComments).filter((statement) => statement.length > 0);
 };

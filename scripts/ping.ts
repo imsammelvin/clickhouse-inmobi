@@ -7,11 +7,7 @@ import { DATABASE, makeClient, selectOne } from "../clickhouse/client";
 import { SERVER_INFO } from "../constants/queries";
 import type { ServerInfo } from "../interfaces";
 import { runScript } from "../utils/common.utils";
-import {
-  initObservability,
-  shutdownObservability,
-  withSpan,
-} from "../utils/telemetryUtils";
+import { initObservability, shutdownObservability, withSpan } from "../utils/telemetryUtils";
 import { log } from "../utils/telemetryUtils";
 
 const main = async (): Promise<void> => {

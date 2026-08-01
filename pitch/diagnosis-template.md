@@ -12,15 +12,15 @@ Lane D — this is what they build against.
 ## 1. The five blocks, in this order
 
 Order is not cosmetic. A revenue owner reads top-down and stops as soon as they know what to do, so
-the *action* must be reachable in the first two blocks and the *proof* must sit below it.
+the _action_ must be reachable in the first two blocks and the _proof_ must sit below it.
 
-| # | Block | Answers | Required? |
-|---|---|---|---|
-| 1 | **HEADLINE** | What moved, by how much, worth how much | Always |
-| 2 | **SO WHAT** | What kind of thing this is, who owns it, what it costs if ignored | Always |
-| 3 | **WHAT MOVED** | Which factor of the revenue identity | Always for revenue; omit for single-metric queries |
-| 4 | **WHERE** | The specific segment, with its size | Only if localizable — **say so explicitly when it isn't** |
-| 5 | **RULED OUT** | What was checked and cleared, with residuals | Always, even when empty |
+| #   | Block          | Answers                                                           | Required?                                                 |
+| --- | -------------- | ----------------------------------------------------------------- | --------------------------------------------------------- |
+| 1   | **HEADLINE**   | What moved, by how much, worth how much                           | Always                                                    |
+| 2   | **SO WHAT**    | What kind of thing this is, who owns it, what it costs if ignored | Always                                                    |
+| 3   | **WHAT MOVED** | Which factor of the revenue identity                              | Always for revenue; omit for single-metric queries        |
+| 4   | **WHERE**      | The specific segment, with its size                               | Only if localizable — **say so explicitly when it isn't** |
+| 5   | **RULED OUT**  | What was checked and cleared, with residuals                      | Always, even when empty                                   |
 
 Block 5 is never omitted. An empty ruled-out list is itself information: it means we didn't check
 anything, and the reader deserves to know that.
@@ -29,7 +29,7 @@ anything, and the reader deserves to know that.
 
 - **Every numeral carries an evidence id** — `[e7]`. No id, no numeral. The grounding check
   (T-019) rejects the response otherwise.
-- **Percentage points vs percent are different words.** Fill rate fell *3.5pp*, which is *−4.4%*.
+- **Percentage points vs percent are different words.** Fill rate fell _3.5pp_, which is _−4.4%_.
   Never write "3.5%" for a pp move.
 - **Name the segment in the schema's own vocabulary.** `os_version = 'Android 15'`, not "Android
   devices". A reader must be able to paste it into a filter.
@@ -43,7 +43,7 @@ anything, and the reader deserves to know that.
 
 ---
 
-## 3. Golden example — technical break *(incident A, real numbers)*
+## 3. Golden example — technical break _(incident A, real numbers)_
 
 ```
 Fill rate fell to 0.750 on 2026-06-23 to 06-25, down 3.5pp [e1] from a
@@ -85,7 +85,7 @@ appear in **WHERE** as co-causes, and the diagnosis is wrong in a way no reader 
 
 ---
 
-## 4. Golden example — not localizable *(incident B, real numbers)*
+## 4. Golden example — not localizable _(incident B, real numbers)_
 
 The case that breaks naive tools. **A system must be able to conclude "no segment is responsible."**
 
@@ -125,7 +125,7 @@ to be allowed to terminate with an empty cause set. Naming BR here would be a fa
 
 ---
 
-## 5. Golden example — seasonality, no alarm *(incident E, real numbers)*
+## 5. Golden example — seasonality, no alarm _(incident E, real numbers)_
 
 The shortest and possibly the most valuable output we produce.
 
@@ -175,9 +175,9 @@ for a validated capability — the standard D-017 set.
 RULED OUT must clear render rate and volume; SO WHAT states run-rate exposure and — if T-033 lands —
 substitutable advertisers on the same inventory.
 
-**Mix shift.** The one where the answer is *"nothing is broken."* WHAT MOVED splits Δblended into
+**Mix shift.** The one where the answer is _"nothing is broken."_ WHAT MOVED splits Δblended into
 rate effect and mix effect; WHERE names the dimension whose weights moved, not a broken segment;
-SO WHAT is explicitly **no action**. Requires T-041. *No training case found* — see T-031.
+SO WHAT is explicitly **no action**. Requires T-041. _No training case found_ — see T-031.
 
 **Exogenous event.** WHERE reports the fingerprint (onset/offset hours, geo + category
 concentration, request- vs price-driven, no same-weekday precedent). **Names the event only if it

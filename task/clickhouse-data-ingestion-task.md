@@ -11,8 +11,8 @@ Get the InMobi ad-events dataset — 9,000,000 events plus three dimension table
 ClickHouse Cloud service, in a way that can be run again and again without corrupting anything, and
 then **prove** that what landed in ClickHouse is exactly what was in the source files.
 
-That last part is not paranoia. We are judged on *"every number in the diagnosis must be
-reproducible from the data"*, and a single fabricated figure costs more than a missed anomaly. The
+That last part is not paranoia. We are judged on _"every number in the diagnosis must be
+reproducible from the data"_, and a single fabricated figure costs more than a missed anomaly. The
 cheapest way to end up with a fabricated figure is to quietly lose rows at ingest and never notice.
 So the ingest ships with a verifier that recomputes the funnel totals in a **different engine**
 (DuckDB, straight off the source Parquet) and asserts ClickHouse agrees — globally, and then day by
@@ -27,12 +27,12 @@ this layer is wrong, everything above it is confidently wrong.
 
 Four files in `InMobi/data/`, arranged as a star schema:
 
-| File | What it is | Rows |
-|---|---|---|
-| `ad_events.parquet` | fact table — one row per ad request | **9,000,000** |
-| `apps.csv` | dimension — `category`, `publisher_tier` | 2,000 |
-| `advertisers.csv` | dimension — `vertical`, `campaign_type` | 500 |
-| `geo_device.csv` | dimension — `region`, `country`, `device_model`, `os_version` | 5,000 |
+| File                | What it is                                                    | Rows          |
+| ------------------- | ------------------------------------------------------------- | ------------- |
+| `ad_events.parquet` | fact table — one row per ad request                           | **9,000,000** |
+| `apps.csv`          | dimension — `category`, `publisher_tier`                      | 2,000         |
+| `advertisers.csv`   | dimension — `vertical`, `campaign_type`                       | 500           |
+| `geo_device.csv`    | dimension — `region`, `country`, `device_model`, `os_version` | 5,000         |
 
 ```
         apps (2K)                          advertisers (500)
@@ -82,17 +82,17 @@ scripts/
 
 ### The rule for each folder
 
-| Path | What goes in it |
-|---|---|
-| `enums/index.ts` | Every literal that *names* something: table names, view names, dictionary names, dimension key columns, source filenames, ClickHouse data formats, env var names, CLI flags. If you are about to type a table name as a raw string, it belongs here. |
-| `interfaces/index.ts` | Every shape that crosses a function boundary. `LoadOptions`, `DayChunk`, `FunnelTotals`, `MetricSnapshot`, `PartStats`, `EnrichmentGaps`, and the row types for each query. |
-| `constants/index.ts` | Paths (`REPO_ROOT`, `DATA_DIR`, `FACT_FILE`, `CHUNK_DIR`), timeouts, `DEFAULT_CONCURRENCY` / `MAX_CONCURRENCY`, `RETRY_ATTEMPTS`, the backoff curve, the dimension load order, and the row counts each dimension must have. |
-| `constants/queries.ts` | Every SQL statement, as a named export. Statements prefixed `src` run in DuckDB against the raw files; the rest run in ClickHouse. The funnel-totals expression list is shared between both engines so `verify.ts` compares like with like. |
-| `utils/common.utils.ts` | Functions used by more than one script: `fmt`, `elapsed`, `secondsSince`, `closeEnough`, `withRetry`, `pool`, the DuckDB wrapper, flag parsing, `runScript`. |
-| `utils/sql.utils.ts` | Only `splitStatements` and `statementLabel` — parsing the DDL file. Kept separate because it is a parser, not a helper. |
-| `clickhouse/client.ts` | `makeClient()` plus `exec` / `select` / `selectOne`. One place for timeouts, compression and insert settings. |
-| `clickhouse/schema.sql` | The canonical DDL. Single owner. Everyone else reads it. |
-| `scripts/*.ts` | Orchestration only. |
+| Path                    | What goes in it                                                                                                                                                                                                                                      |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enums/index.ts`        | Every literal that _names_ something: table names, view names, dictionary names, dimension key columns, source filenames, ClickHouse data formats, env var names, CLI flags. If you are about to type a table name as a raw string, it belongs here. |
+| `interfaces/index.ts`   | Every shape that crosses a function boundary. `LoadOptions`, `DayChunk`, `FunnelTotals`, `MetricSnapshot`, `PartStats`, `EnrichmentGaps`, and the row types for each query.                                                                          |
+| `constants/index.ts`    | Paths (`REPO_ROOT`, `DATA_DIR`, `FACT_FILE`, `CHUNK_DIR`), timeouts, `DEFAULT_CONCURRENCY` / `MAX_CONCURRENCY`, `RETRY_ATTEMPTS`, the backoff curve, the dimension load order, and the row counts each dimension must have.                          |
+| `constants/queries.ts`  | Every SQL statement, as a named export. Statements prefixed `src` run in DuckDB against the raw files; the rest run in ClickHouse. The funnel-totals expression list is shared between both engines so `verify.ts` compares like with like.          |
+| `utils/common.utils.ts` | Functions used by more than one script: `fmt`, `elapsed`, `secondsSince`, `closeEnough`, `withRetry`, `pool`, the DuckDB wrapper, flag parsing, `runScript`.                                                                                         |
+| `utils/sql.utils.ts`    | Only `splitStatements` and `statementLabel` — parsing the DDL file. Kept separate because it is a parser, not a helper.                                                                                                                              |
+| `clickhouse/client.ts`  | `makeClient()` plus `exec` / `select` / `selectOne`. One place for timeouts, compression and insert settings.                                                                                                                                        |
+| `clickhouse/schema.sql` | The canonical DDL. Single owner. Everyone else reads it.                                                                                                                                                                                             |
+| `scripts/*.ts`          | Orchestration only.                                                                                                                                                                                                                                  |
 
 **The invariant:** a file in `scripts/` contains **no interfaces, no constants, no enums and no raw
 SQL**. It reads config from `constants/`, types from `interfaces/`, names from `enums/`, SQL from
@@ -211,15 +211,15 @@ natural version column, so a full replace is both simplest and correct), then
 
 ### Loader flags
 
-| Flag | Effect |
-|---|---|
-| `--force` | Reload every day even if its row count already matches |
-| `--dims-only` | Only the three dimension tables |
-| `--facts-only` | Only `ad_events` |
-| `--only=2026-06-21,2026-06-22` | Just these days — fast iteration on one incident |
-| `--concurrency=6` | Parallel day uploads (default 4, max 16) |
-| `--skip-extract` | Reuse the daily chunks already on disk |
-| `--keep-chunks` | Don't delete `clickhouse/.chunks` afterwards |
+| Flag                           | Effect                                                 |
+| ------------------------------ | ------------------------------------------------------ |
+| `--force`                      | Reload every day even if its row count already matches |
+| `--dims-only`                  | Only the three dimension tables                        |
+| `--facts-only`                 | Only `ad_events`                                       |
+| `--only=2026-06-21,2026-06-22` | Just these days — fast iteration on one incident       |
+| `--concurrency=6`              | Parallel day uploads (default 4, max 16)               |
+| `--skip-extract`               | Reuse the daily chunks already on disk                 |
+| `--keep-chunks`                | Don't delete `clickhouse/.chunks` afterwards           |
 
 Requires the `duckdb` CLI on PATH (`brew install duckdb`).
 
@@ -266,7 +266,7 @@ During a forced full reload at concurrency 6:
 2026-07-02: expected 284,319 rows in partition 20260702, found 0
 ```
 
-**Cause.** `ALTER TABLE … DROP PARTITION` is applied *asynchronously per replica*. Under
+**Cause.** `ALTER TABLE … DROP PARTITION` is applied _asynchronously per replica_. Under
 concurrency, the drop could land **after** the `INSERT` that followed it — deleting the day that had
 just been loaded.
 
@@ -276,7 +276,7 @@ the job even when the data was fine.
 
 **Fixes, both in place:**
 
-- `alter_sync = "2"` on the drop — wait for *every* replica to apply it before inserting.
+- `alter_sync = "2"` on the drop — wait for _every_ replica to apply it before inserting.
 - The confirmation now counts rows in the **table itself** with
   `SETTINGS select_sequential_consistency = 1`, which gives read-your-writes.
 - Drop + insert + confirm are retried as a single unit. If the confirmation fails we do not know
@@ -290,27 +290,27 @@ at a diagnosis built on a hole in the data.
 
 ## 8. Results
 
-| | |
-|---|---|
-| **Load** | 9,000,000 rows in **6.0s** (~1,489,525 rows/s, concurrency 6) |
-| **Re-run** | no-op in 2.1s — every day skipped, nothing rewritten |
-| **Verify** | **30/30 checks pass** in 1.4s |
-| **Storage** | 89.25 MiB on disk (218.10 MiB raw, 2.44x), 35 parts |
+|             |                                                               |
+| ----------- | ------------------------------------------------------------- |
+| **Load**    | 9,000,000 rows in **6.0s** (~1,489,525 rows/s, concurrency 6) |
+| **Re-run**  | no-op in 2.1s — every day skipped, nothing rewritten          |
+| **Verify**  | **30/30 checks pass** in 1.4s                                 |
+| **Storage** | 89.25 MiB on disk (218.10 MiB raw, 2.44x), 35 parts           |
 
 Funnel totals, reconciled against the source Parquet:
 
-| Metric | Value |
-|---|---|
-| Requests | 9,000,000 |
-| Fills | 7,027,910 |
-| Impressions | 6,887,058 |
-| Clicks | 74,940 |
-| Revenue | 17,020.3642 |
-| Fill rate | 0.7809 |
-| Render rate | 0.9800 |
-| CTR | 0.0109 |
-| eCPM | 2.4714 |
-| RPR | 0.001891 |
+| Metric      | Value       |
+| ----------- | ----------- |
+| Requests    | 9,000,000   |
+| Fills       | 7,027,910   |
+| Impressions | 6,887,058   |
+| Clicks      | 74,940      |
+| Revenue     | 17,020.3642 |
+| Fill rate   | 0.7809      |
+| Render rate | 0.9800      |
+| CTR         | 0.0109      |
+| eCPM        | 2.4714      |
+| RPR         | 0.001891    |
 
 What `verify.ts` checks: dimension row counts and key uniqueness · global funnel totals vs DuckDB ·
 **per-day row counts and revenue for all 35 days** · no duplicated rows · every event resolves its
@@ -319,6 +319,7 @@ no impression without a fill, no revenue without an impression) · the revenue i
 glossary · metric sanity ranges.
 
 > ### Note for the anomaly-detection lane
+>
 > **`2026-06-21` has 126,052 events** against ~270,000 on neighbouring days — less than half the
 > volume. That is **in the source data, not an ingest fault**: `verify.ts` reconciles that day
 > exactly against the Parquet. It looks like a planted request-volume anomaly.
@@ -352,13 +353,13 @@ bun run ch:load -- --only=2026-06-21
 ## 10. Hosting — where ClickHouse actually runs
 
 Our service is **already provisioned** and nothing needs creating:
-`ket4….ap-south-1.aws.clickhouse.cloud`, server 26.2.1. The problem statement requires it — *"Load
-the dataset into your team's own ClickHouse Cloud service. There is no shared instance."*
+`ket4….ap-south-1.aws.clickhouse.cloud`, server 26.2.1. The problem statement requires it — _"Load
+the dataset into your team's own ClickHouse Cloud service. There is no shared instance."_
 
 For reference, creating one from scratch:
 
 1. Sign up at <https://clickhouse.cloud>, apply the hackathon credits.
-2. **Create service** → pick a region *close to you*. Ours is `ap-south-1` (Mumbai). Every INSERT is
+2. **Create service** → pick a region _close to you_. Ours is `ap-south-1` (Mumbai). Every INSERT is
    an HTTP round trip from your laptop, so a US region would roughly triple ingest time from India.
 3. Cloud shows the connection details **once**. They go in `.env`:
 
@@ -371,8 +372,7 @@ For reference, creating one from scratch:
 
 Three things that waste an hour if you don't know them:
 
-- **Port 8443 is the HTTPS interface.** `@clickhouse/client` speaks HTTP, not the native protocol on
-  9440. Using 9440 gives a confusing TLS error.
+- **Port 8443 is the HTTPS interface.** `@clickhouse/client` speaks HTTP, not the native protocol on 9440. Using 9440 gives a confusing TLS error.
 - **Settings → IP access list.** A new service is locked down by default. The symptom of forgetting
   this is a connection timeout, not a clear error message.
 - **Cloud idles the service after ~15 minutes** of no queries. The first query after an idle period
@@ -425,7 +425,7 @@ Honest list, so nobody assumes otherwise:
   (`ad_events_enriched`).
 - No `clickhouse/README.md` — this document covers the same ground for now.
 - **No materialized views or pre-aggregated rollups.** Deliberate: they belong to whoever owns
-  anomaly detection, and MVs only fire on insert, so they must be created *before* a reload.
+  anomaly detection, and MVs only fire on insert, so they must be created _before_ a reload.
 - The branch is **not merged to `main`** and has had no review.
 
 ### Contract for other lanes

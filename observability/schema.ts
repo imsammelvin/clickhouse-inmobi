@@ -21,9 +21,7 @@ import { splitStatements, statementLabel } from "../utils/sql.utils";
 import { log } from "../utils/telemetryUtils";
 
 const main = async (): Promise<void> => {
-  const statements = splitStatements(
-    readFileSync(CLICKSTACK_SCHEMA_FILE, "utf8"),
-  );
+  const statements = splitStatements(readFileSync(CLICKSTACK_SCHEMA_FILE, "utf8"));
 
   const client = makeTelemetryClient();
 

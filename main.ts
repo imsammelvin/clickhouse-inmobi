@@ -15,21 +15,11 @@
  */
 import type { ClickHouseClient } from "@clickhouse/client";
 import { DATABASE, makeClient, select } from "./clickhouse/client";
-import {
-  APP_WORKLOAD_INTERVAL_S,
-  OTEL_ENDPOINT,
-  SERVICE_NAME,
-} from "./constants";
+import { APP_WORKLOAD_INTERVAL_S, OTEL_ENDPOINT, SERVICE_NAME } from "./constants";
 import * as Q from "./constants/queries";
 import { AppFlag } from "./enums";
 import type { AppOptions, WorkloadQuery } from "./interfaces";
-import {
-  elapsed,
-  flagValue,
-  hasFlag,
-  runScript,
-  sleep,
-} from "./utils/common.utils";
+import { elapsed, flagValue, hasFlag, runScript, sleep } from "./utils/common.utils";
 import {
   counter,
   flushObservability,
@@ -66,9 +56,7 @@ const WORKLOAD: WorkloadQuery[] = [
 export const parseArgs = (argv: string[]): AppOptions => {
   const loop = hasFlag(argv, AppFlag.Loop);
 
-  const interval = Number(
-    flagValue(argv, AppFlag.Interval) ?? APP_WORKLOAD_INTERVAL_S,
-  );
+  const interval = Number(flagValue(argv, AppFlag.Interval) ?? APP_WORKLOAD_INTERVAL_S);
   if (!Number.isFinite(interval) || interval < 0) {
     throw new Error(
       `${AppFlag.Interval} must be a non-negative number of seconds, got "${interval}"`,
@@ -77,15 +65,9 @@ export const parseArgs = (argv: string[]): AppOptions => {
 
   const rawIterations = flagValue(argv, AppFlag.Iterations);
   // Without --loop a single pass is the whole run; with it, unbounded unless capped.
-  const iterations = rawIterations
-    ? Number(rawIterations)
-    : loop
-      ? Infinity
-      : 1;
+  const iterations = rawIterations ? Number(rawIterations) : loop ? Infinity : 1;
   if (!(iterations > 0)) {
-    throw new Error(
-      `${AppFlag.Iterations} must be a positive integer, got "${rawIterations}"`,
-    );
+    throw new Error(`${AppFlag.Iterations} must be a positive integer, got "${rawIterations}"`);
   }
 
   return { loop, interval, iterations };
@@ -98,10 +80,7 @@ export const parseArgs = (argv: string[]): AppOptions => {
 // the no-op meter provider that exists before initObservability() runs and export nothing.
 // ---------------------------------------------------------------------------
 
-const queryCounter = counter(
-  "app.queries",
-  "Workload queries executed, by name and outcome",
-);
+const queryCounter = counter("app.queries", "Workload queries executed, by name and outcome");
 
 const queryDuration = histogram(
   "app.query.duration",
@@ -123,55 +102,44 @@ const passDuration = histogram(
  * Run one query under its own span. The `select()` helper opens a nested `clickhouse.select` span
  * underneath, which is what gives the trace its shape: pass -> query -> statement.
  */
-const runQuery = async (
-  client: ClickHouseClient,
-  query: WorkloadQuery,
-): Promise<void> => {
+const runQuery = async (client: ClickHouseClient, query: WorkloadQuery): Promise<void> => {
   const startedAt = performance.now();
 
-  await withSpan(
-    "app.query",
-    { "app.query.name": query.name },
-    async (span) => {
-      try {
-        const rows = await select<Record<string, unknown>>(client, query.sql);
-        const ms = elapsed(startedAt) * 1000;
+  await withSpan("app.query", { "app.query.name": query.name }, async (span) => {
+    try {
+      const rows = await select<Record<string, unknown>>(client, query.sql);
+      const ms = elapsed(startedAt) * 1000;
 
-        span.setAttribute("app.query.rows", rows.length);
-        span.setAttribute("app.query.duration_ms", Math.round(ms));
-        queryCounter().add(1, {
-          "app.query.name": query.name,
-          "app.query.outcome": "ok",
-        });
-        queryDuration().record(ms, { "app.query.name": query.name });
+      span.setAttribute("app.query.rows", rows.length);
+      span.setAttribute("app.query.duration_ms", Math.round(ms));
+      queryCounter().add(1, {
+        "app.query.name": query.name,
+        "app.query.outcome": "ok",
+      });
+      queryDuration().record(ms, { "app.query.name": query.name });
 
-        // Emitted inside the span, so ClickStack files it under this trace.
-        log.info("query ok", {
-          "app.query.name": query.name,
-          "app.query.rows": rows.length,
-          "app.query.duration_ms": Math.round(ms),
-        });
-      } catch (error) {
-        queryCounter().add(1, {
-          "app.query.name": query.name,
-          "app.query.outcome": "error",
-        });
-        log.error("query failed", {
-          "app.query.name": query.name,
-          "error.message":
-            error instanceof Error ? error.message : String(error),
-        });
-        throw error;
-      }
-    },
-  );
+      // Emitted inside the span, so ClickStack files it under this trace.
+      log.info("query ok", {
+        "app.query.name": query.name,
+        "app.query.rows": rows.length,
+        "app.query.duration_ms": Math.round(ms),
+      });
+    } catch (error) {
+      queryCounter().add(1, {
+        "app.query.name": query.name,
+        "app.query.outcome": "error",
+      });
+      log.error("query failed", {
+        "app.query.name": query.name,
+        "error.message": error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  });
 };
 
 /** One full pass over the workload. Becomes exactly one trace in ClickStack. */
-const runPass = async (
-  client: ClickHouseClient,
-  pass: number,
-): Promise<number> => {
+const runPass = async (client: ClickHouseClient, pass: number): Promise<number> => {
   const startedAt = performance.now();
 
   await withSpan(

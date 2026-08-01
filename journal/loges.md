@@ -10,6 +10,7 @@ think nothing happened — especially the loose ends.
 ### 2026-08-01 — session 1
 
 **Done**
+
 - Filled `goal.md` §1–12 (one-liner, why-ClickHouse, demo script, scope, architecture, data model,
   interfaces, milestones, success criteria, decision log, risks) from the pre-event plan reconciled
   against `anarix_hackathon_context.md` and `draft_plan.md`.
@@ -25,23 +26,28 @@ think nothing happened — especially the loose ends.
   name) since I have a real name now — no functional change, just readability.
 
 **Half-done — where the loose end is**
+
 - `goal.md` §7/§8 (LOCKED sections) are drafted solo, not yet confirmed by the other three — flag
   disagreements in BROADCAST rather than silently editing.
 - No code written yet — this session was 100% planning/coordination-doc work.
 
 **Blocked on**
+
 - Nothing blocking; next real work (schema.sql, detection sweep query) is unclaimed in TASKS.md.
 
 **Decided, and why** (also in `goal.md` § 11)
+
 - Detection sweep is a required Stage 0 (not assumed given) — unseen incident has no human trigger.
 - Deterministic fixed pipeline, LLM narrates only, never plans investigation steps.
 - LibreChat-only UI, no separate tree UI — matches "polished frontends out of scope."
 
 **Next session, start here**
+
 - Claim T-006 (schema.sql) or T-014 (detection sweep query) depending on who's free.
 - Start `backend/` scaffold: Stage 0–6 orchestrator skeleton + Langfuse wiring stub against a mocked
   ClickHouse response, per `goal.md` § 8 interface contracts — don't wait on Lane B.
 
 **Branches left open**
+
 - `dev/loges/kickoff-goal` — goal.md, AGENTS.md, TASKS.md changes, committed locally, not yet pushed
   (syncing manually, teammates are pushing independently).
