@@ -14,8 +14,15 @@
  */
 import { Ledger } from "./ledger";
 import { METRICS, metricExpr } from "./metrics";
-import { MIN_BASELINE_DAYS, robustBaseline, DATASET_START, DATASET_END, datesBetween } from "./baseline";
+import {
+  MIN_BASELINE_DAYS,
+  robustBaseline,
+  DATASET_START,
+  DATASET_END,
+  datesBetween,
+} from "./baseline";
 import { MIN_ABS_PCT, MIN_SIGMA } from "./stages/detect";
+import { log } from "../utils/telemetryUtils";
 
 /**
  * Incidents we located by hand (pitch/incident-dossier.md). This is NOT the answer key — it is our
@@ -23,13 +30,28 @@ import { MIN_ABS_PCT, MIN_SIGMA } from "./stages/detect";
  * anomalies we never spotted, which would make real recall lower than this reports, never higher.
  */
 export const KNOWN_INCIDENTS: Array<{ dates: string[]; metric: string; label: string }> = [
-  { dates: ["2026-06-23", "2026-06-24", "2026-06-25"], metric: "fill_rate", label: "A Android 15 fill collapse" },
+  {
+    dates: ["2026-06-23", "2026-06-24", "2026-06-25"],
+    metric: "fill_rate",
+    label: "A Android 15 fill collapse",
+  },
   { dates: ["2026-06-21"], metric: "requests", label: "B global volume collapse" },
-  { dates: ["2026-06-19", "2026-06-20", "2026-06-21", "2026-06-22"], metric: "ecpm", label: "C finance eCPM" },
-  { dates: ["2026-06-28", "2026-06-29", "2026-06-30"], metric: "fill_rate", label: "D mild fill dip" },
+  {
+    dates: ["2026-06-19", "2026-06-20", "2026-06-21", "2026-06-22"],
+    metric: "ecpm",
+    label: "C finance eCPM",
+  },
+  {
+    dates: ["2026-06-28", "2026-06-29", "2026-06-30"],
+    metric: "fill_rate",
+    label: "D mild fill dip",
+  },
 ];
 
-interface Row { d: string; v: number | null }
+interface Row {
+  d: string;
+  v: number | null;
+}
 
 async function seriesFor(ledger: Ledger, metric: string): Promise<Map<string, number>> {
   const def = METRICS[metric]!;
@@ -41,7 +63,10 @@ GROUP BY event_date ORDER BY event_date`.trim();
   return new Map(rows.map((r) => [r.d, Number(r.v ?? 0)]));
 }
 
-function evaluate(series: Map<string, number>, day: string): { pct: number; sigma: number; fired: boolean; n: number } {
+function evaluate(
+  series: Map<string, number>,
+  day: string,
+): { pct: number; sigma: number; fired: boolean; n: number } {
   const t = Date.parse(`${day}T00:00:00Z`);
   const base: number[] = [];
   for (let k = 1; k <= 4; k++) {
@@ -56,10 +81,20 @@ function evaluate(series: Map<string, number>, day: string): { pct: number; sigm
   const { centre, spread } = robustBaseline(base);
   const pct = centre === 0 ? 0 : ((actual - centre) / centre) * 100;
   const sigma = spread === 0 ? 0 : (actual - centre) / spread;
-  return { pct, sigma, fired: Math.abs(pct) >= MIN_ABS_PCT && Math.abs(sigma) >= MIN_SIGMA, n: base.length };
+  return {
+    pct,
+    sigma,
+    fired: Math.abs(pct) >= MIN_ABS_PCT && Math.abs(sigma) >= MIN_SIGMA,
+    n: base.length,
+  };
 }
 
-export interface Firing { metric: string; day: string; pct: number; sigma: number }
+export interface Firing {
+  metric: string;
+  day: string;
+  pct: number;
+  sigma: number;
+}
 
 export interface ScanResult {
   fired: Firing[];
@@ -103,22 +138,35 @@ async function main(): Promise<void> {
   const metrics = only >= 0 ? [process.argv[only + 1]!] : DEFAULT_METRICS;
   const { fired, found, missed, extra } = await scanAll(metrics);
   {
-
-    console.log(`\nFIRED (${fired.length})`);
+    log.info(`\nFIRED (${fired.length})`);
     for (const f of fired) {
-      console.log(`  ${f.day}  ${f.metric.padEnd(10)} ${f.pct >= 0 ? "+" : ""}${f.pct.toFixed(1)}%  ${f.sigma.toFixed(1)} sigma`);
+      log.info(
+        `  ${f.day}  ${f.metric.padEnd(10)} ${f.pct >= 0 ? "+" : ""}${f.pct.toFixed(1)}%  ${f.sigma.toFixed(1)} sigma`,
+      );
     }
 
-    console.log(`\nAGAINST KNOWN INCIDENTS`);
-    for (const f of found) console.log(`  FOUND   ${f}`);
-    for (const m of missed) console.log(`  MISSED  ${m}`);
+    log.info(`\nAGAINST KNOWN INCIDENTS`, {
+      "scan.fired": fired.length,
+      "scan.found": found.length,
+      "scan.missed": missed.length,
+      "scan.untriaged": extra.length,
+      "scan.known_total": KNOWN_INCIDENTS.length,
+    });
+    for (const f of found) log.info(`  FOUND   ${f}`);
+    for (const m of missed) log.info(`  MISSED  ${m}`);
 
-    console.log(`\nNOT IN THE KNOWN LIST (${extra.length}) — undiscovered incidents or false alarms`);
+    log.info(`\nNOT IN THE KNOWN LIST (${extra.length}) — undiscovered incidents or false alarms`);
     for (const f of extra.slice(0, 20)) {
-      console.log(`  ${f.day}  ${f.metric.padEnd(10)} ${f.pct >= 0 ? "+" : ""}${f.pct.toFixed(1)}%  ${f.sigma.toFixed(1)} sigma`);
+      log.info(
+        `  ${f.day}  ${f.metric.padEnd(10)} ${f.pct >= 0 ? "+" : ""}${f.pct.toFixed(1)}%  ${f.sigma.toFixed(1)} sigma`,
+      );
     }
-    console.log("");
+    log.info("");
   }
 }
 
-if (import.meta.main) main().catch((e) => { console.error(e); process.exit(1); });
+if (import.meta.main)
+  main().catch((e) => {
+    log.error(String(e));
+    process.exit(1);
+  });

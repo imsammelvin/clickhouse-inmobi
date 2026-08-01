@@ -69,8 +69,7 @@ export function baselineDates(from: string, to: string): string[] {
   return [...out].sort();
 }
 
-export const sqlDateList = (dates: string[]): string =>
-  dates.map((d) => `'${d}'`).join(",");
+export const sqlDateList = (dates: string[]): string => dates.map((d) => `'${d}'`).join(",");
 
 export function mean(xs: number[]): number {
   return xs.reduce((a, b) => a + b, 0) / xs.length;

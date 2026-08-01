@@ -7,6 +7,7 @@
 import { Ledger } from "./ledger";
 import { investigate } from "./orchestrate";
 import { renderFull } from "./render";
+import { log } from "../utils/telemetryUtils";
 
 function arg(name: string, fallback?: string): string {
   const i = process.argv.indexOf(`--${name}`);
@@ -26,10 +27,20 @@ async function main(): Promise<void> {
   try {
     const inv = await investigate({ metric, from, to, ledger });
     if (asJson) {
-      console.log(JSON.stringify(inv, null, 2));
+      // Raw stdout, deliberately: --json exists to be piped, and shipping a whole Investigation
+      // into the log pipeline on every run would be noise, not telemetry.
+      process.stdout.write(`${JSON.stringify(inv, null, 2)}\n`);
     } else {
-      console.log(renderFull(inv));
-      console.log(`total ${Date.now() - started}ms, ${ledger.totalQueries()} queries\n`);
+      log.info(renderFull(inv));
+      // Human line stays clean; the structured record carries what ClickStack needs to chart
+      // latency and outcome per metric. Kept to four attributes for the same readability reason.
+      log.info(`total ${Date.now() - started}ms, ${ledger.totalQueries()} queries\n`);
+      log.info("investigation.complete", {
+        "app.metric": metric,
+        "app.channel": inv.primaryChannel,
+        "app.queries": ledger.totalQueries(),
+        "app.duration_ms": Date.now() - started,
+      });
     }
   } finally {
     await ledger.close();
@@ -38,7 +49,7 @@ async function main(): Promise<void> {
 
 if (import.meta.main) {
   main().catch((err) => {
-    console.error(err instanceof Error ? err.message : err);
+    log.error(String(err instanceof Error ? err.message : err));
     process.exit(1);
   });
 }

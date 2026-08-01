@@ -76,7 +76,8 @@ export async function investigate(opts: InvestigateOptions): Promise<Investigati
   );
 
   // Sweep the driving factor, not the headline metric — that is the point of decomposing first.
-  const sweepMetric = det.anomalous && dec.driver && METRICS[dec.driver.name] ? dec.driver.name : metric;
+  const sweepMetric =
+    det.anomalous && dec.driver && METRICS[dec.driver.name] ? dec.driver.name : metric;
 
   // ---- Stage 2: localize ---------------------------------------------------------------
   ledger.beginStage("localize");
@@ -93,7 +94,7 @@ export async function investigate(opts: InvestigateOptions): Promise<Investigati
     res.uniform
       ? "uniform across all dimensions — no localizable cause"
       : `${raw.length} raw candidate(s) reduced to ${res.causes.length} cause(s); ` +
-        `${res.contamination.length} cleared as contamination.`,
+          `${res.contamination.length} cleared as contamination.`,
   );
 
   // ---- Stage 4: classify ---------------------------------------------------------------
@@ -121,13 +122,18 @@ export async function investigate(opts: InvestigateOptions): Promise<Investigati
       label: `cause.${c.dimension}.${c.value}.delta`,
       value: Number((c.deltaPp ?? c.deltaPct).toFixed(4)),
       unit: c.deltaPp !== null ? "pp" : "pct",
-      sql: causeSqlRef, window: { from, to }, filters: { segment: `${c.dimension}='${c.value}'` },
+      sql: causeSqlRef,
+      window: { from, to },
+      filters: { segment: `${c.dimension}='${c.value}'` },
       segmentSharePct: Number(c.sharePct.toFixed(4)),
     });
     ledger.record({
       label: `cause.${c.dimension}.${c.value}.share_pct`,
-      value: Number(c.sharePct.toFixed(4)), unit: "pct",
-      sql: causeSqlRef, window: { from, to }, filters: { segment: `${c.dimension}='${c.value}'` },
+      value: Number(c.sharePct.toFixed(4)),
+      unit: "pct",
+      sql: causeSqlRef,
+      window: { from, to },
+      filters: { segment: `${c.dimension}='${c.value}'` },
     });
     findings.push({
       channel: cls.channel,
@@ -167,13 +173,17 @@ export async function investigate(opts: InvestigateOptions): Promise<Investigati
       label: `cleared.${c.dimension}.${c.value}.raw`,
       value: Number((c.deltaPp ?? c.deltaPct).toFixed(4)),
       unit: c.deltaPp !== null ? "pp" : "pct",
-      sql: c.sql, window: { from, to }, filters: { segment: `${c.dimension}='${c.value}'` },
+      sql: c.sql,
+      window: { from, to },
+      filters: { segment: `${c.dimension}='${c.value}'` },
     });
     ledger.record({
       label: `cleared.${c.dimension}.${c.value}.residual`,
       value: Number((c.residualPp ?? c.residualDelta).toFixed(4)),
       unit: c.residualPp !== null ? "pp" : "pct",
-      sql: c.sql, window: { from, to }, filters: { segment: `${c.dimension}='${c.value}'` },
+      sql: c.sql,
+      window: { from, to },
+      filters: { segment: `${c.dimension}='${c.value}'` },
     });
     ruledOut.push({
       channel: cls.channel,
@@ -201,33 +211,52 @@ export async function investigate(opts: InvestigateOptions): Promise<Investigati
     const SHOWN = 6;
     ledger.record({
       label: "cleared_as_contamination.count",
-      value: res.contamination.length, unit: "count",
-      sql: res.contamination[0]?.sql ?? "", window: { from, to }, filters: {},
+      value: res.contamination.length,
+      unit: "count",
+      sql: res.contamination[0]?.sql ?? "",
+      window: { from, to },
+      filters: {},
     });
     if (res.contamination.length > SHOWN) {
       ledger.record({
         label: "cleared_as_contamination.not_shown",
-        value: res.contamination.length - SHOWN, unit: "count",
-        sql: res.contamination[0]?.sql ?? "", window: { from, to }, filters: {},
+        value: res.contamination.length - SHOWN,
+        unit: "count",
+        sql: res.contamination[0]?.sql ?? "",
+        window: { from, to },
+        filters: {},
       });
     }
   }
 
   for (const chk of cls.cleared) {
     ruledOut.push({
-      channel: cls.channel, segment: null, metric: sweepMetric,
-      deltaAbs: null, deltaPct: null, deltaPp: null, revenueImpactUsd: null,
-      significanceSigma: null, status: "cleared_as_normal", evidenceIds: [],
+      channel: cls.channel,
+      segment: null,
+      metric: sweepMetric,
+      deltaAbs: null,
+      deltaPct: null,
+      deltaPp: null,
+      revenueImpactUsd: null,
+      significanceSigma: null,
+      status: "cleared_as_normal",
+      evidenceIds: [],
       note: `${chk.check}: ${chk.detail}`,
     });
   }
 
   for (const f of dec.factors.filter((f) => !f.isDriver)) {
     ruledOut.push({
-      channel: cls.channel, segment: null, metric: f.name,
-      deltaAbs: f.incValue - f.baseValue, deltaPct: f.deltaPct, deltaPp: null,
-      revenueImpactUsd: f.revenueEffect, significanceSigma: null,
-      status: "cleared_as_normal", evidenceIds: [f.evidenceId],
+      channel: cls.channel,
+      segment: null,
+      metric: f.name,
+      deltaAbs: f.incValue - f.baseValue,
+      deltaPct: f.deltaPct,
+      deltaPp: null,
+      revenueImpactUsd: f.revenueEffect,
+      significanceSigma: null,
+      status: "cleared_as_normal",
+      evidenceIds: [f.evidenceId],
       note: `${f.name} moved ${f.deltaPct.toFixed(1)}%, worth ${fmtUsd(f.revenueEffect)}/day — not the driver.`,
     });
   }
@@ -257,4 +286,6 @@ export async function investigate(opts: InvestigateOptions): Promise<Investigati
 const fmt = (n: number): string => (Math.abs(n) < 1 ? n.toFixed(4) : n.toFixed(2));
 const fmtUsd = (n: number): string => `${n < 0 ? "-" : ""}$${Math.abs(n).toFixed(2)}`;
 const fmtDelta = (pp: number | null, pct: number): string =>
-  pp !== null ? `${pp >= 0 ? "+" : ""}${pp.toFixed(2)}pp` : `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`;
+  pp !== null
+    ? `${pp >= 0 ? "+" : ""}${pp.toFixed(2)}pp`
+    : `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`;
