@@ -29,6 +29,7 @@ import { groupIntoIncidents, scanSegments } from "../engine/segments";
 import { DATASET_END, ensureDatasetBounds } from "../engine/baseline";
 import { estimateWeeklyGrowth } from "../engine/baseline";
 import { METRICS, metricExpr } from "../engine/metrics";
+import { deliveryStatus, sendEmail } from "./notify";
 
 const DIR = process.env.MCP_WATCH_DIR ?? "backend/mcp/watches";
 const FILE = join(DIR, "watches.json");
@@ -197,6 +198,16 @@ if (import.meta.main) {
     process.stdout.write(`${s}\n`);
   };
 
+  const testTo = process.argv.indexOf("--test-email");
+  if (testTo >= 0) {
+    // Proves credentials end to end without waiting for an anomaly to recur.
+    const to = process.argv[testTo + 1] ?? "";
+    say(`\ndelivery: ${deliveryStatus()}`);
+    const d = await sendEmail(to, "Watchman test", "If you are reading this, SMTP works.");
+    say(d.sent ? `  sent to ${to}\n` : `  NOT sent: ${d.reason}\n`);
+    process.exit(d.sent ? 0 : 1);
+  }
+
   if (process.argv.includes("--list")) {
     const watches = listWatches();
     say(`\n${watches.length} watch(es)\n`);
@@ -210,14 +221,19 @@ if (import.meta.main) {
     say(``);
   } else {
     const found = await runOnce();
-    say(`\nWATCH — ${listWatches().length} watch(es), ${found.length} new event(s)\n`);
+    say(`\nWATCH — ${listWatches().length} watch(es), ${found.length} new event(s)`);
+    say(`  delivery: ${deliveryStatus()}\n`);
     for (const n of found) {
-      say(`  -> ${n.watch.userEmail ?? n.watch.userId}`);
-      say(renderNotification(n).split("\n").map((l) => `     ${l}`).join("\n"));
+      const to = n.watch.userEmail ?? "";
+      const body = renderNotification(n);
+      const where = n.watch.dimension ? `${n.watch.dimension} = '${n.watch.value}'` : "the platform";
+      const d = await sendEmail(to, `${n.watch.metric} moved again on ${where}`, body);
+      say(`  -> ${to || n.watch.userId}   ${d.sent ? "emailed" : `not emailed: ${d.reason}`}`);
+      say(body.split("\n").map((l) => `     ${l}`).join("\n"));
       say(``);
     }
     if (found.length === 0) say(`  Nothing new. Watermarks unchanged.\n`);
-    say(`  Delivery: appended to ${LOG}. Wire an SMTP or webhook sink here to mail it.\n`);
+    say(`  Every event is also appended to ${LOG}.\n`);
   }
   process.exit(0);
 }
