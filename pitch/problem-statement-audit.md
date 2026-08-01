@@ -7,29 +7,29 @@
 
 ## 1. The four things we were asked to build
 
-| # | Requirement | Status | Evidence |
-|---|---|---|---|
-| 1 | **Detect** when a key metric deviates from its expected baseline | ⚠️ **Partial — 2 of 4** | `scan.ts` finds incidents A and B, misses C and D |
-| 2 | **Automatically drill down** to isolate the segment(s) responsible | ✅ **Strong** | 42 raw candidates → 1 cause on incident A, in ClickHouse |
-| 3 | **Plain-language diagnosis**, every claim backed by a computed number | ⚠️ **Deterministic only** | CLI renders it; no LLM narration layer yet |
-| 4 | **Bonus:** state what was checked and ruled out | ✅ **Strongest thing we have** | 38 segments cleared with residuals, free from the deflation loop |
+| #   | Requirement                                                           | Status                         | Evidence                                                         |
+| --- | --------------------------------------------------------------------- | ------------------------------ | ---------------------------------------------------------------- |
+| 1   | **Detect** when a key metric deviates from its expected baseline      | ⚠️ **Partial — 2 of 4**        | `scan.ts` finds incidents A and B, misses C and D                |
+| 2   | **Automatically drill down** to isolate the segment(s) responsible    | ✅ **Strong**                  | 42 raw candidates → 1 cause on incident A, in ClickHouse         |
+| 3   | **Plain-language diagnosis**, every claim backed by a computed number | ⚠️ **Deterministic only**      | CLI renders it; no LLM narration layer yet                       |
+| 4   | **Bonus:** state what was checked and ruled out                       | ✅ **Strongest thing we have** | 38 segments cleared with residuals, free from the deflation loop |
 
 ## 2. The hard requirements
 
-| Requirement | Status | Note |
-|---|---|---|
-| ClickHouse as primary datastore **and analytical engine** | ✅ | All analysis is SQL. No stage exports >1,000 rows. |
+| Requirement                                                        | Status      | Note                                                                                                      |
+| ------------------------------------------------------------------ | ----------- | --------------------------------------------------------------------------------------------------------- |
+| ClickHouse as primary datastore **and analytical engine**          | ✅          | All analysis is SQL. No stage exports >1,000 rows.                                                        |
 | **Meaningfully integrate ≥1 of ClickStack / Langfuse / LibreChat** | ❌ **ZERO** | Nothing. Not a partial — absent. "Superficial inclusion won't count," and we don't even have superficial. |
-| Explainability over sophistication | ✅ | Median/MAD baselines, greedy deflation. Every threshold defensible. |
-| Public repo, MIT / Apache-2.0 | ❌ | No `LICENSE` file exists. |
+| Explainability over sophistication                                 | ✅          | Median/MAD baselines, greedy deflation. Every threshold defensible.                                       |
+| Public repo, MIT / Apache-2.0                                      | ❌          | No `LICENSE` file exists.                                                                                 |
 
 ## 3. Deliverables
 
-| Deliverable | Status |
-|---|---|
-| ≤500-word solution summary | ❌ not started (T-035) |
-| ≤5-minute demo video | ❌ not started (T-037) |
-| ≤15-slide pitch deck | ❌ not started (T-036) |
+| Deliverable                                                                | Status                             |
+| -------------------------------------------------------------------------- | ---------------------------------- |
+| ≤500-word solution summary                                                 | ❌ not started (T-035)             |
+| ≤5-minute demo video                                                       | ❌ not started (T-037)             |
+| ≤15-slide pitch deck                                                       | ❌ not started (T-036)             |
 | Unseen-incident output **+ the trace that proves our system generated it** | ❌ **blocked** — no tracing exists |
 
 ---
@@ -48,22 +48,22 @@ AGAINST KNOWN INCIDENTS
 
 **Recall: 2/4.** And 19 further firings, which break down as:
 
-| Cause | Count | Verdict |
-|---|---|---|
-| Jun 21 revenue −44.8% | 1 | **Legitimate** — same incident as B, seen through revenue |
-| **Revenue +3.8%…+7.2%** on Jun 15, 16, 26, 27, 30, Jul 1, 2, 3, 4 | 9 | **False alarms — systematic** |
-| **CTR −3.7%…−8.8%** on 7 days | 7 | **False alarms — noise** |
-| requests +3.1% Jun 16 | 1 | marginal |
+| Cause                                                             | Count | Verdict                                                   |
+| ----------------------------------------------------------------- | ----- | --------------------------------------------------------- |
+| Jun 21 revenue −44.8%                                             | 1     | **Legitimate** — same incident as B, seen through revenue |
+| **Revenue +3.8%…+7.2%** on Jun 15, 16, 26, 27, 30, Jul 1, 2, 3, 4 | 9     | **False alarms — systematic**                             |
+| **CTR −3.7%…−8.8%** on 7 days                                     | 7     | **False alarms — noise**                                  |
+| requests +3.1% Jun 16                                             | 1     | marginal                                                  |
 
 ### Why the revenue false alarms happen — and why they matter
 
-The glossary states the data has *"a slow growth trend."* Requests climb 264k/day → 288k/day across
+The glossary states the data has _"a slow growth trend."_ Requests climb 264k/day → 288k/day across
 the window, about **+9%**. Our baseline is the median of the trailing four same-weekdays, which by
 construction **lags a rising trend by ~2 weeks**. So every day late in the window reads as a +5%
 "anomaly" against its own past.
 
 This is not noise we can threshold away. It is a **systematic bias that grows as the window
-advances** — which means it will be *worst* on the unseen incident data, since that is the most
+advances** — which means it will be _worst_ on the unseen incident data, since that is the most
 recent slice. We would fire a stream of fake +5% revenue alerts on exactly the dataset we are
 scored on.
 
@@ -80,8 +80,8 @@ it, so ordinary variation clears 2.5σ. Gates are currently global; they need to
 - **D (mild fill dip):** −1pp on a 0.785 base is −1.3% relative, under the same gate. Also masked at
   revenue level by the growth trend.
 
-**This is the single most important finding in this audit.** The judging criterion is *"did you find
-the planted anomalies… found, missed, or hallucinated."* We currently miss half of them and
+**This is the single most important finding in this audit.** The judging criterion is _"did you find
+the planted anomalies… found, missed, or hallucinated."_ We currently miss half of them and
 hallucinate seventeen.
 
 ---
@@ -91,7 +91,7 @@ hallucinate seventeen.
 Worth stating so the gaps above are read in proportion.
 
 - **Localization is excellent and is the differentiator.** 42 → 1 on incident A, with 38 segments
-  cleared *and their residuals given as proof*. Nothing else in the field is likely to do this.
+  cleared _and their residuals given as proof_. Nothing else in the field is likely to do this.
 - **We refuse to fabricate.** Incident B returns `not_localizable` rather than blaming `country=BR`.
   The weekend decoy stays quiet. Insufficient baselines return a refusal.
 - **The ruled-out list — the stated bonus — falls out of the algorithm for free**, not as a bolted-on
@@ -106,7 +106,7 @@ Worth stating so the gaps above are read in proportion.
 
 **P0 — scores zero without these**
 
-1. **Integrate Langfuse.** It is a stated requirement *and* the "no trace, no credit" deliverable
+1. **Integrate Langfuse.** It is a stated requirement _and_ the "no trace, no credit" deliverable
    depends on it. The `Ledger` already records `planSteps` and evidence per stage — this is
    plumbing, not design. Highest value per hour of anything on this list.
 2. **Add `LICENSE`** (MIT or Apache-2.0). Two minutes; it is a stated deliverable.

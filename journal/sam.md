@@ -8,15 +8,16 @@ Started 12:00 Aug 1, **code freeze 12:00 Aug 2**. Unseen incident dataset drops 
 **My lane:** Biz (`pitch/`), but I also built `backend/` — the investigation engine. `goal.md` § 6
 assigns `backend/` to `loges`; my commits carry `Crosses-lane: loges` and it is unmerged on
 `dev/sam/biz-specs`. Other lanes: `clickhouse/` + `scripts/` (samarth), `observability/` + `main.ts`
-+ `api/` (MOHANSUNDAR K), Langfuse PoC in `backend/langfuse/` (loges, not wired to the engine).
+
+- `api/` (MOHANSUNDAR K), Langfuse PoC in `backend/langfuse/` (loges, not wired to the engine).
 
 ---
 
 ### The three judging criteria — never deviate
 
 1. **Detection & localization accuracy** — found / missed / hallucinated, vs a private answer key.
-2. **Explanation trustworthiness** — every number reproducible. *One fabricated figure costs more
-   than a missed anomaly.*
+2. **Explanation trustworthiness** — every number reproducible. _One fabricated figure costs more
+   than a missed anomaly._
 3. **Analytical depth in ClickHouse** — drill-down in queries, not in the LLM.
 
 `bun run criteria` is these as a **gate that exits non-zero**. Currently all pass. Run it after
@@ -55,13 +56,13 @@ cleared. It can also return **zero** causes (incident B) rather than fabricating
 
 ### The five training incidents (`pitch/incident-dossier.md`)
 
-| | Window | Cause | Product path says |
-|---|---|---|---|
-| A | Jun 23–25 | `os_version='Android 15'` fill 0.784→0.433 | technical_break, −$21.05/day ✅ |
-| B | Jun 21 | none — uniform −44% everywhere | not_localizable ✅ |
-| C | Jun 19–22 | `app_category='finance'` eCPM −35% | found, −$13.05/day, **channel wrong** |
-| D | Jun 28–30 | fill dip, segment-level | found, **channel wrong** |
-| E | weekends | seasonality decoy | platform-normal stated, $1.98 attributed ✅ |
+|     | Window    | Cause                                      | Product path says                           |
+| --- | --------- | ------------------------------------------ | ------------------------------------------- |
+| A   | Jun 23–25 | `os_version='Android 15'` fill 0.784→0.433 | technical_break, −$21.05/day ✅             |
+| B   | Jun 21    | none — uniform −44% everywhere             | not_localizable ✅                          |
+| C   | Jun 19–22 | `app_category='finance'` eCPM −35%         | found, −$13.05/day, **channel wrong**       |
+| D   | Jun 28–30 | fill dip, segment-level                    | found, **channel wrong**                    |
+| E   | weekends  | seasonality decoy                          | platform-normal stated, $1.98 attributed ✅ |
 
 ---
 
@@ -71,7 +72,7 @@ cleared. It can also return **zero** causes (incident B) rather than fabricating
    window makes requests the driver because **Jun 21 sits inside it**. Localization and dollars are
    right, the channel is not. Same window-contamination pattern, one stage over.
 2. **Unattended entry point** — `sweep → windows → investigate each`, one command, no human. This
-   *is* the unseen-incident submission artifact. Nobody will hand you metric + window on Day 2.
+   _is_ the unseen-incident submission artifact. Nobody will hand you metric + window on Day 2.
 3. **`demand_change` branch has never executed.** Zero advertisers enter or exit the training
    window. Synthesize an advertiser exit, drive it through (2), assert it lands on `demand_change`.
    (2) and (3) are one piece of work; `segment` is now a parameter so it is straightforward.
@@ -96,7 +97,7 @@ cleared. It can also return **zero** causes (incident B) rather than fabricating
 - **Multiple testing.** Segment sweep runs ~98k tests; at 2.5σ ~1% fire by chance. Segment gates are
   5σ/10%. The more places you look, the higher the bar.
 - **A gate never seen red is not known to work.** Force it to fail before trusting it. I shipped a
-  vacuous assertion (`!x === false || y`) *inside* the fix for another vacuous gate.
+  vacuous assertion (`!x === false || y`) _inside_ the fix for another vacuous gate.
 - **Grounding verifies arithmetic, not relevance.** We once answered a CTR question with a fill-rate
   number — every figure real, every figure grounded, sentence still wrong.
 - **Scale rule (standing):** every function and query must be written with scale in mind. Bound

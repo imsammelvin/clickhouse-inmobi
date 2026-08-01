@@ -6,6 +6,7 @@
  * here in TypeScript rather than in SQL so the chosen dates appear literally in the emitted query,
  * which means a judge reading the trace can see exactly what we compared against.
  */
+import { withSpan, withSyncSpan } from "../utils/telemetryUtils";
 
 /**
  * Bounds of the loaded dataset. Defaults describe the training slice; `ensureDatasetBounds`
@@ -35,18 +36,25 @@ let boundsResolved = false;
 export async function ensureDatasetBounds(
   run: <T>(sql: string) => Promise<T[]>,
 ): Promise<{ start: string; end: string }> {
-  if (!boundsResolved) {
-    const [row] = await run<{ lo: string; hi: string }>(
-      `SELECT toString(min(event_date)) AS lo, toString(max(event_date)) AS hi
+  return withSpan(
+    "baseline.ensure_dataset_bounds",
+    { "app.cached": boundsResolved },
+    async (span) => {
+      if (!boundsResolved) {
+        const [row] = await run<{ lo: string; hi: string }>(
+          `SELECT toString(min(event_date)) AS lo, toString(max(event_date)) AS hi
          FROM ad_events_enriched`,
-    );
-    if (row?.lo && row?.hi && row.lo !== "1970-01-01") {
-      DATASET_START = row.lo;
-      DATASET_END = row.hi;
-    }
-    boundsResolved = true;
-  }
-  return { start: DATASET_START, end: DATASET_END };
+        );
+        if (row?.lo && row?.hi && row.lo !== "1970-01-01") {
+          DATASET_START = row.lo;
+          DATASET_END = row.hi;
+        }
+        boundsResolved = true;
+      }
+      span.setAttributes({ "app.dataset.start": DATASET_START, "app.dataset.end": DATASET_END });
+      return { start: DATASET_START, end: DATASET_END };
+    },
+  );
 }
 
 /** Test hook: forget the resolved bounds so the next call re-reads them. */
@@ -163,9 +171,19 @@ export function mad(xs: number[]): number {
  * metrics cannot produce absurd sigma values.
  */
 export function robustBaseline(xs: number[]): { centre: number; spread: number } {
-  const centre = median(xs);
-  const floor = Math.abs(centre) * MIN_COEFF_VARIATION;
-  return { centre, spread: Math.max(mad(xs), floor) };
+  return withSyncSpan("baseline.robust", { "app.samples": xs.length }, (span) => {
+    const centre = median(xs);
+    const floor = Math.abs(centre) * MIN_COEFF_VARIATION;
+    const spread = Math.max(mad(xs), floor);
+    // Whether the floor won matters: it is the difference between a real spread and a metric so
+    // stable that sigma would otherwise divide out to hundreds.
+    span.setAttributes({
+      "app.baseline.centre": centre,
+      "app.baseline.spread": spread,
+      "app.baseline.floored": spread === floor,
+    });
+    return { centre, spread };
+  });
 }
 
 /**
@@ -203,20 +221,39 @@ function theilSenSlope(points: Array<{ x: number; y: number }>): number {
  * multiplicative — a 6% trend means 6% of whatever the level is, not a fixed number of requests.
  */
 export function estimateWeeklyGrowth(series: Map<string, number>): number {
-  const points = [...series.entries()]
-    .filter(([, v]) => v > 0)
-    .map(([d, v]) => ({ x: Date.parse(`${d}T00:00:00Z`) / DAY_MS, y: Math.log(v) }))
-    .sort((a, b) => a.x - b.x);
+  return withSyncSpan(
+    "baseline.estimate_weekly_growth",
+    { "app.series.days": series.size },
+    (span) => {
+      const points = [...series.entries()]
+        .filter(([, v]) => v > 0)
+        .map(([d, v]) => ({ x: Date.parse(`${d}T00:00:00Z`) / DAY_MS, y: Math.log(v) }))
+        .sort((a, b) => a.x - b.x);
 
-  if (points.length < 14) return 0; // Too little history to claim a trend at all.
+      span.setAttribute("app.growth.points", points.length);
 
-  const perDayLog = theilSenSlope(points);
-  const weekly = Math.exp(perDayLog * 7) - 1;
+      if (points.length < 14) {
+        // Too little history to claim a trend at all.
+        span.setAttribute("app.growth.rejected", "insufficient_points");
+        return 0;
+      }
 
-  // Guard against a pathological fit: anything beyond +/-15%/week is not a growth trend in this
-  // dataset, it is an artefact, and applying it would do more damage than ignoring it.
-  if (!Number.isFinite(weekly) || Math.abs(weekly) > 0.15) return 0;
-  return weekly;
+      const perDayLog = theilSenSlope(points);
+      const weekly = Math.exp(perDayLog * 7) - 1;
+
+      // Guard against a pathological fit: anything beyond +/-15%/week is not a growth trend in this
+      // dataset, it is an artefact, and applying it would do more damage than ignoring it.
+      if (!Number.isFinite(weekly) || Math.abs(weekly) > 0.15) {
+        // Recorded rather than silently returning 0: this guard firing is the signature of the
+        // 427-sigma failure described above, and it should be visible when it happens.
+        span.setAttributes({ "app.growth.rejected": "implausible_fit", "app.growth.raw": weekly });
+        return 0;
+      }
+
+      span.setAttribute("app.growth.weekly", weekly);
+      return weekly;
+    },
+  );
 }
 
 /**
@@ -232,8 +269,20 @@ export function trendAwareBaseline(
   points: Array<{ weeksAgo: number; value: number }>,
   weeklyGrowth: number,
 ): { centre: number; spread: number; weeklyGrowth: number } {
-  const adjusted = points.map((p) => p.value * (1 + weeklyGrowth) ** p.weeksAgo);
-  const centre = median(adjusted);
-  const floor = Math.abs(centre) * MIN_COEFF_VARIATION;
-  return { centre, spread: Math.max(mad(adjusted), floor), weeklyGrowth };
+  return withSyncSpan(
+    "baseline.trend_aware",
+    { "app.baseline.points": points.length, "app.growth.weekly": weeklyGrowth },
+    (span) => {
+      const adjusted = points.map((p) => p.value * (1 + weeklyGrowth) ** p.weeksAgo);
+      const centre = median(adjusted);
+      const floor = Math.abs(centre) * MIN_COEFF_VARIATION;
+      const spread = Math.max(mad(adjusted), floor);
+      span.setAttributes({
+        "app.baseline.centre": centre,
+        "app.baseline.spread": spread,
+        "app.baseline.floored": spread === floor,
+      });
+      return { centre, spread, weeklyGrowth };
+    },
+  );
 }
