@@ -147,9 +147,47 @@ SELECT concat('gd_', toString(number))                    AS geo_device_id,
        ${element(DIMS.device_model, "number", SALT.gdDevice)} AS device_model,
        ${element(DIMS.os_version, "number", SALT.gdOs)}    AS os_version
 FROM numbers(${SHAPE.geoDevices})`,
+    // Recreate the three dictionaries with a REFRESHING lifetime, in this database only.
+    //
+    // schema.sql declares LIFETIME(0) — never refresh — which is right for a load-once production
+    // table and wrong the moment the dimension rows change underneath it. On a multi-node service any
+    // node that loaded a dictionary before the rows existed serves empty strings for the life of the
+    // process, and queries are load-balanced, so `dictGet` returns real values or '' depending on
+    // which node answers. Every dimension in the enriched view then collapses to one blank value and
+    // the engine reports "uniform across every dimension — no segment is responsible" with no error
+    // and a clean-looking trace. It cost an hour and a wrong bug report to the team.
+    //
+    // A short lifetime makes it self-heal instead. Scoped to the scratch database; schema.sql is Lane
+    // B's file and unchanged.
+    ...dictionaryOverrides(),
     `SYSTEM RELOAD DICTIONARY dict_apps`,
     `SYSTEM RELOAD DICTIONARY dict_advertisers`,
     `SYSTEM RELOAD DICTIONARY dict_geo_device`,
+  ];
+}
+
+/** The same three dictionaries as schema.sql, but self-refreshing. See the note above. */
+function dictionaryOverrides(): string[] {
+  return [
+    `CREATE OR REPLACE DICTIONARY dict_apps
+(app_id String, category String DEFAULT '', publisher_tier String DEFAULT '')
+PRIMARY KEY app_id
+SOURCE(CLICKHOUSE(TABLE 'apps'))
+LAYOUT(COMPLEX_KEY_HASHED())
+LIFETIME(MIN 30 MAX 60)`,
+    `CREATE OR REPLACE DICTIONARY dict_advertisers
+(advertiser_id String, vertical String DEFAULT '', campaign_type String DEFAULT '')
+PRIMARY KEY advertiser_id
+SOURCE(CLICKHOUSE(TABLE 'advertisers'))
+LAYOUT(COMPLEX_KEY_HASHED())
+LIFETIME(MIN 30 MAX 60)`,
+    `CREATE OR REPLACE DICTIONARY dict_geo_device
+(geo_device_id String, region String DEFAULT '', country String DEFAULT '',
+ device_model String DEFAULT '', os_version String DEFAULT '')
+PRIMARY KEY geo_device_id
+SOURCE(CLICKHOUSE(TABLE 'geo_device'))
+LAYOUT(COMPLEX_KEY_HASHED())
+LIFETIME(MIN 30 MAX 60)`,
   ];
 }
 

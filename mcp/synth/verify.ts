@@ -22,7 +22,7 @@
  */
 import { callTool } from "../tools";
 import { Session } from "../trace";
-import { CLEAN_DAYS, PLANTED, SHAPE, dateOf, weekendOffsets } from "./spec";
+import { CLEAN_DAYS, DIMS, PLANTED, SHAPE, dateOf, weekendOffsets } from "./spec";
 import { initObservability, shutdownObservability } from "../../utils/telemetryUtils";
 
 const say = (s = ""): void => {
@@ -85,6 +85,55 @@ async function main(): Promise<void> {
     if (w.from !== SHAPE.from) {
       fail(`dataset starts ${w.from}, spec says ${SHAPE.from} — rebuild with \`bun run synth:build --reset\``);
     }
+
+    /**
+     * PREFLIGHT. Refuse to score anything if the dictionary-derived dimensions are blank.
+     *
+     * This guard exists because its absence produced a wrong bug report. `schema.sql` declares the
+     * dictionaries LIFETIME(0), so a node that loaded one before the dimension rows existed serves ''
+     * forever, and a multi-node service load-balances — so `dictGet` returns real values or '' depending
+     * on which node answers. Every dimension then collapses to a single blank value.
+     *
+     * The scores that come out of that are not just wrong, they are INVERTED in the most misleading
+     * possible way: P1 and P2 fail (nothing can be localized when there is only one value to localize
+     * to), while P3 and P4 pass for the wrong reason (declining to name a segment looks correct when
+     * there were never any segments to name). A run in that state reads as "the engine cannot localize
+     * but correctly refuses to fabricate" — the exact opposite of the truth on both counts.
+     *
+     * So: check first, and if the dimensions are blank say so and stop rather than reporting a
+     * meaningless scorecard as an engine defect.
+     */
+    const probe = await call(session, "get_metric", {
+      metric: "fill_rate",
+      from: SHAPE.from,
+      to: SHAPE.from,
+      group_by: ["os_version"],
+      limit: 10,
+    });
+    const probeRows = (probe.data.rows ?? []) as Array<{ group: Record<string, string> }>;
+    const distinct = new Set(probeRows.map((r) => r.group.os_version ?? ""));
+    if (distinct.size <= 1 || [...distinct].every((v) => v === "")) {
+      say(``);
+      say(`SETUP ERROR — dimensions are blank, refusing to score.`);
+      say(``);
+      say(`  \`os_version\` returned ${distinct.size} distinct value(s): ${JSON.stringify([...distinct])}`);
+      say(`  Expected ${DIMS.os_version.length}. The dictionaries are serving empty strings, so every`);
+      say(`  dimension in ad_events_enriched collapses to one blank value.`);
+      say(``);
+      say(`  Cause: schema.sql declares the dictionaries LIFETIME(0) — never refresh. A node that`);
+      say(`  loaded one before the dimension rows existed serves '' for the life of the process, and a`);
+      say(`  multi-node service load-balances, so this comes and goes between runs.`);
+      say(``);
+      say(`  Fix:  bun run synth:build -- --reset`);
+      say(`  That recreates the dictionaries with a refreshing lifetime and reloads them.`);
+      say(``);
+      say(`  Scoring in this state would be actively misleading, not merely wrong: P1/P2 fail because`);
+      say(`  there is nothing to localize to, while P3/P4 pass because refusing to name a segment looks`);
+      say(`  correct when no segments exist. Both readings invert.`);
+      process.exitCode = 2;
+      return;
+    }
+    say(`  dimensions OK — os_version has ${distinct.size} distinct value(s)`);
 
     // ---- one sweep, then score everything against it -------------------------------------
     say(`\nSWEEP`);
