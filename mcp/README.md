@@ -193,6 +193,14 @@ The contract also covers three behaviours that are product decisions, not style:
   a number came from, what it was compared against, what was ruled out or how long it took, the answer
   is the full working including the exact SQL from `get_evidence`. Confidentiality about the
   implementation, never about the evidence — and if the two ever conflict, showing the working wins.
+- **Charts only when the shape is the point.** One, two or three numbers get a sentence — a one-bar
+  chart is never right. A trend over four or more days gets a mermaid `xychart-beta` line (rendered by
+  the client, not by this server); four or more categories get an ordered bar; more than ~7 get a
+  table. One series and one metric per chart, because that chart type has no legend and two lines
+  would be distinguishable only by colour. **Every plotted point must be a value a tool returned** —
+  no interpolating a missing day, no smoothing, no extending past the data, no truncated axis. A chart
+  is a set of claims that `checkGrounding` cannot see, so a fabricated point is a fabricated number in
+  the one place nothing catches it. Falls back to `#`-bar rows if the block does not render.
 - **Icons carry meaning, not decoration.** One status icon opens a verdict — 🔴 broken, 🟠 market
   moved, 🔵 platform-wide, 🟢 normal, ⚪ cannot call it, 🚫 cannot be measured — plus 🎯 cause,
   💵 cost/day, ✅ cleared. A plain measurement gets no icon at all, because it is not a verdict.
