@@ -16,6 +16,7 @@ import {
   trendAwareBaseline,
 } from "../baseline";
 import { type Mask, NO_MASK } from "../types";
+import { planRollup, RAW_SOURCE, sourceLabel } from "../../clickhouse/rollup";
 import { withSpan } from "../../utils/telemetryUtils";
 import type { Span } from "@opentelemetry/api";
 
@@ -42,6 +43,8 @@ export interface Detection {
   anomalous: boolean;
   reason: string;
   evidenceIds: string[];
+  /** `rollup:<grain>:<dim>` or `raw` -- which surface answered, same reporting `measure` already does. */
+  servedFrom: string;
 }
 
 /** Gates. Deliberately conservative: crying wolf is scored against us harder than a near miss. */
@@ -94,11 +97,18 @@ async function detectInner(
   const base = baselineDates(from, to);
   const evidenceIds: string[] = [];
 
+  // Rollup when it can answer exactly, raw otherwise -- same picker mcp/query.ts already uses.
+  // `mask.dims` is every dimension already spent by the caller's exclusion/segment scope; detect's
+  // own query adds none of its own, so the plan's dimension budget is exactly the mask's.
+  const plan = planRollup({ dims: mask.dims ?? [], grain: "daily", expressions: [expr] });
+  const src = plan ?? RAW_SOURCE;
+  const servedFrom = sourceLabel(plan);
+
   // One query returns both the incident window and every baseline day, so the two can never be
   // computed against different filters or a different mask.
   const sql = `
-SELECT toString(event_date) AS d, ${expr} AS v
-FROM ad_events_enriched
+SELECT toString(event_date) AS d, ${src.expr(expr)} AS v
+FROM ${src.from}
 WHERE (${mask.sql})
   AND (event_date BETWEEN '${from}' AND '${to}' OR event_date IN (${sqlDateList(base)}))
 GROUP BY event_date
@@ -234,6 +244,7 @@ ORDER BY event_date`.trim();
       anomalous: false,
       reason: `Insufficient baseline: ${baseVals.length} same-weekday observation(s), need ${MIN_BASELINE_DAYS}.`,
       evidenceIds,
+      servedFrom,
     };
   }
 
@@ -254,6 +265,7 @@ ORDER BY event_date`.trim();
     // measured spread" is the question that separates a real signal from a restated size gate.
     "app.detect.spread_floored": spreadFloored,
     "app.detect.refused": false,
+    "app.detect.served_from": servedFrom,
   });
 
   return {
@@ -272,5 +284,6 @@ ORDER BY event_date`.trim();
     anomalous,
     reason,
     evidenceIds,
+    servedFrom,
   };
 }

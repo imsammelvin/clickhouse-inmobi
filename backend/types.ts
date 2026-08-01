@@ -88,15 +88,30 @@ export interface Investigation {
   traceId: string;
 }
 
-/** A SQL predicate plus a human-readable form, so exclusions are explainable, not just applied. */
+/**
+ * A SQL predicate plus a human-readable form, so exclusions are explainable, not just applied.
+ *
+ * `dims` lists every underlying column the predicate constrains -- a pair dimension like
+ * `region|os_version` splits into BOTH `region` and `os_version`, since that is what
+ * `planRollup` needs to know how many of the rollup's dimension slots this mask has already
+ * spent. Optional and defaulted to `[]` by every constructor below rather than made required,
+ * so a caller building a `Mask` by hand (there are none left, but the type should not force it)
+ * degrades to "unknown, assume unmasked" instead of a type error.
+ */
 export interface Mask {
   sql: string;
   description: string;
+  dims?: readonly string[];
 }
 
-export const NO_MASK: Mask = { sql: "1", description: "no exclusions" };
+export const NO_MASK: Mask = { sql: "1", description: "no exclusions", dims: [] };
 
 const esc = (v: string): string => v.replace(/'/g, "\\'");
+
+/** The underlying column(s) a dimension name constrains -- splits a pair back into its two. */
+export function dimsOf(dimension: string): string[] {
+  return dimension.split("|");
+}
 
 /**
  * SQL predicate matching one segment, including the synthetic pair dimensions.
@@ -120,9 +135,10 @@ export function segmentExclusion(dimension: string, value: string): string {
 }
 
 export function andMask(a: Mask, b: Mask): Mask {
-  if (a.sql === "1") return b;
+  if (a.sql === "1") return { ...b, dims: [...new Set([...(a.dims ?? []), ...(b.dims ?? [])])] };
   return {
     sql: `(${a.sql}) AND (${b.sql})`,
     description: `${a.description}; ${b.description}`,
+    dims: [...new Set([...(a.dims ?? []), ...(b.dims ?? [])])],
   };
 }

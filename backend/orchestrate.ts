@@ -25,6 +25,7 @@ import {
   type Mask,
   NO_MASK,
   type Segment,
+  dimsOf,
   segmentPredicate,
 } from "./types";
 import { withSpan } from "../utils/telemetryUtils";
@@ -71,6 +72,7 @@ function segmentMask(segment: Segment): Mask {
   return {
     sql: segmentPredicate(segment.dimension, segment.value),
     description: `${segment.dimension}='${segment.value}'`,
+    dims: dimsOf(segment.dimension),
   };
 }
 
@@ -283,6 +285,7 @@ async function investigateInner(opts: InvestigateOptions): Promise<Investigation
     const segDet = await detect(ledger, sweepMetric, from, to, {
       sql: segmentPredicate(c.dimension, c.value),
       description: `${c.dimension}='${c.value}'`,
+      dims: dimsOf(c.dimension),
     });
     if (segDet.anomalous) confirmed.push(c);
     else insignificant.push({ cause: c, sigma: segDet.sigma, pct: segDet.deltaPct });
@@ -442,6 +445,7 @@ async function investigateInner(opts: InvestigateOptions): Promise<Investigation
     ? {
         sql: segmentPredicate(causeSegment.dimension, causeSegment.value),
         description: `${causeSegment.dimension}='${causeSegment.value}'`,
+        dims: dimsOf(causeSegment.dimension),
       }
     : null;
   const scoped = causeMask ? await decompose(ledger, from, to, causeMask) : dec;

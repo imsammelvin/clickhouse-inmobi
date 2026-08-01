@@ -617,3 +617,47 @@ a gate that reads green having compared nothing is worse than no gate. **It beco
 moment you repoint the first stage**, which is exactly when you need it.
 
 Also in `bun run verify` now, which runs all five gates in one command.
+
+### 2026-08-02 03:05 — loges — T-050 done, T-043 partial: detect/confirm/decompose now read the rollup, verified 799-label parity
+
+**T-050 (Mask.dims) — done.** Added `dims?: readonly string[]` to `Mask` (`backend/types.ts`), populated
+at construction. Found FOUR sites, not the three sam's note listed — `orchestrate.ts`'s `confirm` stage
+builds its own inline per-cause mask (line ~285) that sam's note didn't cover, plus a `causeMask` feeding
+`decompose` (line ~444). Missing the `confirm` one is what caught a real bug (below), not a hypothetical.
+
+**T-043 partial — `detect` (and `confirm`, which just calls `detect` again) and `decompose` now read the
+rollup.** `localize`/`residualize` (measured 71% of server time by sam) and `classify` (`uniqExact` isn't
+additive) are still raw — next up, see T-043's row.
+
+**Two bugs found and fixed along the way, both in the verification tooling, not incidentally:**
+
+1. **`bun run parity` (sam's script) was silently vacuous even after wiring a stage.** It calls
+   `resetRollupReady()` before the "rollup pass" but nothing re-establishes readiness before
+   `investigate()` runs — `planRollup` saw `ready !== true` and returned null every time, so the
+   "rollup" pass quietly read raw too. Fixed by re-probing readiness (same pattern as `main()`'s own
+   probe) right after the reset, inside the per-scenario loop.
+
+2. **Once that was fixed, parity caught a real correctness bug in my own first pass**: the `confirm`
+   stage's inline mask (the 4th site above) had no `dims`, so a mask constraining `os_version` got
+   planned against the empty-dims fallback carrier (`ad_format`) — ClickHouse errored loudly
+   (`Unknown expression or function identifier 'os_version'`) because that column isn't projected
+   under that key. Loud this time, but the failure mode is NOT guaranteed to be loud in general — a
+   differently-shaped mismatch could return a plausible wrong number instead of an error. This is
+   exactly the hazard T-050's own note warned about, and exactly why the parity gate exists before
+   shipping, not after.
+
+**Verified, not eyeballed:** `bun run parity` — 799 evidence labels across all 5 channel scenarios,
+rollup vs raw, bit-identical, all 5 genuinely rollup-served this time. `bun run verify` — all 6 gates
+green (typecheck, criteria, mcp:eval 60/60, parity, `ch:verify-rollup` 272/272, `synth:verify` on
+unseen-shaped data). Nothing silently degrades to raw and passes by accident.
+
+**Next, if there's time before the freeze:** `localize`'s rollup path is structurally different from
+`detect`/`decompose` — it fans out single+paired dimensions via one `arrayJoin` over raw events in a
+single query, which the rollup can't answer in one shot (each dim key lives in its own `dim=` partition).
+The rollup equivalent needs one query per relevant dim key, UNION'd — the same shape `mcp/sweep.ts`'s
+`scanSegmentsRollup` already uses for `find_incidents`. That unlocks `residualize` for free once
+`localize` is wired, since `residualize` only ever calls `localize`.
+
+**Commits:** none yet (working tree only) — `backend/types.ts`, `backend/orchestrate.ts`,
+`backend/stages/detect.ts`, `backend/stages/decompose.ts`, `mcp/eval/parity.ts`. Not pushed (loges'
+own rule: only loges pushes their own commits).

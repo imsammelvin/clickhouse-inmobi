@@ -18,7 +18,7 @@
  */
 import type { Ledger } from "../ledger";
 import { type Candidate, localize } from "./localize";
-import { type Mask, NO_MASK, andMask, segmentExclusion } from "../types";
+import { type Mask, NO_MASK, andMask, dimsOf, segmentExclusion } from "../types";
 import { withSpan } from "../../utils/telemetryUtils";
 
 export interface ResidualizeResult {
@@ -257,6 +257,7 @@ async function residualizeInner(
       // hand-rolling that here emitted `country|ad_format != 'ES|native'`, which is a syntax error.
       sql: segmentExclusion(top.dimension, top.value),
       description: `excluding ${top.dimension} = '${top.value}'`,
+      dims: dimsOf(top.dimension),
     });
 
     // Re-sweep the remainder. This is the whole idea: what still moves once the cause is gone?
@@ -352,6 +353,7 @@ async function orderBySurvival(
           andMask(m, {
             sql: segmentExclusion(o.dimension, o.value),
             description: `excluding ${o.dimension} = '${o.value}'`,
+            dims: dimsOf(o.dimension),
           }),
         NO_MASK,
       );

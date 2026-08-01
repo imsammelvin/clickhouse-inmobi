@@ -101,7 +101,19 @@ async function main(): Promise<void> {
   for (const s of SCENARIOS) {
     // Rollup pass first, then force raw. Order matters only in that the raw pass must not inherit a
     // cached plan, which `resetRollupReady` + `disableRollup` together guarantee.
+    //
+    // `resetRollupReady` clears the module-level flag to `null` ("unchecked"), which is exactly what
+    // a fresh process has -- but nothing inside `investigate()` ever calls `ensureRollupReady` itself
+    // (only the MCP tool layer does, via a Session). Left alone, EVERY `planRollup()` call in this
+    // "rollup" pass would see `ready !== true` and silently return null, so this pass would read raw
+    // too -- indistinguishable from the real VACUOUS case, but for the wrong reason: not "no stage
+    // reads the rollup" but "this harness never told the rollup module it may". Re-probe readiness
+    // the same way `main()` does above, so the pass this loop calls "rollup" actually can be one.
     resetRollupReady();
+    const primer = new Ledger();
+    primer.beginStage("parity_probe");
+    await ensureRollupReady((sql) => primer.run(sql));
+    await primer.close();
     const withRollup = await runOnce(s);
     const eligible = rollupHealth()?.ready === true;
 
