@@ -70,7 +70,6 @@ const LABELS: Record<string, string> = {
   technical_break: "Technical break. Owner: Engineering.",
   mix_shift: "Mix shift — nothing is broken. No action.",
   seasonality: "Seasonality — expected pattern. No action.",
-  exogenous_event: "External event. Owner: Planning.",
   not_localizable: "Platform-level, not a segment problem. Owner: Platform / on-call.",
   no_anomaly: "No action.",
 };

@@ -1,5 +1,5 @@
 /**
- * Stage 4 — classify the surviving cause into one of the six channels (goal.md § 2).
+ * Stage 4 — classify the surviving cause into one of the channels (goal.md § 2).
  *
  * This is the stage that turns a finding into a decision. "Fill rate fell in Android 15" is
  * analytics; "technical break, engineering owns it, demand and supply are both fine" is an
@@ -40,7 +40,6 @@ const OWNERS: Record<Channel, string> = {
   technical_break: "Engineering",
   mix_shift: "Nobody — nothing is broken",
   seasonality: "Nobody — expected pattern",
-  exogenous_event: "Planning",
   not_localizable: "Platform / on-call",
   no_anomaly: "Nobody",
 };

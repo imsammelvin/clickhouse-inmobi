@@ -21,9 +21,13 @@ export interface Evidence {
 }
 
 /**
- * The six cause channels (goal.md § 2), plus two outcomes that are not causes but are legitimate
+ * The cause channels (goal.md § 2), plus two outcomes that are not causes but are legitimate
  * conclusions. `not_localizable` exists because incident B (Jun 21) is real: a uniform -44% across
- * every dimension. A engine forced to name a top segment would fabricate `country=BR` as the cause.
+ * every dimension. An engine forced to name a top segment would fabricate `country=BR` as the cause.
+ *
+ * There is deliberately no `exogenous_event` channel. Naming an external cause (a match, a
+ * festival) requires data outside `ad_events`, which is out of scope under D-019 — and the data has
+ * no event structure to find in any case.
  */
 export type Channel =
   | "demand_change"
@@ -31,7 +35,6 @@ export type Channel =
   | "technical_break"
   | "mix_shift"
   | "seasonality"
-  | "exogenous_event"
   | "not_localizable"
   | "no_anomaly";
 

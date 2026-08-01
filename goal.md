@@ -58,8 +58,9 @@ inventory and blended eCPM falls while every individual segment is flat. A syste
 
 ### The insight we are building on
 
-Revenue moves for six structurally different reasons. Naming *where* it moved is table stakes.
-Naming **which kind of thing happened** is the product, because the owner and the action differ:
+Revenue moves for a small number of structurally different reasons. Naming *where* it moved is
+table stakes. Naming **which kind of thing happened** is the product, because the owner and the
+action differ:
 
 | # | Cause | Computable signature | Who acts |
 |---|---|---|---|
@@ -68,7 +69,7 @@ Naming **which kind of thing happened** is the product, because the owner and th
 | 3 | **Technical break** | fill or render rate collapses on one OS / format / tier; rate-driven, not mix-driven | Engineering — page someone |
 | 4 | **Mix shift** | every segment's rate is flat; weights moved toward cheaper inventory | **Nobody.** Nothing is broken |
 | 5 | **Seasonality** | matches same-weekday trailing baseline within band | **Nobody.** Suppress the alert |
-| 6 | **Exogenous event** | sharp onset *and* offset, geo+category concentrated, no same-weekday precedent | Planning — prep for the next one |
+| 6 | ~~Exogenous event~~ | **Dropped (D-019)** — not attributable from this dataset, and external data is out of scope | — |
 
 Every investigation classifies into exactly one primary channel and prices the rest. This is what
 turns a drill-down tool into something a business owner acts on.
@@ -168,10 +169,16 @@ Written first; we build backwards from it. Judges see the demo, not the repo.
   comparable and rankable (D-007)
 - **Structural change detection** — advertiser entry/exit, spend step-changes, mix shifts,
   concentration risk. "What changed?" before "what's different?"
-- **Event fingerprinting** — computes the *shape* of an exogenous event (sharp onset/offset, geo +
-  category concentration, request-driven vs price-driven, no same-weekday precedent). Joins an
-  optional operator-supplied `external_events` calendar to name it. **Never names an event without
-  the join** (D-009)
+
+**Performance and scale — the primary axis (D-019):**
+- **Rollup-backed queries so cost is independent of event volume.** Today every investigation
+  full-scans the fact table: 9.00M rows, 77.77 MiB, 216 MiB peak, ~1.2s per sweep. An
+  `AggregatingMergeTree` at `(hour × dimension × value)` grain is ~59k rows for this window — the
+  rollup grows with *cardinality × time*, not with events, so the same query costs the same at 9M
+  events or 9T. **This is the petabyte answer and it is T-013.**
+- **Measured latency budget** end to end, per stage, published in the README.
+- **Bounded LLM cost** — one narration call per investigation, evidence struct only, token count
+  measured and reported. The LLM must never scale with data volume.
 - LLM narration stage — numbers-only-from-JSON, never raw events
 - **Numeric grounding check** — any numeral in generated prose absent from the evidence set fails
   the response
@@ -213,6 +220,14 @@ Written first; we build backwards from it. Judges see the demo, not the repo.
 - **Streaming / real-time ingest.** The dataset is a five-week batch. Idempotent batch load only.
 - **ROAS, incrementality, LTV, frequency capping.** There are no conversion events and no `user_id`
   in this dataset. Claiming these would be fabrication — see § 12 R-011.
+- **Any attribution to data outside the dataset (D-019).** No event calendars, no holiday tables, no
+  contextual/affinity modelling, no `external_events` join. Anomalies are found and explained
+  **using `ad_events` and its three dimensions, and nothing else.** Tested before cutting: matching
+  advertiser vertical to app category moves eCPM 2.4654 vs 2.4721 and CTR 0.01084 vs 0.01089 — no
+  effect exists to model; and the largest hourly deviations in entertainment apps are 1.6× on 49–85
+  requests at random hours, which is Poisson noise, not events. There is nothing there to attribute.
+- **Elaborate anomaly detection.** Keep detection to what the problem statement asks for. Effort
+  goes to latency, scale and bounded LLM cost, not to a cleverer detector (D-019).
 
 > Anything not listed under "In scope" needs a decision-log entry (§ 11) before someone starts on it.
 
@@ -226,7 +241,6 @@ inmobi/data/*  →  [ clickhouse/ ingest ]  →  [ ClickHouse Cloud ]
                                               apps · advertisers · geo_device  + dict_*
                                               ad_events_enriched  (VIEW — the query surface)
                                               rollup / baseline MVs   ← not yet built
-                                              external_events         ← optional, human-supplied
                                                         │
                                     [ clickhouse/ + mcp/ : detection sweep +
                                       GROUPING SETS drill-down + significance gate ]
@@ -287,8 +301,8 @@ The schema is the contract between all four lanes. Change it only via § 11 + a 
   - `geo_device` (dim): `geo_device_id, region, country, device_model, os_version`
   - `dict_apps`, `dict_advertisers`, `dict_geo_device` — the dims held in RAM as `hashed`
     dictionaries for `dictGet` on the hot path (D-013)
-  - `external_events` — optional, operator-supplied: `(date, country, region, name, type)`. Empty by
-    default. Populated **only** by a human confirming what an event was. Never inferred (D-009).
+  - **No other tables.** No event calendar, no holiday table, no external join surface. Attribution
+    uses `ad_events` and its three dimensions only (D-019).
 
 - **Engine + `ORDER BY`:** as shipped in `bec2a35` —
   ```sql
@@ -412,6 +426,12 @@ should be mid-refactor when it lands, and `main` must be runnable at all times.
 
 How we know we won, in measurable terms. Mapped to the published judging criteria.
 
+- [ ] **Query cost is independent of event volume.** After T-013, an investigation reads rollup rows,
+      not raw events. Baseline to beat: **9.00M rows / 77.71 MiB / 216 MiB peak / ~1.2s per sweep**
+      today. *(D-019 — the primary axis)*
+- [ ] **p95 end-to-end investigation < 3s** with per-stage latency published in the README.
+- [ ] **Exactly one LLM call per investigation**, taking the evidence struct only, with token count
+      measured and reported. LLM cost must not scale with data volume.
 - [ ] **Detection sweep finds the planted training-set anomalies** — including the pure-seasonality
       one, correctly *ruled out* rather than alarmed on — with zero manual threshold tuning per
       incident. *(rubric: detection & localization accuracy, "avoid crying wolf")*
@@ -449,7 +469,7 @@ Append-only. Newest at the bottom. One line per decision. Never edit or delete s
 | D-006 | 2026-08-01 | Primary persona is the **yield/revenue manager**; the AM/campaign persona is the second act | One persona makes the demo coherent. The revenue owner is who this dataset is shaped for. | sam (proposed) |
 | D-007 | 2026-08-01 | Every finding is **priced in dollars** before it is reported | Gives one ranking key across metrics. A 40% drop in a $12 segment is noise; 3% in a $400k segment is the story. Rank by dollars, gate by significance. | sam (proposed) |
 | D-008 | 2026-08-01 | **LLM narrates only.** It never authors analysis SQL and never sees raw rows | Directly targets the largest scoring risk (fabricated figures) and the explicit hint in the problem statement. Structural, not advisory. Extends D-002. | sam (proposed) |
-| D-009 | 2026-08-01 | **Never name an external event** (match, festival) unless it joins to an operator-supplied `external_events` row. Otherwise report the computed *fingerprint* only | "There was a cricket match" is not computable from `ad_events`. Naming the shape without naming the cause is both honest and more credible to a business owner. | sam (proposed) |
+| D-009 | 2026-08-01 | ~~Never name an external event unless it joins an operator-supplied `external_events` row; otherwise report the fingerprint.~~ **SUPERSEDED BY D-019.** External attribution is out of scope entirely — no calendar, no join, no fingerprint stage. | Original reasoning still holds ("there was a cricket match" is not computable from `ad_events`), but D-019 goes further and drops the whole branch rather than keeping a mechanism we will not feed. | sam (proposed), superseded |
 | D-010 | 2026-08-01 | **Mix-vs-rate decomposition is mandatory** on every localization | Simpson's paradox is the #1 false-alarm source in blended ad metrics — blended eCPM can fall while every segment is flat. Distinguishes "nothing broke" from "something broke." | sam (proposed) |
 | D-011 | 2026-08-01 | Campaign grain is **`(advertiser_id, campaign_type)`** | There is no `campaign_id` in the dataset. Fixing this once prevents two lanes defining "campaign" differently. | sam (proposed) |
 | D-012 | 2026-08-01 | Baseline is **trailing same-weekday, up to 4 back**; no alerting on 2026-06-01 → 06-14 | Only 5 weeks of data exist and the glossary warns that a flat average makes every weekend look anomalous. | sam (proposed) |
@@ -459,6 +479,8 @@ Append-only. Newest at the bottom. One line per decision. Never edit or delete s
 | D-016 | 2026-08-01 | **`ad_events_enriched` is the only query surface** for Lanes A/C/D. Nobody queries `ad_events` directly | One place where dimension enrichment can be wrong, instead of four. Makes every drill-down a plain GROUP BY. | samarth (shipped) |
 | D-017 | 2026-08-01 | **Localization must residualize, not just rank.** Contribution ranking (T-018) is necessary but not sufficient; add iterative deflation (T-040) before anything is reported as a cause | Measured on the real Jun 23–25 fill-rate incident: a plain ranked sweep returns **21 segments** outside band (EU −5.50pp, tier_1 −3.89pp, finance −3.76pp, banner −3.65pp…). Excluding the single true cause — `os_version = 'Android 15'`, fill rate 0.7837 → 0.4333, −35.04pp on 9.6% of traffic — every one of those 21 collapses to within **±0.24pp** (EU → −0.07pp, tier_1 → +0.01pp). They were dilution artifacts, not causes. Reporting them is exactly the "hallucinated segment" failure the rubric punishes, and no amount of better narration fixes it — it is an algorithm problem. | sam (proposed) |
 | D-018 | 2026-08-01 | **The product is InMobi's own marketplace view. Every persona is inside InMobi; buy-side questions are out of scope.** Supersedes the "campaign repeatability / should I spend again" second act, which is reframed to demand durability + backfill capacity. | The dataset is unambiguously the platform's: `fill_rate` is a marketplace metric an advertiser does not have, `revenue` is money *earned* on impressions (an advertiser's *cost*), `publisher_tier` is InMobi's own supply classification, and `advertiser_id` is a 500-value slicing dimension no advertiser could see. Volume settles it too — the median advertiser runs **116 impressions and 1.3 clicks a day**, and 355 of 500 are under 200 impressions/day, so per-advertiser detection would be pure noise. Decisively: we are scored against planted anomalies that are all marketplace-level (Android 15 fill collapse, global volume drop, finance eCPM); built buy-side we would miss every one. | sam (proposed) |
+
+| D-019 | 2026-08-01 | **Attribute using the given dataset only, and keep detection minimal.** No event calendars, holiday tables, contextual/affinity modelling or any external join. The primary axis of this hackathon is **latency, scalability and bounded LLM cost**, not a cleverer detector. Supersedes D-009 and drops the exogenous-event channel. | Tested before cutting, so this is a measurement not a preference: vertical↔category affinity does not exist in the data (matched eCPM 2.4654 vs mismatched 2.4721; CTR 0.01084 vs 0.01089), and there is no event structure to find (largest hourly deviations in entertainment apps are 1.6× on 49–85 requests at random hours — Poisson noise). Any calendar we authored would attribute synthetic anomalies to invented causes, which the private answer key would contradict, and one fabricated figure costs more than a missed anomaly. Meanwhile every investigation currently full-scans 9.00M rows / 77.71 MiB, which is the thing that actually will not survive scale. | user (directed), sam (recorded) |
 
 > Rows D-005…D-012 are **proposed** and were added after the initial draft. Ratify or contest at M0
 > kickoff — change `(proposed)` to the ratifying handle, or open a BROADCAST entry arguing the other
