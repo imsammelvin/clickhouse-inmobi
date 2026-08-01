@@ -7,6 +7,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { Ledger } from "./ledger";
+import { ensureDatasetBounds } from "./baseline";
 import { METRICS } from "./metrics";
 import { detect } from "./stages/detect";
 import { decompose } from "./stages/decompose";
@@ -83,6 +84,8 @@ async function investigateInner(opts: InvestigateOptions): Promise<Investigation
   const { metric, from, to } = opts;
   const ledger = opts.ledger ?? new Ledger();
   const traceId = randomUUID();
+  // Same reason as scanAll: bounds feed WHERE clauses downstream.
+  await ensureDatasetBounds((sql) => ledger.run(sql));
   const findings: Finding[] = [];
   const ruledOut: Finding[] = [];
 

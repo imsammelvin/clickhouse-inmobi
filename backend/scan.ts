@@ -20,6 +20,7 @@ import {
   trendAwareBaseline,
   DATASET_START,
   DATASET_END,
+  ensureDatasetBounds,
   datesBetween,
 } from "./baseline";
 import { MIN_ABS_PCT, MIN_SIGMA } from "./stages/detect";
@@ -141,6 +142,10 @@ export async function scanAll(metrics: string[] = DEFAULT_METRICS): Promise<Scan
 
 async function scanAllInner(metrics: string[]): Promise<ScanResult> {
   const ledger = new Ledger();
+  // Read the real date range before any SQL is built. The bounds below go straight into a WHERE
+  // clause, so a slice that starts outside the hardcoded default would match zero rows and report
+  // "no incidents" without erroring.
+  await ensureDatasetBounds((sql) => ledger.run(sql));
   const fired: Firing[] = [];
   const segmentFirings = [];
   try {
