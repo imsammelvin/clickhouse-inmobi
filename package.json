@@ -28,6 +28,7 @@
     "mcp:http": "OTEL_SERVICE_NAME=clickhouse-inmobi-mcp bun run backend/mcp/server.ts --transport http",
     "mcp:prompt": "bun run backend/mcp/prompt.ts",
     "mcp:eval": "OTEL_SERVICE_NAME=clickhouse-inmobi-mcp-eval bun run backend/mcp/eval/run.ts",
+    "watch": "bun run backend/mcp/watch.ts",
     "narrate": "bun run backend/mcp/eval/narrate.ts",
     "parity": "bun run backend/mcp/eval/parity.ts",
     "verify": "bun run backend/mcp/verify-all.ts",

@@ -48,6 +48,7 @@ import {
   weeklyGrowthFor,
 } from "./query";
 import { recommendAction } from "./action";
+import { addWatch, listWatches, removeWatch } from "./watch";
 import type { Session, ToolOutcome } from "./trace";
 
 export interface ToolDef {
@@ -744,6 +745,122 @@ const exportTrace: ToolDef = {
   },
 };
 
+/**
+ * Watching is offered, never configured.
+ *
+ * A rule written before you have seen the incident is written blind, and that is how an alert channel
+ * becomes noise. So there is no subscription form: a watch can only be created from a cause the user
+ * was just shown, and its threshold is the impact the investigation already measured — the user is
+ * never asked for a number they would have to invent.
+ */
+const watchThis: ToolDef = {
+  name: "watch_this",
+  description:
+    "Keep an eye on an incident the user has just been shown, and notify them out of band if it " +
+    "recurs. Offer this ONCE, right after reporting a real cause — 'want me to tell you if this comes " +
+    "back?' — and call it only if they say yes. Never offer it for a no-anomaly or cannot-assess " +
+    "verdict: there is nothing to watch. Never ask the user for a threshold; pass the impact the " +
+    "investigation already measured. Notification happens by cron, out of band — it cannot arrive in " +
+    "this chat, so do not imply that it will.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      metric: metricEnum("The metric that moved."),
+      dimension: str("Cause dimension, e.g. os_version. Omit for a platform-wide finding."),
+      value: str("Cause value, e.g. 'Android 15'. Required whenever dimension is given."),
+      no_segment: {
+        type: "boolean",
+        description: "True for a platform-wide finding where no segment was responsible.",
+      },
+      impact_usd_per_day: {
+        type: "number",
+        description: "What the investigation priced it at, if it priced it. Do not invent one.",
+      },
+      note: str("One line describing the incident, used in the notification."),
+    },
+    required: ["metric"],
+    additionalProperties: false,
+  },
+  handler: async (args, _ledger, session) => {
+    const def = resolveMetric(args.metric);
+    const hasSegment = args.no_segment !== true && args.dimension !== undefined;
+    if (hasSegment && args.value === undefined) {
+      throw new QueryError("`value` is required whenever `dimension` is given.");
+    }
+    const w = addWatch({
+      userId: session.userId,
+      userEmail: session.userEmail,
+      metric: def.name,
+      dimension: hasSegment ? assertDimension(args.dimension, def) : null,
+      value: hasSegment ? String(args.value) : null,
+      baselineImpactUsdPerDay:
+        typeof args.impact_usd_per_day === "number" ? args.impact_usd_per_day : null,
+      note: typeof args.note === "string" ? args.note : "",
+    });
+    const where = w.dimension ? `${w.dimension} = '${w.value}'` : "the platform";
+    return {
+      summary: `watching ${def.name} on ${where}`,
+      payload: {
+        watching: { id: w.id, metric: w.metric, where, since: w.createdAt },
+        howItWorks:
+          "A sweep runs out of band on a schedule and checks whether this fires again. You are told " +
+          "once per occurrence, not once per run, and nothing is sent while it stays normal.",
+        deliveryCaveat:
+          "The notification arrives by mail or webhook, not in this chat — a chat server cannot start " +
+          "a conversation. Say so rather than implying an alert will appear here.",
+        accountCaveat:
+          session.userId === "anonymous"
+            ? "No user id reached this server, so this watch is not tied to an account. Add " +
+              "X-User-Id: {{LIBRECHAT_USER_ID}} to the MCP headers in librechat.yaml."
+            : undefined,
+      },
+    };
+  },
+};
+
+const listWatchesTool: ToolDef = {
+  name: "list_watches",
+  description:
+    "What this user is currently watching, and when each was last triggered. Use when they ask what " +
+    "alerts they have, or before stopping one so they can pick.",
+  inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  handler: async (_args, _ledger, session) => {
+    const watches = listWatches(session.userId);
+    return {
+      summary: `${watches.length} watch(es)`,
+      payload: {
+        count: watches.length,
+        watches: watches.map((w) => ({
+          id: w.id,
+          metric: w.metric,
+          where: w.dimension ? `${w.dimension} = '${w.value}'` : "platform-wide",
+          since: w.createdAt,
+          lastNotified: w.watermark ?? "never — it has not recurred",
+          note: w.note || undefined,
+        })),
+      },
+    };
+  },
+};
+
+const stopWatching: ToolDef = {
+  name: "stop_watching",
+  description: "Stop watching one incident. Takes an id from list_watches.",
+  inputSchema: {
+    type: "object",
+    properties: { id: str("Watch id, as returned by list_watches.") },
+    required: ["id"],
+    additionalProperties: false,
+  },
+  handler: async (args, _ledger, session) => {
+    const id = String(args.id);
+    if (!removeWatch(id, session.userId)) {
+      throw new QueryError(`No watch '${id}' belongs to you. Call list_watches to see yours.`);
+    }
+    return { summary: `stopped ${id}`, payload: { stopped: id } };
+  },
+};
+
 export const TOOLS: ToolDef[] = [
   describeData,
   listDimensionValues,
@@ -755,6 +872,9 @@ export const TOOLS: ToolDef[] = [
   explainRevenue,
   getEvidence,
   exportTrace,
+  watchThis,
+  listWatchesTool,
+  stopWatching,
 ];
 
 export const TOOL_BY_NAME = new Map(TOOLS.map((t) => [t.name, t]));

@@ -1,0 +1,223 @@
+/**
+ * The watchman: notice it again, and say so.
+ *
+ *   bun run watch            # one pass — what a cron calls
+ *   bun run watch -- --list  # what is being watched, and by whom
+ *
+ * Deliberately NOT a subscription system. Nobody configures alerts in the abstract, and a rule written
+ * before you have seen the incident is a rule written blind — it is how alerting becomes noise. Here a
+ * watch can only be created from an incident the user was just shown: the chat reports a cause, offers
+ * to keep an eye on it, and the answer is one tool call carrying the finding it came from. The
+ * threshold is the incident's own measured impact, so "tell me if this gets worse" needs no number
+ * from the user.
+ *
+ * WHY A CRON AND NOT A PUSH INTO THE CHAT. MCP is request/response — a server cannot put a message
+ * into a LibreChat conversation, and LibreChat has no path that sends one without a user action
+ * (checked: `customWelcome` is static text, conversation starters are buttons). So the watching
+ * happens out of band and the chat is where you follow it up. That split is honest, and it is also the
+ * only version that works while nobody is looking at the screen.
+ *
+ * ONE SWEEP FOR EVERY WATCH. The runner does not query per watch. It runs the same segment sweep the
+ * unattended path uses, once, and matches the firings against what people asked about — so the cost is
+ * flat in the number of watchers.
+ */
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { Ledger } from "../engine/ledger";
+import { groupIntoIncidents, scanSegments } from "../engine/segments";
+import { DATASET_END, ensureDatasetBounds } from "../engine/baseline";
+import { estimateWeeklyGrowth } from "../engine/baseline";
+import { METRICS, metricExpr } from "../engine/metrics";
+
+const DIR = process.env.MCP_WATCH_DIR ?? "backend/mcp/watches";
+const FILE = join(DIR, "watches.json");
+const LOG = join(DIR, "notifications.jsonl");
+
+export interface Watch {
+  id: string;
+  /** From LibreChat's {{LIBRECHAT_USER_ID}} header, or "anonymous" when it is not configured. */
+  userId: string;
+  userEmail?: string;
+  metric: string;
+  /** null = watch the platform, not a segment. */
+  dimension: string | null;
+  value: string | null;
+  /** What it cost when they saw it. Recurrence is judged against this, not a number they invented. */
+  baselineImpactUsdPerDay: number | null;
+  note: string;
+  createdAt: string;
+  /** Last day already reported, so the same incident is not mailed every morning. */
+  watermark: string | null;
+}
+
+const load = (): Watch[] => {
+  if (!existsSync(FILE)) return [];
+  try {
+    return JSON.parse(readFileSync(FILE, "utf8")) as Watch[];
+  } catch {
+    return [];
+  }
+};
+
+const save = (watches: Watch[]): void => {
+  mkdirSync(DIR, { recursive: true });
+  writeFileSync(FILE, `${JSON.stringify(watches, null, 2)}\n`);
+};
+
+/** Create a watch from an incident the user was just shown. */
+export function addWatch(w: Omit<Watch, "id" | "createdAt" | "watermark">): Watch {
+  const watches = load();
+  // One watch per user per segment+metric: asking twice should not mean being told twice.
+  const existing = watches.find(
+    (x) =>
+      x.userId === w.userId &&
+      x.metric === w.metric &&
+      x.dimension === w.dimension &&
+      x.value === w.value,
+  );
+  if (existing) return existing;
+
+  const watch: Watch = { ...w, id: randomUUID().slice(0, 8), createdAt: new Date().toISOString(), watermark: null };
+  watches.push(watch);
+  save(watches);
+  return watch;
+}
+
+export const listWatches = (userId?: string): Watch[] =>
+  load().filter((w) => !userId || w.userId === userId);
+
+export function removeWatch(id: string, userId?: string): boolean {
+  const watches = load();
+  const next = watches.filter((w) => !(w.id === id && (!userId || w.userId === userId)));
+  if (next.length === watches.length) return false;
+  save(next);
+  return true;
+}
+
+export interface Notification {
+  watch: Watch;
+  day: string;
+  pct: number;
+  sigma: number;
+  requestsPerDay: number;
+}
+
+/**
+ * One pass. Sweep once, match every watch against the firings, report only what is new.
+ *
+ * "New" is per watch: a firing on or before that watch's watermark has already been reported, and
+ * re-reporting it is exactly how an alert channel gets muted.
+ */
+export async function runOnce(): Promise<Notification[]> {
+  const watches = load();
+  if (watches.length === 0) return [];
+
+  const ledger = new Ledger();
+  ledger.beginStage("watch");
+  const found: Notification[] = [];
+
+  try {
+    await ensureDatasetBounds(<T>(sql: string): Promise<T[]> => ledger.run<T>(sql));
+    const metrics = [...new Set(watches.map((w) => w.metric))].filter((m) => METRICS[m]);
+
+    for (const metric of metrics) {
+      const def = METRICS[metric]!;
+      const series = await ledger.run<{ d: string; v: number | null }>(
+        `SELECT toString(event_date) AS d, ${metricExpr(def)} AS v
+         FROM ad_events_enriched GROUP BY event_date ORDER BY event_date`,
+      );
+      const growth = estimateWeeklyGrowth(new Map(series.map((r): [string, number] => [r.d, Number(r.v ?? 0)])));
+      /**
+       * Match PER SEGMENT, not per clustered window.
+       *
+       * `clusterWindows` collapses an event into one row led by its strongest segment, and that lead is
+       * usually a pair — the Android 15 fill collapse is led by `app_category|os_version` =
+       * `finance|Android 15`. A watch on `os_version='Android 15'` compared against the lead therefore
+       * never matched, and the runner reported "nothing new" for an incident sitting in the data.
+       *
+       * Silent, and the worst possible failure for this feature: the user is told nothing and concludes
+       * nothing happened. `groupIntoIncidents` keeps one row per segment, which is the grain a watch is
+       * actually about.
+       */
+      const incidents = groupIntoIncidents(await scanSegments(ledger, metric, growth));
+
+      for (const w of watches.filter((x) => x.metric === metric)) {
+        for (const inc of incidents) {
+          const sameSegment =
+            w.dimension === null || (inc.dimension === w.dimension && inc.value === w.value);
+          if (!sameSegment) continue;
+          if (w.watermark && inc.to <= w.watermark) continue; // already told them
+          found.push({
+            watch: w,
+            day: inc.to,
+            pct: inc.worstPct,
+            sigma: inc.worstSigma,
+            requestsPerDay: inc.requestsPerDay,
+          });
+          w.watermark = inc.to;
+        }
+      }
+    }
+  } finally {
+    await ledger.close();
+  }
+
+  if (found.length) {
+    save(watches);
+    mkdirSync(DIR, { recursive: true });
+    for (const n of found) {
+      appendFileSync(LOG, `${JSON.stringify({ at: new Date().toISOString(), ...n })}\n`);
+    }
+  }
+  return found;
+}
+
+/** What the user is sent. Plain text on purpose — it has to read well in a mail client. */
+export function renderNotification(n: Notification): string {
+  const where = n.watch.dimension ? `${n.watch.dimension} = '${n.watch.value}'` : "the platform";
+  const dir = n.pct < 0 ? "down" : "up";
+  return [
+    `It happened again: ${where}.`,
+    ``,
+    `${n.watch.metric} is ${dir} ${Math.abs(n.pct).toFixed(0)}% on ${n.day}, ` +
+      `on about ${n.requestsPerDay.toLocaleString()} requests a day.`,
+    n.watch.baselineImpactUsdPerDay !== null
+      ? `When you last saw this it was worth $${Math.abs(n.watch.baselineImpactUsdPerDay).toFixed(2)}/day.`
+      : ``,
+    ``,
+    `Ask for the full diagnosis:  "why did ${n.watch.metric} drop on ${n.day}?"`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+if (import.meta.main) {
+  const say = (s = ""): void => {
+    process.stdout.write(`${s}\n`);
+  };
+
+  if (process.argv.includes("--list")) {
+    const watches = listWatches();
+    say(`\n${watches.length} watch(es)\n`);
+    for (const w of watches) {
+      say(
+        `  ${w.id}  ${(w.userEmail ?? w.userId).padEnd(28)} ${w.metric.padEnd(11)} ` +
+          `${w.dimension ? `${w.dimension}='${w.value}'` : "platform"}` +
+          `${w.watermark ? `   last told: ${w.watermark}` : ""}`,
+      );
+    }
+    say(``);
+  } else {
+    const found = await runOnce();
+    say(`\nWATCH — ${listWatches().length} watch(es), ${found.length} new event(s)\n`);
+    for (const n of found) {
+      say(`  -> ${n.watch.userEmail ?? n.watch.userId}`);
+      say(renderNotification(n).split("\n").map((l) => `     ${l}`).join("\n"));
+      say(``);
+    }
+    if (found.length === 0) say(`  Nothing new. Watermarks unchanged.\n`);
+    say(`  Delivery: appended to ${LOG}. Wire an SMTP or webhook sink here to mail it.\n`);
+  }
+  process.exit(0);
+}
