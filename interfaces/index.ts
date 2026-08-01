@@ -1,0 +1,155 @@
+/**
+ * Every shape used by more than one line of code. No `interface` or inline object type should
+ * appear in scripts/ or utils/ -- it belongs here.
+ */
+import type { DimensionKey, SourceFile, Table } from "../enums";
+
+// ---------------------------------------------------------------------------
+// config
+// ---------------------------------------------------------------------------
+
+/** A dimension table, the CSV that fills it, and its primary key. */
+export interface DimensionSource {
+  table: Table;
+  file: SourceFile;
+  key: DimensionKey;
+}
+
+/** A dimension table and the row count it must have after a correct load. */
+export interface DimensionExpectation {
+  table: Table;
+  key: DimensionKey;
+  rows: number;
+}
+
+// ---------------------------------------------------------------------------
+// ingest
+// ---------------------------------------------------------------------------
+
+/** Parsed CLI options for scripts/load.ts. */
+export interface LoadOptions {
+  /** Reload every day even when its row count already matches the source. */
+  force: boolean;
+  dimsOnly: boolean;
+  factsOnly: boolean;
+  /** Keep the extracted per-day Parquet files instead of deleting them. */
+  keepChunks: boolean;
+  /** Reuse chunks already on disk -- the extract step is deterministic. */
+  skipExtract: boolean;
+  concurrency: number;
+  /** ISO dates to load, or null for all of them. */
+  only: string[] | null;
+}
+
+/** One calendar day of the fact table: one Parquet file, one ClickHouse partition. */
+export interface DayChunk {
+  /** ISO date, e.g. "2026-06-23". */
+  date: string;
+  /** ClickHouse partition id, e.g. "20260623". */
+  partition: string;
+  /** Absolute path to the extracted Parquet file. */
+  path: string;
+  /** Row count read from the Parquet footer, not a scan. */
+  rows: number;
+}
+
+// ---------------------------------------------------------------------------
+// query results
+// ---------------------------------------------------------------------------
+
+export interface VersionRow {
+  version: string;
+}
+
+export interface ServerInfo {
+  version: string;
+  uptime: string;
+  now: string;
+}
+
+/** `SELECT count() AS n` */
+export interface CountRow {
+  n: string;
+}
+
+/** Row count plus distinct-key count for a dimension table. */
+export interface UniquenessRow {
+  n: string;
+  distinct: string;
+}
+
+/** Row of DuckDB's parquet_file_metadata(). */
+export interface ParquetFileMeta {
+  file_name: string;
+  num_rows: number;
+}
+
+/** Funnel totals, computed identically in DuckDB and ClickHouse so they can be compared. */
+export interface FunnelTotals {
+  rows: number;
+  fills: number;
+  impressions: number;
+  clicks: number;
+  revenue: number;
+  min_time: string;
+  max_time: string;
+}
+
+/** Per-day rollup used for reconciliation. Numeric in DuckDB, string over the CH HTTP interface. */
+export interface DayAggregate {
+  d: string;
+  rows: number;
+  revenue: number;
+}
+
+export interface DayAggregateRaw {
+  d: string;
+  rows: string;
+  revenue: string;
+}
+
+/** Row count of one active partition, from system.parts. */
+export interface PartitionRow {
+  partition: string;
+  rows: string;
+}
+
+/** Storage footprint of one table, from system.parts. */
+export interface PartStats {
+  table: string;
+  total_rows: string;
+  compressed: string;
+  uncompressed: string;
+  ratio: number;
+  parts: string;
+}
+
+/** The glossary metrics computed over a set of events. */
+export interface MetricSnapshot {
+  fill_rate: number;
+  render_rate: number;
+  ctr: number;
+  ecpm: number;
+  rpr: number;
+}
+
+/** Events that violate the Request -> Fill -> Impression -> Click ordering. All must be zero. */
+export interface FunnelIntegrity {
+  revenue_without_impression: string;
+  impression_without_fill: string;
+  click_without_impression: string;
+}
+
+/** Both sides of the revenue identity from metrics_glossary.md. */
+export interface RevenueIdentity {
+  lhs: number;
+  rhs: number;
+}
+
+/** Counts of events whose dimension keys failed to resolve through the dictionaries. */
+export interface EnrichmentGaps {
+  no_app: string;
+  no_geo: string;
+  no_adv_on_filled: string;
+  no_adv_on_unfilled: string;
+}
