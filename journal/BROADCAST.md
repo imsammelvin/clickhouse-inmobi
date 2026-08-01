@@ -29,3 +29,17 @@ tables in `AGENTS.md` § 1–2 at kickoff (tasks T-001, T-002). Rename your `dev
 **Commit:** initial scaffold
 
 <!-- append new entries below this line -->
+
+### 2026-08-01 13:54 — loges — goal.md/AGENTS.md/TASKS.md drafted for kickoff review
+**What changed:** `goal.md` fully drafted (architecture, data model against the real `inmobi/` package,
+milestones pinned to today's actual event clock, decision log, risks). `AGENTS.md` §1 lanes/directories
+assigned: loges→`backend/`, dev-2→`clickhouse/`+`mcp/`, dev-3→`clickstack/`, dev-4→`librechat/`.
+`TASKS.md` T-005 marked done (data already landed), T-006 given to Lane B, T-013–T-025 added covering
+the full pipeline.
+**Who is affected:** everyone — please read `goal.md` in full before claiming a task, it's the plan
+we're building against.
+**What you must do:** confirm or dispute §7/§8 (LOCKED) in this file, don't silently edit them. Fill in
+your Name cell in `AGENTS.md` §1. Note: this corrects an earlier informal draft that had dev-3
+(ClickStack) and dev-4 (LibreChat) swapped — if you were already working under the swapped
+assignment, stop and re-check which lane is actually yours.
+**Commit:** branch `dev/loges/kickoff-goal`
