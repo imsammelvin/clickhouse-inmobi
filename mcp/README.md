@@ -178,6 +178,18 @@ and the deck say the same thing the same way.
 > `bun run mcp:prompt > sys.md` — that command prints the exact string the server serves, from the one
 > place it is defined, so a pasted copy cannot drift. Do not retype it into a config file.
 
+The contract also covers three behaviours that are product decisions, not style:
+
+- **A greeting does a check.** "hi" gets one `find_incidents` call scoped to `revenue` (~7s; all five
+  metrics is ~32s and nobody types "hi" expecting to wait), one line naming the most serious thing
+  found, and an offer to dig in. It does not investigate until asked, and "nothing is firing" is a
+  complete answer.
+- **Answers are sized to the question.** A one-word message does not get a report, and no answer ends
+  with a menu of suggestions.
+- **Icons carry meaning, not decoration.** One status icon opens a verdict — 🔴 broken, 🟠 market
+  moved, 🔵 platform-wide, 🟢 normal, ⚪ cannot call it, 🚫 cannot be measured — plus 🎯 cause,
+  💵 cost/day, ✅ cleared. A plain measurement gets no icon at all, because it is not a verdict.
+
 ### Where the model's context actually comes from
 
 | Source | Size | Arrives |

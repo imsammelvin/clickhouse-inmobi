@@ -33,6 +33,7 @@ import {
   FILLED_ONLY_DIMENSIONS,
   METRICS,
   MAX_ROWS,
+  type FilterValue,
   QueryError,
   assertDimension,
   assertWindow,
@@ -67,14 +68,20 @@ const metricEnum = (description: string) => ({
 });
 const filtersSchema = {
   type: "object",
-  additionalProperties: { type: "string" },
+  additionalProperties: {
+    anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }],
+  },
   description:
-    "Equality filters, e.g. {\"os_version\": \"Android 15\", \"region\": \"EU\"}. Values must match " +
-    "the data exactly — call list_dimension_values first if unsure.",
+    'Filter to a slice. Three forms: exact {"os_version": "Android 15"}, several ' +
+    '{"os_version": ["Android 15", "Android 14"]}, or a prefix {"os_version": "Android*"} which ' +
+    'matches every version of that OS. Use the prefix or list form for a family question ("how much ' +
+    'traffic is Android?", "the two newest iOS versions") rather than adding up separate calls ' +
+    'yourself — a total you compute is not a measured number. Values must match the data exactly; ' +
+    'call list_dimension_values if unsure.',
 };
 
-const asRecord = (v: unknown): Record<string, string> | undefined =>
-  v === undefined || v === null ? undefined : (v as Record<string, string>);
+const asRecord = (v: unknown): Record<string, FilterValue> | undefined =>
+  v === undefined || v === null ? undefined : (v as Record<string, FilterValue>);
 
 const fmtPct = (n: number): string => `${n >= 0 ? "+" : ""}${n.toFixed(1)}%`;
 

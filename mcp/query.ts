@@ -76,12 +76,25 @@ export interface Window {
   to: string;
 }
 
-/** A validated, human-describable set of equality filters. */
+/** A validated, human-describable set of filters. */
 export interface Scope {
   sql: string;
   description: string;
   filters: Record<string, string>;
 }
+
+/**
+ * One filter value: exact, one-of-several, or a prefix.
+ *
+ * Equality alone was not enough, and the gap showed up the first time a real chat client hit it.
+ * Asked "how much of our traffic is Android?", the model could not express it — `os_version` holds
+ * `Android 12`, `Android 13`, `Android 14`, `Android 15` — so it listed the values and summed four
+ * of them in its own head to get 4,967,845. That figure is arithmetically right and appears in no
+ * evidence row, which is exactly the behaviour the no-SQL design exists to prevent. A model will
+ * always work around a tool surface that cannot express an obvious question; the fix is to make the
+ * question expressible.
+ */
+export type FilterValue = string | string[];
 
 export const NO_SCOPE: Scope = { sql: "1", description: "whole platform", filters: {} };
 
@@ -155,7 +168,19 @@ export function assertDimension(dimension: unknown, metric: MetricDef): string {
   );
 }
 
-/** Equality filters, validated per metric and escaped as literals. */
+/**
+ * Filters, validated per metric and escaped as literals.
+ *
+ * Three forms per dimension, all composed here so no caller can assemble a predicate:
+ *
+ *   "Android 15"                  ->  os_version = 'Android 15'
+ *   ["Android 15", "Android 14"]  ->  os_version IN ('Android 15', 'Android 14')
+ *   "Android*"                    ->  startsWith(os_version, 'Android')
+ *
+ * `startsWith` rather than `LIKE 'x%'` because it is the form ClickHouse can use an index for, and a
+ * trailing `*` is the only wildcard accepted — no user-supplied pattern ever reaches SQL. None of the
+ * swept dimensions contain a literal `*`, so treating it as a wildcard costs nothing.
+ */
 export function buildScope(filters: unknown, metric: MetricDef): Scope {
   if (filters === undefined || filters === null) return NO_SCOPE;
   if (typeof filters !== "object" || Array.isArray(filters)) {
@@ -167,15 +192,47 @@ export function buildScope(filters: unknown, metric: MetricDef): Scope {
   const parts: string[] = [];
   const described: string[] = [];
   const clean: Record<string, string> = {};
+
   for (const [dim, value] of entries) {
     assertDimension(dim, metric);
-    if (typeof value !== "string") {
-      throw new QueryError(`Filter \`${dim}\` must be a string value, got ${JSON.stringify(value)}.`);
+
+    if (Array.isArray(value)) {
+      if (value.length === 0) {
+        throw new QueryError(`Filter \`${dim}\` is an empty list — omit it instead.`);
+      }
+      if (!value.every((v): v is string => typeof v === "string")) {
+        throw new QueryError(`Filter \`${dim}\` must be a list of strings, got ${JSON.stringify(value)}.`);
+      }
+      parts.push(`${dim} IN (${value.map(lit).join(", ")})`);
+      described.push(`${dim} in (${value.join(", ")})`);
+      clean[dim] = value.join(" | ");
+      continue;
     }
+
+    if (typeof value !== "string") {
+      throw new QueryError(
+        `Filter \`${dim}\` must be a string, a list of strings, or a "prefix*", got ${JSON.stringify(value)}.`,
+      );
+    }
+
+    if (value.endsWith("*")) {
+      const prefix = value.slice(0, -1);
+      if (prefix.length === 0) {
+        throw new QueryError(
+          `Filter \`${dim}\` is just "*", which matches everything — omit the filter instead.`,
+        );
+      }
+      parts.push(`startsWith(${dim}, ${lit(prefix)})`);
+      described.push(`${dim} starts with '${prefix}'`);
+      clean[dim] = value;
+      continue;
+    }
+
     parts.push(`${dim} = ${lit(value)}`);
     described.push(`${dim}='${value}'`);
     clean[dim] = value;
   }
+
   return { sql: parts.join(" AND "), description: described.join(", "), filters: clean };
 }
 
@@ -238,7 +295,7 @@ export interface MeasureArgs {
   metric: string;
   from: string;
   to?: string;
-  filters?: Record<string, string>;
+  filters?: Record<string, FilterValue>;
   group_by?: string[];
   granularity?: Granularity;
   limit?: number;
@@ -378,7 +435,7 @@ export interface CompareArgs {
   /** Omit to compare against the same-weekday trailing baseline (D-012). */
   baseline_from?: string;
   baseline_to?: string;
-  filters?: Record<string, string>;
+  filters?: Record<string, FilterValue>;
   group_by?: string[];
   limit?: number;
 }
@@ -577,7 +634,7 @@ export interface RankArgs {
   from: string;
   to?: string;
   order?: "worst" | "best" | "largest";
-  filters?: Record<string, string>;
+  filters?: Record<string, FilterValue>;
   limit?: number;
 }
 
