@@ -148,6 +148,12 @@ Written first; we build backwards from it. Judges see the demo, not the repo.
   "nothing broke, the mix shifted" is distinguishable from a real fault (D-010)
 - Statistical significance gating before any segment is called anomalous
 - Contribution-to-delta ranking + a simple, explainable confidence score
+- **Residualization — iterative deflation to separate causes from contamination** (D-017). After
+  ranking, take the top candidate, **exclude its rows, and re-sweep**. Any segment that returns to
+  normal was never a cause — it was contaminated by overlap with the real one. Repeat until nothing
+  exceeds the band. Output is the *minimal* set of true causes, plus every cleared segment with its
+  residual delta as proof. Costs ~2–4 extra ClickHouse round trips. **This is the difference between
+  naming one cause and naming twenty-one** — see the worked evidence in the D-017 row.
 - **Every finding priced in dollars** before it is reported, so findings across metrics are
   comparable and rankable (D-007)
 - **Structural change detection** — advertiser entry/exit, spend step-changes, mix shifts,
@@ -432,6 +438,7 @@ Append-only. Newest at the bottom. One line per decision. Never edit or delete s
 | D-014 | 2026-08-01 | Fact table is **daily-partitioned**, not monthly | Daily partitions make the loader idempotent — one chunk per partition, so a reload is DROP+INSERT with no dedup and no double-counted revenue. Reload safety matters more than partition count, because R-007 has us reloading under time pressure. | samarth (shipped), sam (conceded) |
 | D-015 | 2026-08-01 | Stack is **TypeScript/Bun**, not Python. All lane contracts are `.ts` | Settled by what landed on `main` first. Re-litigating it costs more than either option is worth. | samarth (shipped), sam (conceded) |
 | D-016 | 2026-08-01 | **`ad_events_enriched` is the only query surface** for Lanes A/C/D. Nobody queries `ad_events` directly | One place where dimension enrichment can be wrong, instead of four. Makes every drill-down a plain GROUP BY. | samarth (shipped) |
+| D-017 | 2026-08-01 | **Localization must residualize, not just rank.** Contribution ranking (T-018) is necessary but not sufficient; add iterative deflation (T-040) before anything is reported as a cause | Measured on the real Jun 23–25 fill-rate incident: a plain ranked sweep returns **21 segments** outside band (EU −5.50pp, tier_1 −3.89pp, finance −3.76pp, banner −3.65pp…). Excluding the single true cause — `os_version = 'Android 15'`, fill rate 0.7837 → 0.4333, −35.04pp on 9.6% of traffic — every one of those 21 collapses to within **±0.24pp** (EU → −0.07pp, tier_1 → +0.01pp). They were dilution artifacts, not causes. Reporting them is exactly the "hallucinated segment" failure the rubric punishes, and no amount of better narration fixes it — it is an algorithm problem. | sam (proposed) |
 
 > Rows D-005…D-012 are **proposed** and were added after the initial draft. Ratify or contest at M0
 > kickoff — change `(proposed)` to the ratifying handle, or open a BROADCAST entry arguing the other

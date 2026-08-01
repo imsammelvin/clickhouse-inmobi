@@ -58,6 +58,8 @@
 | T-037 | Demo video script: narration, beat timings, what is on screen when | Biz | sam | todo | — | T-010, T-030 | Distinct from T-011 (the recording). ≤5 min hard cap — script to 4:30 so the recording has slack. |
 | T-038 | Judging-rubric coverage checklist: map every deliverable to every scoring criterion | Biz | sam | todo | — | — | Cheap insurance. Five criteria, and "no trace, no credit" is absolute. Run it once at M3 and again at M4 to find gaps while there is still time to fix them. |
 | T-039 | Value quantification: leak-duration counterfactual for the deck | Biz | sam | todo | — | T-030 | "Detected 09:14 vs the human's 14:30 — 5h of leak avoided, $11k." Makes our own ROI a computed number rather than a claim. One slide, near-zero code. |
+| T-040 | Residualization: iterative deflation after contribution ranking | Lane A | — | todo | — | T-018 | **Proposed scope addition — see `goal.md` D-017 and the BROADCAST entry. Lane A's call to accept or reject.** Loop: take the top-ranked candidate, exclude its rows, re-sweep; anything that returns to band was contamination, not a cause; stop when nothing exceeds band. Emit the minimal cause set + every cleared segment with its residual as evidence. Verified against Jun 23–25: ranking alone reports 21 segments, deflation reports 1. ~2–4 extra ClickHouse round trips. |
+| T-041 | Mix-vs-rate split for ratio metrics, inside the localization stage | Lane A | — | todo | — | T-040 | Sibling of T-040 (D-010). Before deflating a ratio metric, split Δblended into rate effect vs mix effect, so "nothing broke, the traffic mix moved" is a reportable answer. Not yet confirmed present in the training data — T-031 is checking; if absent we still need it for the unseen incident. |
 
 ## Done
 
