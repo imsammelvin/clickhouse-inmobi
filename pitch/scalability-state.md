@@ -40,18 +40,22 @@ scale: the rollup grows with dimension cardinality x time, not with events.
 | All 10 MCP tools | yes | `servedFrom=rollup:daily:...`, 40-65 ms per call |
 | `find_incidents` sweep | yes | 9,446 ms -> 325 ms |
 | `detect`, `confirm`, `decompose` | yes | `bun run parity` reports `rollup-served` |
-| `localize` | **no** | still scans raw events |
-| `residualize` | **no** | still scans raw events |
+| `localize` (unmasked sweep) | yes | `parity` bit-identical with the rollup in use |
+| `residualize` (masked re-sweeps) | **no** | ~4 queries per investigation, see below |
 | `classify` | no, and cannot | `uniqExact(advertiser_id)` is not additive over sums |
 
-So: **asking a question is fast; asking *why* is not yet.** A measurement is 40 ms. A full
-investigation is 5-20 s, because `localize` and `residualize` still read raw events and the run makes
-~20 round trips to ClickHouse Cloud.
+**Five of six investigation stages are converted.** The sixth cannot be: `classify` counts distinct
+advertisers, and a distinct count cannot be recovered from sums.
 
-## Why the last two stages are not done
+What remains on raw is `residualize`'s *masked* re-sweeps — about four queries per investigation.
+A measurement is 40 ms; a full investigation is a few seconds.
 
-Not time, and not oversight. `detect` and `decompose` were a two-line swap: point the FROM clause at the
-rollup, wrap the aggregates. `residualize` is a different shape.
+## Why the last masked path is not done
+
+Not time, and not oversight. `detect` and `decompose` were a two-line swap. `localize`'s unmasked sweep
+was better than that — the rollup already stores one row per (dimension, value), which is exactly what
+localize's `arrayJoin` was constructing, so the fan-out simply disappeared. `residualize` is a different
+shape.
 
 It re-sweeps every dimension **with an exclusion mask** — "everything except Android 15" — and a
 pre-aggregated table cannot subtract a segment unless that segment's dimension is part of the key. It is
@@ -85,6 +89,16 @@ returned plausible numbers.
 
 - The scalability *design* is proven: rows read and rows returned are both bounded by cardinality
   rather than by event count, and the measured delta is 58x on rows and 45x on server time.
-- The *conversion* is partial: the tool layer and three of six investigation stages.
-- The remaining two stages are a known, scoped, ~2x latency win with a documented approach and a gate
-  that can prove it correct. They are not a mystery; they are a decision we deferred.
+- The *conversion* is the tool layer plus five of six investigation stages. The sixth is arithmetically
+  impossible to convert, not merely unfinished.
+- What remains is one masked query shape inside `residualize`, roughly four queries per investigation,
+  with a documented approach and a gate that can prove it correct. It is a deferred decision, not a
+  mystery.
+
+## One figure we corrected, and why it is written down
+
+An earlier draft of this page said `residualize` cost 97 seconds. That was a sum over a six-minute
+`system.query_log` window containing many runs, not the cost of one investigation, which is ~1.4 s
+across 8 queries. The share claim survived the correction — it is still the most expensive stage — but
+the absolute did not, and the remaining win is therefore smaller than that number implied. It is
+recorded here because a figure quoted once tends to be quoted again.
