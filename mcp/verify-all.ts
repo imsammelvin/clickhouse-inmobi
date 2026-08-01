@@ -54,6 +54,16 @@ const GATES: Gate[] = [
     summary: (o) => lastMatch(o, /gated accuracy\s+\S+\s+\S+/g),
   },
   {
+    name: "parity",
+    what: "the same investigation, rollup vs raw — every recorded number identical",
+    cmd: ["bun", "run", "parity"],
+    slow: true,
+    // Exit 2 = the rollup is unavailable, so there is nothing to compare. Setup state, not a defect.
+    skipCode: 2,
+    summary: (o) =>
+      lastMatch(o, /(VACUOUS[^\n]*|All \d+ scenario\(s\) read the rollup[^\n]*|\d+ of \d+ scenario\(s\) DIFFER[^\n]*)/g),
+  },
+  {
     name: "ch:verify-rollup",
     what: "every rollup-served answer equals the raw-scan answer",
     cmd: ["bun", "run", "ch:verify-rollup"],

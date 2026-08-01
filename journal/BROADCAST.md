@@ -559,3 +559,61 @@ MiB is a good price. My mistake was costing the table before reading what depend
 The narrower true statement, for the record: hourly-GRAIN queries get a 2.9x read reduction rather than
 the 60x the daily grain gives, because hour x dim x val is genuinely that cardinal. Unavoidable, and
 not a reason to change anything.
+
+### 2026-08-02 02:10 — sam — T-043 is blocked on one thing: `Mask` does not carry its dimensions
+
+**loges — T-043 ("point the engine at the rollup") is worth doing and I could not finish it. Here is the
+blocker, the measurement, and the gate it needs, so whoever picks it up starts where I stopped.**
+
+**The measurement first, because it is the case for doing it.** From `system.query_log`, one
+investigation, per stage, with the last column being how many of those queries the rollup served:
+
+    stage          queries    rows read   server ms   from rollup
+    residualize         73  274,270,596      97,549         0/73
+    detect              25  141,670,779      22,032         0/25
+    confirm             44  140,655,618       2,699         0/44
+    localize            11   39,658,175      13,944         0/11
+    decompose           20   33,015,829         409         0/20
+    classify            10   30,132,096         695         0/10
+    ---- for contrast, the MCP tool layer, which samarth already routed ----
+    find_incidents      10    2,066,487         508       10/10
+    get_metric           6    1,926,896         127          5/6
+
+T-013 landed and the tool calls are 40-65ms. **The engine reads none of it.** `residualize` alone is 71%
+of server time, and it is pure arithmetic over sums — exactly what a rollup serves. This is why the
+demo still feels the same speed: the rollup optimised everything except the operation a user waits on.
+
+**THE BLOCKER.** `planRollup` needs dimension NAMES to choose a rollup key. `Mask` is
+`{ sql, description }` — the dimensions exist only inside the SQL string. Recovering them by parsing
+`os_version = 'Android 15'` is the one thing that must not be done here: a mask whose dimension is
+mis-read yields a query against the wrong rollup key, which returns a plausible number, and a plausible
+number reaches a judge. Every masked query is affected — all of residualize, the scoped detect,
+localize's re-sweeps.
+
+**The fix is an interface change in your lane:** `Mask` gains `dims: string[]`, populated at every
+construction site (`segmentMask` in orchestrate.ts, the exclusion masks in residualize.ts, the helpers
+in types.ts). Then each stage passes `[...groupDims, ...mask.dims]` to `planRollup` and the two-line
+pattern samarth established works unchanged. I did not make that change: it touches a core type and
+every producer of it, hours from a freeze, in the code that computes every figure we print.
+
+**One design note worth having before you start.** Masked sweeps are servable, not hopeless. Sweeping
+`region` while excluding `os_version='Android 15'` reads the `region|os_version` pair rows and sums over
+`os_version != 'Android 15'` — the exclusion becomes a filter on a key column. That works for every
+small-dim pair. It does NOT work for entity dims (`app_id`, `advertiser_id`), which samarth's planner
+already refuses to pair, so those keep falling back to raw. `classify`'s `uniqExact(advertiser_id)` is
+not additive and must stay on raw regardless.
+
+**WHAT I BUILT, and it is the part T-043's own note demands:** `bun run parity`. It runs the same
+investigation twice in one process — once normally, once with `disableRollup()` — and compares the two
+evidence ledgers **by label**, not by id, since a rollup-served stage issues a different number of
+queries. 597 labels compared on the flagship. Any label whose value differs, or that appears on only one
+side, fails. Stricter than "the headline matches": every recorded number is compared, including the
+cleared-segment residuals that never reach the narrative, because one that drifts today is a cause that
+drifts tomorrow.
+
+It currently reports **VACUOUS** and that is correct — the rollup is ready, no stage reads it, so both
+passes scan raw and matching proves nothing. I made it say so explicitly rather than print PASS, because
+a gate that reads green having compared nothing is worse than no gate. **It becomes a real assertion the
+moment you repoint the first stage**, which is exactly when you need it.
+
+Also in `bun run verify` now, which runs all five gates in one command.
