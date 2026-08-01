@@ -3,10 +3,11 @@
  *
  *   bun run backend/cli.ts --metric fill_rate --from 2026-06-23 --to 2026-06-25
  *   bun run backend/cli.ts --metric revenue   --from 2026-06-21 --json
+ *   bun run backend/cli.ts --metric fill_rate --from 2026-06-23 --to 2026-06-25 --plain
  */
 import { Ledger } from "./ledger";
 import { investigate } from "./orchestrate";
-import { renderFull } from "./render";
+import { renderFull, renderPlain } from "./render";
 import { initObservability, log, shutdownObservability, withSpan } from "../utils/telemetryUtils";
 
 function arg(name: string, fallback?: string): string {
@@ -30,6 +31,7 @@ async function run(): Promise<void> {
   const from = arg("from");
   const to = arg("to", from);
   const asJson = process.argv.includes("--json");
+  const asPlain = process.argv.includes("--plain"); // T-045: pitch/diagnosis-template.md §1 wording
 
   const ledger = new Ledger();
   const started = Date.now();
@@ -39,6 +41,8 @@ async function run(): Promise<void> {
       // Raw stdout, deliberately: --json exists to be piped, and shipping a whole Investigation
       // into the log pipeline on every run would be noise, not telemetry.
       process.stdout.write(`${JSON.stringify(inv, null, 2)}\n`);
+    } else if (asPlain) {
+      log.info(renderPlain(inv));
     } else {
       log.info(renderFull(inv));
       // Human line stays clean; the structured record carries what ClickStack needs to chart

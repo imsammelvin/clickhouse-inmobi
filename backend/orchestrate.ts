@@ -24,6 +24,25 @@ import {
 } from "./types";
 import { withSpan } from "../utils/telemetryUtils";
 
+/**
+ * T-046 — materiality floor, applied to every confirmed cause regardless of which path found it.
+ *
+ * "Confirm" (Stage 3b) already checks a segment is significant against its OWN history, but that
+ * catches noisy-for-itself segments, not small-but-real ones. Jun 27 is the exhibit: platform
+ * revenue itself clears the anomaly gate directly (+4.4%, >2.5 sigma -- no fallback involved), yet
+ * the only thing localization finds is `country|ad_format='IN|banner'` moving +9.7% against its own
+ * baseline -- clears "confirm" fine -- on just 2.1% of traffic. The product path still named a
+ * channel and an owner as if something broke, on what the eval's own ground truth calls the planted
+ * seasonality decoy. Incident D's genuine cause sits at 9.8% share, and incidents A/C sit at
+ * 9.6%/7.0-7.2% -- 5% cleanly separates every real training incident from this decoy, where dollars
+ * do not ($2.13/day vs D's $1.50/day, same order of magnitude).
+ *
+ * Deliberately keyed on segment SHARE, not on whether the platform itself moved: incident A's cause
+ * is itself only 9.6% of traffic on a platform move that clears gates directly, so "the platform
+ * moved" cannot be the discriminator -- only materiality can.
+ */
+export const MIN_MATERIAL_SHARE_PCT = 5;
+
 export interface InvestigateOptions {
   metric: string;
   from: string;
@@ -292,6 +311,67 @@ async function investigateInner(opts: InvestigateOptions): Promise<Investigation
   res.causes.length = 0;
   res.causes.push(...confirmed);
 
+  // T-046 materiality floor (see MIN_MATERIAL_SHARE_PCT doc comment). Applies to every confirmed
+  // cause, on every path -- a segment can be statistically real against its own history and still
+  // be too small a slice of traffic to call an incident. Filtered causes move to `ruledOut`, each
+  // with its numbers recorded as evidence first (the same pattern used for `res.contamination`
+  // below) -- printing a number in a note without recording it is exactly the "grounding" failure
+  // this codebase is built to prevent.
+  const material = res.causes.filter((c) => c.sharePct >= MIN_MATERIAL_SHARE_PCT);
+  const immaterial = res.causes.filter((c) => c.sharePct < MIN_MATERIAL_SHARE_PCT);
+  for (const c of immaterial) {
+    ledger.record({
+      label: `immaterial.${c.dimension}.${c.value}.delta`,
+      value: Number((c.deltaPp ?? c.deltaPct).toFixed(4)),
+      unit: c.deltaPp !== null ? "pp" : "pct",
+      sql: c.sql,
+      window: { from, to },
+      filters: { segment: `${c.dimension}='${c.value}'` },
+    });
+    ledger.record({
+      label: `immaterial.${c.dimension}.${c.value}.share_pct`,
+      value: Number(c.sharePct.toFixed(4)),
+      unit: "pct",
+      sql: c.sql,
+      window: { from, to },
+      filters: { segment: `${c.dimension}='${c.value}'` },
+    });
+    ruledOut.push({
+      channel: "no_anomaly",
+      segment: { dimension: c.dimension, value: c.value },
+      metric: sweepMetric,
+      deltaAbs: c.deltaAbs,
+      deltaPct: c.deltaPct,
+      deltaPp: c.deltaPp,
+      revenueImpactUsd: null,
+      significanceSigma: null,
+      status: "cleared_as_normal",
+      segmentSharePct: c.sharePct,
+      evidenceIds: [],
+      note:
+        `moved ${fmtDelta(c.deltaPp, c.deltaPct)} against its own history, but on only ` +
+        `${c.sharePct.toFixed(2)}% of traffic — too small a slice to call an incident ` +
+        `(floor: ${MIN_MATERIAL_SHARE_PCT}%).`,
+    });
+  }
+  // Distinct from `noCause` below: this is specifically "found something, but it doesn't matter",
+  // never "found nothing" -- so it must not borrow platformInBand's meaning, only its outcome.
+  const filteredForMateriality = immaterial.length > 0;
+  if (filteredForMateriality) {
+    // The floor itself is printed (ruledOut note, and the headline below) -- configuration, not
+    // measurement, but printed numerals must resolve regardless, same as detect.ts's own gates.
+    ledger.record({
+      label: "gate.min_material_share_pct",
+      value: MIN_MATERIAL_SHARE_PCT,
+      unit: "pct",
+      sql: "configuration: backend/orchestrate.ts MIN_MATERIAL_SHARE_PCT",
+      window: { from, to },
+      filters: {},
+    });
+  }
+  res.causes.length = 0;
+  res.causes.push(...material);
+
   // ---- Stage 4: classify + price -------------------------------------------------------
   //
   // Both run off the SAME decomposition, scoped to the cause.
@@ -511,7 +591,11 @@ async function investigateInner(opts: InvestigateOptions): Promise<Investigation
           `${cause.sharePct.toFixed(1)}% of traffic). Worth ${fmtUsd(revPerDay)}/day.`
       : platformInBand
         ? `no segment moved beyond its own normal range.`
-        : `${metric} moved ${det.deltaPct.toFixed(1)}% but no segment cleared the significance gates.`;
+        : filteredForMateriality
+          ? `${metric} moved ${det.deltaPct.toFixed(1)}% over ${from}..${to}, but the only segment ` +
+            `that cleared significance was too small a slice of traffic to call an incident ` +
+            `(floor: ${MIN_MATERIAL_SHARE_PCT}%).`
+          : `${metric} moved ${det.deltaPct.toFixed(1)}% but no segment cleared the significance gates.`;
 
   // Nothing survived Stage 3b, so there is no cause to own. What that MEANS depends entirely on
   // whether the platform itself moved.
@@ -524,7 +608,11 @@ async function investigateInner(opts: InvestigateOptions): Promise<Investigation
   // as "No action.", which is a miss dressed as an all-clear. Failing to localize is not the same
   // as finding nothing, and only one of the two is safe to stay quiet about.
   const noCause = !res.uniform && res.causes.length === 0;
-  const channel = noCause ? (platformInBand ? "no_anomaly" : "not_localizable") : cls.channel;
+  const channel = noCause
+    ? platformInBand || filteredForMateriality
+      ? "no_anomaly"
+      : "not_localizable"
+    : cls.channel;
 
   if (platformInBand) {
     // The platform verdict is itself a finding, and it is the one that keeps the seasonality decoy

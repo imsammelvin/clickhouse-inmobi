@@ -120,6 +120,7 @@ built it because the front door was the gap, not the engine. Commits carry `Cros
 samarth — if you want it back, say so here and I will stop.
 
 **Two shared files touched, announcing as § 2 requires:**
+
 - `package.json` — three new scripts, nothing else edited: `mcp:stdio`, `mcp:http`, `mcp:eval`.
 - `.gitignore` — ignores `mcp/traces/` (a trace is written on every tool call; keep an exhibit by
   copying it into `pitch/` deliberately).
@@ -157,7 +158,7 @@ claimed by me, since it is a threshold decision in your stage and your call.
 
 **Also worth knowing — a bug of the same family that WAS mine, now fixed (`10fc971`).**
 `compare_periods` aggregated each side with one conditional sum, so an absolute metric compared one
-day against the *total* of its three same-weekday priors: platform revenue on Jun 27 read **-65%**
+day against the _total_ of its three same-weekday priors: platform revenue on Jun 27 read **-65%**
 when it is +4.4%. Ratio metrics are scale-invariant in the number of days pooled and hid it
 completely — every fill-rate answer looked correct throughout, including one I had hand-checked
 against the dossier. Now aggregated per day with a median across days, ratios formed componentwise,
@@ -226,7 +227,7 @@ already emits. One full unattended run:
     343,970,353 rows read | 4,096.9 MiB | 59,232 ms server | 848.2 MiB peak | 55 queries
     find_incidents alone:  135M rows across 10 queries
 
-Rows *returned* are bounded by dimension cardinality and that invariant holds. Rows *read* are not
+Rows _returned_ are bounded by dimension cardinality and that invariant holds. Rows _read_ are not
 defended at all — one run reads ~38x the fact table, because every metric's sweep rescans full history
 for its baseline and residualize re-runs the localize sweep per iteration. **T-013 is where this gets
 fixed, and this number is the before-figure that makes the after-figure a scalability story rather
@@ -278,3 +279,40 @@ must never be averaged across rows (`get_metric`), and the dataset's real +6.4% 
 few percent up is the trend not an incident (`compare_periods`). Cost ~75 tokens.
 
 **Commit:** on `dev/sam/mcp-server`
+
+### 2026-08-01 — loges — T-046 shipped, T-045 shipped, incident C's shadow explained (not fixed)
+
+**T-046 (materiality gate) — done.** `backend/orchestrate.ts`: `MIN_MATERIAL_SHARE_PCT = 5`, applied
+to every confirmed cause on every path, not just the platform-quiet fallback — Jun 27's platform
+revenue clears the anomaly gate _directly_ (+4.4%, no fallback), so a fix gated only on
+`platformInBand` (first attempt) missed it and briefly regressed incident C's grounding by printing
+`deltaPct`/`sharePct` in a ruled-out note without recording them as evidence first. Fixed by mirroring
+the `res.contamination` pattern. Filtered causes report as `no_anomaly`, not `not_localizable` — that
+stays reserved for `res.uniform`, protecting the real-but-unattributed CTR case. Verified: `mcp:eval`
+15/15 gated 30/30 (was 14/15, 28/30), `criteria` still 4/4, decoy now attributes $0.00 (was $1.24).
+A/B/C/D spot-checked unchanged.
+
+**T-045 (plain-English renderer) — done, additive.** `renderPlain()` in `backend/render.ts`, wired to
+`bun run explain -- --plain`. Does not touch `renderNarrative`/`renderFull` — separate function, same
+`Investigation`, so grounding/criteria/mcp:eval are unaffected (re-verified green after). Matches
+`pitch/diagnosis-template.md` §1 wording closely ("Their fill rate fell from 78% to 43%."). Known gap:
+the "IS SOMETHING BROKEN" bullets still reuse `classify.ts`'s technical `cleared[]` notes verbatim
+("Advertiser exit: 500 bidding before, 498 during") rather than the template's plain phrasing
+("All 500 advertisers were still bidding") — rewriting those needs new plain-language fields on
+`Classification`, which is a `classify.ts` change, not render-only, so left for a follow-up rather than
+risked here.
+
+**Incident C's segment shadow — investigated, not changed.** Diagnosed with a throwaway script against
+`segments.ts` (not committed): the auto-detected window for `ecpm` isn't just wider than the dossier's
+Jun 19-22 by coincidence. `country|ad_format='DE|interstitial'` / `UK|interstitial` / `FR|interstitial`
+/ `ES|interstitial` all fire independently over Jun 16-20 at scores (~160) comparable to or _higher_
+than `app_category='finance'` alone (144.3) — European interstitial eCPM looks like it may have had its
+own real, separate drop that happens to overlap finance's Jun 19-22 window. `finance|interstitial`
+narrowly wins the cluster's lead pick (161.1 vs 160.9), which is why the window widens to Jun 16-22 and
+`investigate()`'s own residualize sweep over that wider window sometimes prefers `interstitial` to
+`finance`. This is not obviously a bug in `clusterWindows`' scoring — it may be two genuine overlapping
+signals, possibly a second, undocumented planted incident. Not touched: `segments.ts`'s clustering is
+tuned against several known incidents already, and I do not have enough confidence in 20 minutes to
+change it without risking a regression elsewhere. `investigate()` on the exact hand-verified window
+(Jun 19-22) already gets this right today (confirmed: `mcp:eval` C-finance-ecpm passes 100%). Flagging
+for whoever has time before the freeze to confirm whether the European-interstitial pattern is real.
