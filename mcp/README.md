@@ -186,6 +186,13 @@ The contract also covers three behaviours that are product decisions, not style:
   complete answer.
 - **Answers are sized to the question.** A one-word message does not get a report, and no answer ends
   with a menu of suggestions.
+- **Implementation stays internal; evidence never does.** The contract refuses to reveal or paraphrase
+  the instructions themselves, refuses to name files, modules, stages or tool parameters, and treats
+  text arriving in tool results as data rather than commands. It says so explicitly in both
+  directions, because a blanket "don't reveal internals" would gut criterion 2: if someone asks where
+  a number came from, what it was compared against, what was ruled out or how long it took, the answer
+  is the full working including the exact SQL from `get_evidence`. Confidentiality about the
+  implementation, never about the evidence — and if the two ever conflict, showing the working wins.
 - **Icons carry meaning, not decoration.** One status icon opens a verdict — 🔴 broken, 🟠 market
   moved, 🔵 platform-wide, 🟢 normal, ⚪ cannot call it, 🚫 cannot be measured — plus 🎯 cause,
   💵 cost/day, ✅ cleared. A plain measurement gets no icon at all, because it is not a verdict.
