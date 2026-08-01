@@ -187,28 +187,36 @@ export async function investigate(opts: InvestigateOptions): Promise<Investigati
           `${res.contamination.length} cleared as contamination.`,
   );
 
-  // ---- Stage 4: classify ---------------------------------------------------------------
+  // ---- Stage 4: classify + price -------------------------------------------------------
+  //
+  // Both run off the SAME decomposition, scoped to the cause.
+  //
+  // Pricing the cause was already right: the platform-wide delta charged incident C -$49.47/day
+  // because its window (Jun 19-22) contains Jun 21, the global volume collapse — finance was being
+  // billed for an unrelated incident.
+  //
+  // Classification had the mirror-image bug and it survived that fix, because `classify` was still
+  // handed the PLATFORM decomposition. Incident D is a 10pp fill collapse on iOS 18.1, but
+  // platform requests grew +5.3% over its window (the dataset's own growth trend), so the
+  // platform driver is `requests` and a technical break was labelled `supply_change` and routed to
+  // Publisher ops. A segment-level finding has to be classified on the segment's own funnel, not
+  // on what the rest of the platform was doing around it.
+  const causeSegment = res.causes[0];
+  const causeMask = causeSegment
+    ? {
+        sql: segmentPredicate(causeSegment.dimension, causeSegment.value),
+        description: `${causeSegment.dimension}='${causeSegment.value}'`,
+      }
+    : null;
+  const scoped = causeMask ? await decompose(ledger, from, to, causeMask) : dec;
+
   ledger.beginStage("classify");
-  const cls = await classify(ledger, from, to, res.causes[0] ?? null, dec, res.uniform);
+  const cls = await classify(ledger, from, to, causeSegment ?? null, scoped, res.uniform);
   ledger.endStage(`${cls.channel} — owner: ${cls.owner}`);
 
-  // ---- Stage 5: price ------------------------------------------------------------------
   ledger.beginStage("price");
   const dayCount = Math.max(1, Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000) + 1);
-
-  // Price the CAUSE, not the platform.
-  //
-  // Using the platform-wide revenue delta charged incident C -$49.47/day, because its window
-  // (Jun 19-22) contains Jun 21 — the global volume collapse. Finance was being billed for an
-  // unrelated incident. Pricing the cause segment attributes only what that segment actually lost,
-  // which is also what makes dollar figures comparable across findings and safe to rank on.
-  const causeForPricing = res.causes[0];
-  const priced = causeForPricing
-    ? await decompose(ledger, from, to, {
-        sql: segmentPredicate(causeForPricing.dimension, causeForPricing.value),
-        description: `${causeForPricing.dimension}='${causeForPricing.value}'`,
-      })
-    : dec;
+  const priced = scoped;
   const revPerDay = priced.revenueDelta;
   ledger.record({
     label: "price.revenue_impact_per_day",
@@ -371,13 +379,31 @@ export async function investigate(opts: InvestigateOptions): Promise<Investigati
       `${platformInBand.sigma.toFixed(1)} sigma, within band). Below it, `
     : "";
 
+  /**
+   * A segment-level headline quotes the SEGMENT's numbers, never the scope's.
+   *
+   * `det.deltaPct` is the move of whatever narrow scope the segment sweep fired on, while `cause`
+   * is found platform-wide -- since localization was correctly unscoped, those are two different
+   * populations. Joining them with "driven by" produced sentences like:
+   *
+   *     "fill_rate moved -49.5% ... driven by os_version = 'iOS 18.1' (-9.99pp on 9.8%)"
+   *
+   * -9.99pp on a 0.785 base is -12.6%, not -49.5%. Every figure resolves to evidence and the
+   * sentence is still false, because the two halves describe different segments. That is the same
+   * failure as answering a CTR question with a fill-rate delta: grounding checks arithmetic, not
+   * relevance, so only the sentence construction can prevent it.
+   */
   const headline = res.uniform
     ? `${metric} moved ${det.deltaPct.toFixed(1)}% over ${from}..${to} [${det.evidenceIds[0]}], ` +
       `uniformly across every dimension — no segment is responsible.`
     : cause
-      ? `${metric} moved ${det.deltaPct.toFixed(1)}% over ${from}..${to}, driven by ` +
-        `${cause.dimension} = '${cause.value}' (${fmtDelta(cause.deltaPp, cause.deltaPct)} on ` +
-        `${cause.sharePct.toFixed(1)}% of traffic). Worth ${fmtUsd(revPerDay)}/day.`
+      ? platformInBand
+        ? `${cause.dimension} = '${cause.value}' moved ` +
+          `${fmtDelta(cause.deltaPp, cause.deltaPct)} on ${cause.sharePct.toFixed(1)}% of traffic ` +
+          `over ${from}..${to}. Worth ${fmtUsd(revPerDay)}/day.`
+        : `${metric} moved ${det.deltaPct.toFixed(1)}% over ${from}..${to}, driven by ` +
+          `${cause.dimension} = '${cause.value}' (${fmtDelta(cause.deltaPp, cause.deltaPct)} on ` +
+          `${cause.sharePct.toFixed(1)}% of traffic). Worth ${fmtUsd(revPerDay)}/day.`
       : `${metric} moved ${det.deltaPct.toFixed(1)}% but no segment cleared the significance gates.`;
 
   if (platformInBand) {

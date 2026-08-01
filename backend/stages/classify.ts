@@ -7,7 +7,7 @@
  * and the signature is queried.
  */
 import type { Ledger } from "../ledger";
-import { baselineDates, sqlDateList } from "../baseline";
+import { baselineDates, datesBetween, median, sqlDateList } from "../baseline";
 import type { Candidate } from "./localize";
 import type { Decomposition } from "./decompose";
 import { type Channel, segmentPredicate } from "../types";
@@ -113,16 +113,53 @@ FROM (
   const [r] = await ledger.run<SignalRow>(sql);
   if (!r) throw new Error("classify: signal query returned no rows");
 
+  /**
+   * Distinct advertisers must be counted PER DAY and compared on a per-day centre.
+   *
+   * `uniqExact` is not additive, so pooling an N-day baseline against a 1-day incident inflates
+   * the baseline for free and manufactures an advertiser exit out of nothing. Measured on the
+   * seasonality decoy (2026-06-28, segment `region|os_version = 'EU|iOS 17.5'`):
+   *
+   *     per day   Jun 07: 394   Jun 14: 400   Jun 21: 315   Jun 28: 421
+   *     3 baseline Sundays POOLED: 481
+   *
+   * Jun 28 is the HIGHEST of the four Sundays, yet 421-vs-481 reported "advertisers fell 12%" and
+   * classified a perfectly normal weekend as a demand change owned by Sales. Per-day medians give
+   * 421 vs 394 -- participation up 7%, no exit.
+   *
+   * This fires on any narrow segment, which is now the common path since detection gained a
+   * segment-level fallback, and it fires on the one channel with a named counterparty.
+   */
+  const perDay = await ledger.run<{ d: string; advs: string | number; reqs: string | number }>(
+    `
+SELECT toString(event_date)                        AS d,
+       uniqExactIf(advertiser_id, advertiser_id != '') AS advs,
+       count()                                     AS reqs
+FROM ad_events_enriched
+WHERE ${seg}
+  AND (event_date BETWEEN '${from}' AND '${to}' OR event_date IN (${sqlDateList(base)}))
+GROUP BY d
+ORDER BY d`.trim(),
+  );
+  const incidentDays = new Set(datesBetween(from, to));
+  const onDays = (want: boolean, pick: (x: { advs: string | number; reqs: string | number }) => number) =>
+    perDay.filter((x) => incidentDays.has(x.d) === want).map(pick);
+  const advsOf = (x: { advs: string | number }) => Number(x.advs);
+  const reqsOf = (x: { reqs: string | number }) => Number(x.reqs);
+
   const baseDays = Number(r.base_days) || 1;
   const incDays = Number(r.inc_days) || 1;
-  const advsBase = Number(r.advs_base);
-  const advsInc = Number(r.advs_inc);
+  const advsBase = Math.round(median(onDays(false, advsOf))) || Number(r.advs_base);
+  const advsInc = Math.round(median(onDays(true, advsOf))) || Number(r.advs_inc);
   const renderBase = Number(r.render_base ?? 0);
   const renderInc = Number(r.render_inc ?? 0);
   const ecpmBase = Number(r.ecpm_base ?? 0);
   const ecpmInc = Number(r.ecpm_inc ?? 0);
-  const reqsBase = Number(r.reqs_base) / baseDays;
-  const reqsInc = Number(r.reqs_inc) / incDays;
+  // Median per day, for the same reason: a pooled mean puts Jun 21's collapse into every Sunday
+  // baseline, which read the decoy's +13% segment move as +27.5% in the rationale -- a number that
+  // contradicted the headline in the same response.
+  const reqsBase = median(onDays(false, reqsOf)) || Number(r.reqs_base) / baseDays;
+  const reqsInc = median(onDays(true, reqsOf)) || Number(r.reqs_inc) / incDays;
 
   const evidenceIds = [
     ledger.record({

@@ -12,7 +12,7 @@
  * total by construction, with the residual carrying the interaction terms.
  */
 import type { Ledger } from "../ledger";
-import { baselineDates, sqlDateList } from "../baseline";
+import { baselineDates, datesBetween, median, sqlDateList } from "../baseline";
 import { type Mask, NO_MASK } from "../types";
 
 export interface Factor {
@@ -38,23 +38,57 @@ export interface Decomposition {
 }
 
 interface FunnelRow {
-  days: string | number;
+  d: string;
   reqs: string | number;
   fills: string | number;
   imps: string | number;
   rev: number;
 }
 
+/** One day's summed funnel counters. */
+interface Totals {
+  reqs: number;
+  fills: number;
+  imps: number;
+  rev: number;
+}
+
+/** Componentwise median across days -- robust to a single contaminated day on either side. */
+const centre = (series: Totals[]): Totals => ({
+  reqs: median(series.map((t) => t.reqs)),
+  fills: median(series.map((t) => t.fills)),
+  imps: median(series.map((t) => t.imps)),
+  rev: median(series.map((t) => t.rev)),
+});
+
+/**
+ * Per-day funnel totals. Deliberately NOT pre-aggregated across the window.
+ *
+ * This used to sum the whole window and divide by the day count -- a mean on both sides -- and a
+ * mean is exactly what a neighbouring incident poisons. Two live cases, from opposite directions:
+ *
+ *   Incident C (Jun 19-22) CONTAINS Jun 21, the global volume collapse. The mean read requests at
+ *   -8.2%, so a finance eCPM crash was classified `supply_change` and routed to Publisher ops.
+ *
+ *   Incident D (Jun 28-30) has Jun 21 sitting in its same-weekday BASELINE. The mean read requests
+ *   at +7.9%, so a 10pp fill collapse on one OS was also classified `supply_change`.
+ *
+ * `detect` and `localize` were both hardened against this with a median; this stage never was.
+ * Same bug, third stage. Totals stay summed *within* each day, so ratios remain sum/sum as the
+ * glossary requires -- the median is only ever taken across days.
+ */
 const funnelSql = (where: string, mask: Mask): string =>
   `
 SELECT
-  uniqExact(event_date) AS days,
-  count()               AS reqs,
-  sum(is_filled)        AS fills,
-  sum(is_impression)    AS imps,
-  sum(revenue)          AS rev
+  toString(event_date) AS d,
+  count()              AS reqs,
+  sum(is_filled)       AS fills,
+  sum(is_impression)   AS imps,
+  sum(revenue)         AS rev
 FROM ad_events_enriched
-WHERE (${mask.sql}) AND ${where}`.trim();
+WHERE (${mask.sql}) AND ${where}
+GROUP BY d
+ORDER BY d`.trim();
 
 export async function decompose(
   ledger: Ledger,
@@ -67,27 +101,70 @@ export async function decompose(
   const incSql = funnelSql(`event_date BETWEEN '${from}' AND '${to}'`, mask);
   const baseSql = funnelSql(`event_date IN (${sqlDateList(base)})`, mask);
 
-  const [inc] = await ledger.run<FunnelRow>(incSql);
-  const [bas] = await ledger.run<FunnelRow>(baseSql);
-  if (!inc || !bas) throw new Error("decompose: funnel query returned no rows");
+  const incRows = await ledger.run<FunnelRow>(incSql);
+  const basRows = await ledger.run<FunnelRow>(baseSql);
+  if (incRows.length === 0 || basRows.length === 0) {
+    throw new Error("decompose: funnel query returned no rows");
+  }
 
-  const per = (r: FunnelRow) => {
-    const days = Number(r.days) || 1;
-    const reqs = Number(r.reqs);
-    const fills = Number(r.fills);
-    const imps = Number(r.imps);
-    const rev = Number(r.rev);
+  const totals = (r: FunnelRow): Totals => ({
+    reqs: Number(r.reqs),
+    fills: Number(r.fills),
+    imps: Number(r.imps),
+    rev: Number(r.rev),
+  });
+  const basByDate = new Map(basRows.map((r) => [r.d, totals(r)]));
+  const incByDate = new Map(incRows.map((r) => [r.d, totals(r)]));
+  const incidentDays = datesBetween(from, to);
+
+  /**
+   * Baseline aligned day-for-day with the incident window, matched on weekday.
+   *
+   * Pooling every baseline day and taking one centre is not like-for-like when the two sets have
+   * different weekday mixes. Incident C spans Fri-Mon (4 days); its baseline pool is 9 days with
+   * three Mondays. Mondays run ~270k requests and Saturdays ~215k, so the pooled baseline centre
+   * lands on a Friday while the incident centre lands between Friday and Saturday -- and requests
+   * read -3.6% purely from that mismatch. Matched per weekday they read:
+   *
+   *     Fri +3.2%   Sat +3.4%   Sun -43.5%   Mon +4.2%
+   *
+   * Request volume was normal; one day inside the window (Jun 21, incident B) collapsed. The
+   * pooled comparison turned that into "requests are the driver", which routed a finance eCPM
+   * crash to Publisher ops as a supply change.
+   */
+  const matchedBaseline = (day: string): Totals | null => {
+    const matched = baselineDates(day, day)
+      .filter((b) => !incidentDays.includes(b))
+      .map((b) => basByDate.get(b))
+      .filter((t): t is Totals => t !== undefined);
+    return matched.length ? centre(matched) : null;
+  };
+
+  const incSeries = incidentDays
+    .map((d) => incByDate.get(d))
+    .filter((t): t is Totals => t !== undefined);
+  const baseSeries = incidentDays
+    .map(matchedBaseline)
+    .filter((t): t is Totals => t !== null);
+
+  if (incSeries.length === 0 || baseSeries.length === 0) {
+    throw new Error("decompose: no weekday-matched baseline for this window");
+  }
+
+  /** Ratios stay sum/sum within a day; the median is only ever taken across days. */
+  const per = (series: Totals[]) => {
+    const { reqs, fills, imps, rev } = centre(series);
     return {
-      requests: reqs / days,
+      requests: reqs,
       fill_rate: reqs === 0 ? 0 : fills / reqs,
       render_rate: fills === 0 ? 0 : imps / fills,
       ecpm: imps === 0 ? 0 : (rev / imps) * 1000,
-      revenue: rev / days,
+      revenue: rev,
     };
   };
 
-  const b = per(bas);
-  const i = per(inc);
+  const b = per(baseSeries);
+  const i = per(incSeries);
 
   // Revenue rebuilt from the four factors. Swap them one at a time, baseline -> incident.
   const rev = (f: { requests: number; fill_rate: number; render_rate: number; ecpm: number }) =>
