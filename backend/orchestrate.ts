@@ -11,7 +11,7 @@ import { METRICS } from "./metrics";
 import { detect } from "./stages/detect";
 import { decompose } from "./stages/decompose";
 import { localize } from "./stages/localize";
-import { residualize } from "./stages/residualize";
+import { qualifies, residualize } from "./stages/residualize";
 import { classify } from "./stages/classify";
 import type { Finding, Investigation } from "./types";
 
@@ -82,9 +82,11 @@ export async function investigate(opts: InvestigateOptions): Promise<Investigati
   // ---- Stage 2: localize ---------------------------------------------------------------
   ledger.beginStage("localize");
   const candidates = await localize(ledger, sweepMetric, from, to);
-  const raw = candidates.filter((c) =>
-    c.deltaPp !== null ? Math.abs(c.deltaPp) >= 1 : Math.abs(c.deltaPct) >= 3,
-  );
+  // Count only candidates that clear the same gate residualize uses. Counting everything past a
+  // 1pp wobble inflated this to 818 once app_id was swept, most of them small-sample noise no
+  // serious tool would surface — quoting that as "what a naive tool reports" would overstate our
+  // own result.
+  const raw = candidates.filter(qualifies);
   ledger.endStage(`${raw.length} segment(s) outside band on a raw ranked sweep.`);
 
   // ---- Stage 3: residualize ------------------------------------------------------------

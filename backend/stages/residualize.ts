@@ -46,7 +46,7 @@ const magnitude = (c: Candidate): number =>
 const bandFor = (c: Candidate): number =>
   c.deltaPp !== null ? RESIDUAL_BAND_PP : RESIDUAL_BAND_PCT;
 
-function qualifies(c: Candidate): boolean {
+export function qualifies(c: Candidate): boolean {
   if (c.sharePct < CAUSE_MIN_SHARE_PCT) return false;
   return c.deltaPp !== null
     ? Math.abs(c.deltaPp) >= CAUSE_MIN_PP
@@ -101,13 +101,24 @@ export async function residualize(
     const med = mags[Math.floor(mags.length / 2)] ?? 0;
     const sqlRef = initial[0]?.sql ?? "";
     const rec = (label: string, value: number, unit: "count" | "pct") =>
-      ledger.record({ label, value: Number(value.toFixed(4)), unit, sql: sqlRef, window: { from, to }, filters: {} });
+      ledger.record({
+        label,
+        value: Number(value.toFixed(4)),
+        unit,
+        sql: sqlRef,
+        window: { from, to },
+        filters: {},
+      });
     rec("uniformity.segments_moved", moved.length, "count");
     rec("uniformity.dimensions", new Set(moved.map((c) => c.dimension)).size, "count");
     rec("uniformity.min_magnitude", mags[0] ?? 0, "pct");
     rec("uniformity.max_magnitude", mags[mags.length - 1] ?? 0, "pct");
     rec("uniformity.median_magnitude", med, "pct");
-    rec("uniformity.spread_ratio_pct", med === 0 ? 0 : (((mags[mags.length - 1] ?? 0) - (mags[0] ?? 0)) / med) * 100, "pct");
+    rec(
+      "uniformity.spread_ratio_pct",
+      med === 0 ? 0 : (((mags[mags.length - 1] ?? 0) - (mags[0] ?? 0)) / med) * 100,
+      "pct",
+    );
     return {
       causes: [],
       contamination: [],
@@ -172,7 +183,8 @@ export async function residualize(
   const causeKeys = new Set(causes.map((c) => `${c.dimension}|${c.value}`));
   const contamKeys = new Set(contamination.map((c) => `${c.dimension}|${c.value}`));
   const normal = initial.filter(
-    (c) => !causeKeys.has(`${c.dimension}|${c.value}`) && !contamKeys.has(`${c.dimension}|${c.value}`),
+    (c) =>
+      !causeKeys.has(`${c.dimension}|${c.value}`) && !contamKeys.has(`${c.dimension}|${c.value}`),
   );
 
   return { causes, contamination, normal, uniform: false, iterations };

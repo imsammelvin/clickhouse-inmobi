@@ -7,7 +7,7 @@
  * which matters because incident and baseline must never be computed under different filters.
  */
 import type { Ledger } from "../ledger";
-import { METRICS, dimensionsFor, metricExpr } from "../metrics";
+import { DIMENSION_PAIRS, METRICS, dimensionsFor, metricExpr } from "../metrics";
 import { baselineDates, datesBetween, sqlDateList } from "../baseline";
 import { type Mask, NO_MASK } from "../types";
 
@@ -59,7 +59,22 @@ export async function localize(
   const expr = metricExpr(def);
   const dims = dimensionsFor(metric);
   const base = baselineDates(from, to);
-  const pairs = dims.map((d) => `('${d}', ${d})`).join(", ");
+
+  // Single dimensions plus the pairwise cuts. A pair is emitted as one synthetic dimension
+  // ("region|os_version" -> "EU|Android 15") so the sweep, the ranking and the deflation loop all
+  // treat it exactly like any other candidate — no special-casing downstream.
+  const single = dims.map((d) => `('${d}', ${d})`);
+  const paired = DIMENSION_PAIRS.filter(([a, b]) => dims.includes(a) && dims.includes(b)).map(
+    ([a, b]) => `('${a}|${b}', concat(${a}, '|', ${b}))`,
+  );
+  const pairs = [...single, ...paired].join(", ");
+
+  // Volume floor, applied in SQL rather than after the fact. app_id alone is 2,000 values and the
+  // pairs add several hundred more, so without this the client would receive thousands of rows
+  // that could never be a cause. Deliberately a floor on VOLUME, never on delta: residualize has
+  // to see a segment's small post-exclusion residual to recognise it as contamination, and
+  // filtering on delta would hide exactly the rows the differentiator depends on.
+  const minRequests = 150;
 
   const sql = `
 SELECT
@@ -82,7 +97,7 @@ FROM (
     AND (event_date BETWEEN '${from}' AND '${to}' OR event_date IN (${sqlDateList(base)}))
 )
 GROUP BY dim, val
-HAVING base_v IS NOT NULL AND inc_v IS NOT NULL AND inc_reqs > 0
+HAVING base_v IS NOT NULL AND inc_v IS NOT NULL AND inc_reqs >= ${minRequests}
 ORDER BY dim, val`.trim();
 
   const rows = await ledger.run<SweepRow>(sql);

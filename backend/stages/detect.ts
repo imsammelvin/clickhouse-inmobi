@@ -7,13 +7,7 @@
  */
 import type { Ledger } from "../ledger";
 import { METRICS, metricExpr } from "../metrics";
-import {
-  MIN_BASELINE_DAYS,
-  baselineDates,
-  mean,
-  robustBaseline,
-  sqlDateList,
-} from "../baseline";
+import { MIN_BASELINE_DAYS, baselineDates, mean, robustBaseline, sqlDateList } from "../baseline";
 import { type Mask, NO_MASK } from "../types";
 
 export interface Detection {
@@ -51,7 +45,8 @@ export async function detect(
   mask: Mask = NO_MASK,
 ): Promise<Detection> {
   const def = METRICS[metric];
-  if (!def) throw new Error(`Unknown metric "${metric}". Known: ${Object.keys(METRICS).join(", ")}`);
+  if (!def)
+    throw new Error(`Unknown metric "${metric}". Known: ${Object.keys(METRICS).join(", ")}`);
 
   const expr = metricExpr(def);
   const base = baselineDates(from, to);
@@ -78,7 +73,8 @@ ORDER BY event_date`.trim();
     def.kind === "absolute" ? rs.reduce((a, r) => a + num(r), 0) : mean(rs.map(num));
 
   const incidentValue = agg(incidentDays);
-  const perDayIncident = def.kind === "absolute" ? incidentValue / incidentDays.length : incidentValue;
+  const perDayIncident =
+    def.kind === "absolute" ? incidentValue / incidentDays.length : incidentValue;
 
   const baseVals = baselineDays.map(num);
   // Compare per-day against per-day. A 3-day incident total against a 1-day baseline would show a
@@ -129,28 +125,49 @@ ORDER BY event_date`.trim();
     // Gates are configuration, not measurement — but they are printed, so they must still resolve.
     // Recording them keeps the grounding check total rather than carving out exceptions.
     ledger.record({
-      label: "gate.min_abs_pct", value: MIN_ABS_PCT, unit: "pct",
+      label: "gate.min_abs_pct",
+      value: MIN_ABS_PCT,
+      unit: "pct",
       sql: "configuration: backend/stages/detect.ts MIN_ABS_PCT",
-      window: { from, to }, filters: {},
+      window: { from, to },
+      filters: {},
     }),
     ledger.record({
-      label: "gate.min_sigma", value: MIN_SIGMA, unit: "sigma",
+      label: "gate.min_sigma",
+      value: MIN_SIGMA,
+      unit: "sigma",
       sql: "configuration: backend/stages/detect.ts MIN_SIGMA",
-      window: { from, to }, filters: {},
+      window: { from, to },
+      filters: {},
     }),
   );
   if (deltaPp !== null) {
-    evidenceIds.push(ledger.record({
-      label: `${metric}.delta_pp`, value: Number(deltaPp.toFixed(4)), unit: "pp",
-      sql, window: { from, to }, filters: {},
-    }));
+    evidenceIds.push(
+      ledger.record({
+        label: `${metric}.delta_pp`,
+        value: Number(deltaPp.toFixed(4)),
+        unit: "pp",
+        sql,
+        window: { from, to },
+        filters: {},
+      }),
+    );
   }
 
   // Refusing is a legitimate output. Better than a confident answer off two observations.
   if (baseVals.length < MIN_BASELINE_DAYS) {
     return {
-      metric, from, to, incidentValue: perDayIncident, baselineMean, baselineStd,
-      baselineDays: baseVals.length, deltaAbs, deltaPct, deltaPp, sigma,
+      metric,
+      from,
+      to,
+      incidentValue: perDayIncident,
+      baselineMean,
+      baselineStd,
+      baselineDays: baseVals.length,
+      deltaAbs,
+      deltaPct,
+      deltaPp,
+      sigma,
       anomalous: false,
       reason: `Insufficient baseline: ${baseVals.length} same-weekday observation(s), need ${MIN_BASELINE_DAYS}.`,
       evidenceIds,
@@ -166,8 +183,19 @@ ORDER BY event_date`.trim();
     : `Within band: ${deltaPct.toFixed(1)}% (gate ${MIN_ABS_PCT}%), ${sigma.toFixed(1)} sigma (gate ${MIN_SIGMA}).`;
 
   return {
-    metric, from, to, incidentValue: perDayIncident, baselineMean, baselineStd,
-    baselineDays: baseVals.length, deltaAbs, deltaPct, deltaPp, sigma, anomalous, reason,
+    metric,
+    from,
+    to,
+    incidentValue: perDayIncident,
+    baselineMean,
+    baselineStd,
+    baselineDays: baseVals.length,
+    deltaAbs,
+    deltaPct,
+    deltaPp,
+    sigma,
+    anomalous,
+    reason,
     evidenceIds,
   };
 }

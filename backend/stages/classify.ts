@@ -123,55 +123,95 @@ FROM (
 
   const evidenceIds = [
     ledger.record({
-      label: `classify.advertisers_bidding`, value: advsInc, unit: "count",
-      sql, window: { from, to }, filters: { segment: seg },
+      label: `classify.advertisers_bidding`,
+      value: advsInc,
+      unit: "count",
+      sql,
+      window: { from, to },
+      filters: { segment: seg },
       segmentSharePct: cause.sharePct,
     }),
     ledger.record({
-      label: `classify.render_rate`, value: Number(renderInc.toFixed(4)), unit: "ratio",
-      sql, window: { from, to }, filters: { segment: seg },
+      label: `classify.render_rate`,
+      value: Number(renderInc.toFixed(4)),
+      unit: "ratio",
+      sql,
+      window: { from, to },
+      filters: { segment: seg },
     }),
     ledger.record({
-      label: `classify.ecpm`, value: Number(ecpmInc.toFixed(3)), unit: "usd",
-      sql, window: { from, to }, filters: { segment: seg },
+      label: `classify.ecpm`,
+      value: Number(ecpmInc.toFixed(3)),
+      unit: "usd",
+      sql,
+      window: { from, to },
+      filters: { segment: seg },
     }),
     ledger.record({
-      label: `classify.requests_per_day`, value: Math.round(reqsInc), unit: "count",
-      sql, window: { from, to }, filters: { segment: seg },
+      label: `classify.requests_per_day`,
+      value: Math.round(reqsInc),
+      unit: "count",
+      sql,
+      window: { from, to },
+      filters: { segment: seg },
     }),
     // Baseline sides are printed too ("2.456 vs 2.473"), so they must be recorded, not just the
     // incident side. Half a comparison is not evidence for the comparison.
     ledger.record({
-      label: `classify.advertisers_bidding.baseline`, value: advsBase, unit: "count",
-      sql, window: { from, to }, filters: { segment: seg },
+      label: `classify.advertisers_bidding.baseline`,
+      value: advsBase,
+      unit: "count",
+      sql,
+      window: { from, to },
+      filters: { segment: seg },
     }),
     ledger.record({
-      label: `classify.render_rate.baseline`, value: Number(renderBase.toFixed(4)), unit: "ratio",
-      sql, window: { from, to }, filters: { segment: seg },
+      label: `classify.render_rate.baseline`,
+      value: Number(renderBase.toFixed(4)),
+      unit: "ratio",
+      sql,
+      window: { from, to },
+      filters: { segment: seg },
     }),
     ledger.record({
-      label: `classify.ecpm.baseline`, value: Number(ecpmBase.toFixed(3)), unit: "usd",
-      sql, window: { from, to }, filters: { segment: seg },
+      label: `classify.ecpm.baseline`,
+      value: Number(ecpmBase.toFixed(3)),
+      unit: "usd",
+      sql,
+      window: { from, to },
+      filters: { segment: seg },
     }),
     ledger.record({
       label: `classify.requests_delta_pct`,
       value: Number((reqsBase === 0 ? 0 : ((reqsInc - reqsBase) / reqsBase) * 100).toFixed(4)),
-      unit: "pct", sql, window: { from, to }, filters: { segment: seg },
+      unit: "pct",
+      sql,
+      window: { from, to },
+      filters: { segment: seg },
     }),
     ledger.record({
       label: `classify.ecpm_delta_pct`,
       value: Number((ecpmBase === 0 ? 0 : ((ecpmInc - ecpmBase) / ecpmBase) * 100).toFixed(4)),
-      unit: "pct", sql, window: { from, to }, filters: { segment: seg },
+      unit: "pct",
+      sql,
+      window: { from, to },
+      filters: { segment: seg },
     }),
     ledger.record({
       label: `classify.render_delta_pp`,
       value: Number(((renderInc - renderBase) * 100).toFixed(4)),
-      unit: "pp", sql, window: { from, to }, filters: { segment: seg },
+      unit: "pp",
+      sql,
+      window: { from, to },
+      filters: { segment: seg },
     }),
     ledger.record({
       label: `classify.advertisers_delta_pct`,
       value: Number((advsBase === 0 ? 0 : ((advsInc - advsBase) / advsBase) * 100).toFixed(4)),
-      unit: "pct", sql, window: { from, to }, filters: { segment: seg },
+      unit: "pct",
+      sql,
+      window: { from, to },
+      filters: { segment: seg },
     }),
   ];
 
@@ -213,16 +253,28 @@ FROM (
       `both present; the match is failing. That is a delivery fault, not a market event.`;
     cleared.push(
       { check: "Advertiser exit", detail: `${advsBase} bidding before, ${advsInc} during` },
-      { check: "Render failure", detail: `${renderInc.toFixed(3)} vs ${renderBase.toFixed(3)}, within band` },
-      { check: "Price / eCPM", detail: `${ecpmInc.toFixed(3)} vs ${ecpmBase.toFixed(3)}, within band` },
-      { check: "Request volume", detail: `${reqDrop >= 0 ? "+" : ""}${reqDrop.toFixed(1)}%, supply is not the constraint` },
+      {
+        check: "Render failure",
+        detail: `${renderInc.toFixed(3)} vs ${renderBase.toFixed(3)}, within band`,
+      },
+      {
+        check: "Price / eCPM",
+        detail: `${ecpmInc.toFixed(3)} vs ${ecpmBase.toFixed(3)}, within band`,
+      },
+      {
+        check: "Request volume",
+        detail: `${reqDrop >= 0 ? "+" : ""}${reqDrop.toFixed(1)}%, supply is not the constraint`,
+      },
     );
   } else if (driver === "ecpm" || Math.abs(ecpmDrop) >= 10) {
     channel = "demand_change";
     rationale =
       `eCPM moved ${ecpmDrop.toFixed(1)}% with advertiser count flat (${advsBase} -> ${advsInc}). ` +
       `Bidders are still present but paying differently — a pricing change, not a withdrawal.`;
-    cleared.push({ check: "Advertiser exit", detail: `${advsBase} bidding before, ${advsInc} during` });
+    cleared.push({
+      check: "Advertiser exit",
+      detail: `${advsBase} bidding before, ${advsInc} during`,
+    });
   } else {
     channel = "demand_change";
     rationale = `Segment moved on ${driver ?? "an unattributed factor"} without a matching supply or delivery signal.`;

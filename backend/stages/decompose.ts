@@ -115,12 +115,18 @@ export async function decompose(
       evidenceIdPct: ledger.record({
         label: `decompose.${name}.delta_pct`,
         value: Number((b[name] === 0 ? 0 : ((i[name] - b[name]) / b[name]) * 100).toFixed(4)),
-        unit: "pct", sql, window: { from, to }, filters: {},
+        unit: "pct",
+        sql,
+        window: { from, to },
+        filters: {},
       }),
       evidenceIdUsd: ledger.record({
         label: `decompose.${name}.revenue_effect_usd`,
         value: Number(effect.toFixed(4)),
-        unit: "usd", sql, window: { from, to }, filters: {},
+        unit: "usd",
+        sql,
+        window: { from, to },
+        filters: {},
       }),
       evidenceId: ledger.record({
         label: `decompose.${name}`,

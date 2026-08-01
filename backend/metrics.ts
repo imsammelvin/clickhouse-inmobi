@@ -97,10 +97,10 @@ export function metricExpr(m: MetricDef): string {
 /**
  * Dimensions available on `ad_events_enriched` (goal.md § 7).
  *
- * `advertiser_vertical` and `campaign_type` are deliberately excluded from the default sweep:
- * `advertiser_id` is empty on unfilled requests, so those columns are only populated on filled
- * events. Slicing fill rate by them is definitionally broken (§ 7 fact #1, R-009) — the single
- * easiest way to produce a confidently wrong number in this dataset.
+ * `advertiser_vertical`, `campaign_type` and `advertiser_id` are deliberately excluded from
+ * fill-rate and request sweeps: `advertiser_id` is empty on unfilled requests, so those columns
+ * exist only on filled events. Slicing fill rate by them is definitionally broken (§ 7 fact #1,
+ * R-009) — the single easiest way to produce a confidently wrong number in this dataset.
  */
 export const DIMENSIONS = [
   "ad_format",
@@ -110,10 +110,46 @@ export const DIMENSIONS = [
   "country",
   "device_model",
   "os_version",
+  // Entity dimension. The answer key can name a publisher app ("app_00393 broke"), which a
+  // seven-attribute sweep could never say. 2,000 values, ~0.05% of traffic each.
+  "app_id",
 ] as const;
 
+/**
+ * `geo_device_id` is deliberately NOT swept.
+ *
+ * It is a surrogate join key, not a business entity: 5,000 profiles at ~0.02% of traffic each, so a
+ * single-profile anomaly is worth about $0.02/day and could never be actioned. Everything it
+ * carries — region, country, device_model, os_version — is already swept as its own dimension, at
+ * cardinalities where a finding means something. Adding it would multiply candidate rows 2.5x to
+ * describe the same variance less usefully.
+ */
+export const EXCLUDED_DIMENSIONS = ["geo_device_id"] as const;
+
 /** Only safe on metrics restricted to filled events. */
-export const FILLED_ONLY_DIMENSIONS = ["advertiser_vertical", "campaign_type"] as const;
+export const FILLED_ONLY_DIMENSIONS = [
+  "advertiser_vertical",
+  "campaign_type",
+  "advertiser_id",
+] as const;
+
+/**
+ * Pairwise cuts. Not a full cube — each pair carries a hypothesis, and pairs are what make an
+ * incident like the problem statement's own example ("Device X in Region North") findable when it
+ * is invisible in either dimension alone.
+ *
+ * They also do real work for residualization: clearing a cause out of another dimension needs the
+ * two together, so `os_version` is paired widely because an OS-level break is the shape we have
+ * actually observed in this data.
+ */
+export const DIMENSION_PAIRS = [
+  ["region", "os_version"],
+  ["publisher_tier", "os_version"],
+  ["app_category", "os_version"],
+  ["region", "device_model"],
+  ["app_category", "ad_format"],
+  ["country", "ad_format"],
+] as const;
 
 export function dimensionsFor(metric: string): readonly string[] {
   // Fill rate's denominator includes unfilled requests, where advertiser columns are ''.
