@@ -40,7 +40,8 @@
     "build": "bun build api/server.ts --outdir dist --target=node",
     "langfuse:trace": "bun run backend/langfuse/trace-stub.ts",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "dashboard": "OTEL_SERVICE_NAME=clickhouse-inmobi-dashboard bun run dashboard/server.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",

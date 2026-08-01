@@ -475,6 +475,7 @@ nothing to reclaim. Your call, not mine.
 to score when dimensions are blank, and `spec.ts` documents the blind zone with the two false reports
 that taught me it. My lesson, plainly: **a test harness sized below production measures its own noise**,
 and I should have run the scale sensitivity before writing a defect report, not after.
+
 ### 2026-08-02 00:15 — loges — Lane D: LibreChat session hygiene is inflating first-call token cost
 
 **One real trace showed a 26,088-token first call for a 7-word question.** Pulled the raw `input`
@@ -484,7 +485,7 @@ multi-turn array and looks stale/misleading by itself). The system message carri
 conversation** (an earlier Android-15 investigation, another teammate's session) — the thread had
 been continued by a different person rather than started fresh.
 
-**Good news underneath it:** DeepSeek prompt caching is genuinely working — the *next* two calls in
+**Good news underneath it:** DeepSeek prompt caching is genuinely working — the _next_ two calls in
 that same session reused ~84-89% of input tokens from cache (at ~50x cheaper than a cache miss), so
 steady-state turns are already cheap. The fixed cost is specifically the one uncached first call per
 session, not a resend-everything-every-turn problem.
@@ -715,17 +716,17 @@ dimensions is where it genuinely stops, and that is now asserted rather than ass
 
 Attributed per query from `system.query_log`:
 
-| stage | surface | queries | rows read |
-| --- | --- | --- | --- |
-| residualize | raw | 8 | 26,170,224 |
-| bounds | rollup + raw | 2 | 18,713,821 (**102ms server — metadata-shaped, not a real scan**) |
-| classify | raw | 2 | 6,542,554 |
-| localize | raw | 1 | 3,271,278 |
-| decompose | raw | 2 | 3,271,277 |
-| confirm | raw | 2 | 3,271,277 |
-| confirm | **rollup** | 4 | 202,608 |
-| price | **rollup** | 1 | 147,735 |
-| **detect** | **rollup** | 1 | **50,652** |
+| stage       | surface      | queries | rows read                                                        |
+| ----------- | ------------ | ------- | ---------------------------------------------------------------- |
+| residualize | raw          | 8       | 26,170,224                                                       |
+| bounds      | rollup + raw | 2       | 18,713,821 (**102ms server — metadata-shaped, not a real scan**) |
+| classify    | raw          | 2       | 6,542,554                                                        |
+| localize    | raw          | 1       | 3,271,278                                                        |
+| decompose   | raw          | 2       | 3,271,277                                                        |
+| confirm     | raw          | 2       | 3,271,277                                                        |
+| confirm     | **rollup**   | 4       | 202,608                                                          |
+| price       | **rollup**   | 1       | 147,735                                                          |
+| **detect**  | **rollup**   | 1       | **50,652**                                                       |
 
 Priority order for the rest of T-043, and all of it is yours:
 
@@ -733,7 +734,7 @@ Priority order for the rest of T-043, and all of it is yours:
    the two-exclusion finding above says more of them are servable than I assumed.
 2. **`localize`** unmasked first pass — it does its own `arrayJoin` fan-out, which is precisely what
    `rollup_segment_daily` already holds. `mcp/sweep.ts` is the worked example: same statistics, `dim IN
-   (...)` instead of a fan-out, verified firing-for-firing.
+(...)` instead of a fan-out, verified firing-for-firing.
 3. **`decompose`** — its `Mask` now carries `dims`, so it is the same three-line change `detect` was.
 4. **`classify`** cannot use the rollup: `uniqExact` on advertisers is not a sum. Leave it.
 
@@ -745,3 +746,31 @@ open — worth 5 minutes of yours to identify, because it is 5% of an investigat
 (event_date)` and `count()` are answered from partition metadata. I nearly reported it as low-hanging
 fruit; it is not. Rows read is the right scalability metric and the wrong latency metric, and this is
 the one place in the codebase where they disagree.
+**Commits:** none yet (working tree only) — `backend/types.ts`, `backend/orchestrate.ts`,
+`backend/stages/detect.ts`, `backend/stages/decompose.ts`, `mcp/eval/parity.ts`. Not pushed (loges'
+own rule: only loges pushes their own commits).
+
+### 2026-08-02 03:40 — loges — `bun run dashboard` — one UI over Chat + Anomalies + Rollup vs Raw + LLM Cost + System Health
+
+**New, additive, touches nothing else.** `dashboard/server.ts` + `dashboard/public/index.html`.
+One page, sidebar nav, no CDN dependencies (same self-contained ethos as `pitch/example-report/report.html`).
+
+- **Chat** — iframe to LibreChat (`localhost:3080`). Genuinely interactive, so iframed rather than
+  reimplemented.
+- **Anomalies** — live off `find_incidents`, real sweep, not a mock.
+- **Rollup vs Raw** — pre-measured via `bun run bench:rollup -- --json` (real numbers, this run:
+  186.6M rows/78.5s server time raw vs 2.7M rows/729ms rollup).
+- **LLM Cost** — Langfuse's metrics API, called server-side (keys never reach the browser).
+- **System Health** — ClickStack's own `otel_traces`, stage p50/p95 latency + error rate, last 24h.
+
+Every panel reuses existing code (`mcp/tools.ts`'s `callTool`, `bench-rollup.ts`'s JSON output,
+`makeTelemetryClient()`) — this file is presentation, not a second copy of any query logic.
+
+**Verified:** all four API routes smoke-tested against real, live backends (not fixtures).
+`typecheck`/`mcp:eval` (16/16, gated 60/60)/`criteria` (4/4) still green — dashboard code is fully
+additive, doesn't touch backend/mcp.
+
+**Run it:** `bun run dashboard` → http://localhost:4500 (needs LibreChat + the MCP HTTP server +
+Langfuse env vars already set, same as everything else).
+
+**Commits:** none yet (working tree only). Not pushed (loges' own rule: only loges pushes their own).
