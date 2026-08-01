@@ -4,13 +4,13 @@
 to check it yourself.**
 
 If any number in a diagnosis cannot be reproduced by the validation query beside its formula, that
-is a bug and it outranks a missed anomaly (R-001). Code lives in `backend/`.
+is a bug and it outranks a missed anomaly (R-001). Code lives in `backend/engine/`.
 
 ---
 
 ## 1. Base metrics
 
-Fixed by `metrics_glossary.md`. Implemented in `backend/metrics.ts`. **All are sum/sum over the
+Fixed by `metrics_glossary.md`. Implemented in `backend/engine/metrics.ts`. **All are sum/sum over the
 group — never an average of per-row or per-day ratios**, or rollups stop being correct.
 
 | Metric      | Formula                                    | Unit  |

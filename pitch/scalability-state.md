@@ -18,36 +18,36 @@ maintained on insert, no manual step:
     mv_rollup_segment_hourly    ad_events             -> rollup_segment_hourly    3,089,172 rows
     mv_rollup_segment_daily     rollup_segment_hourly -> rollup_segment_daily       148,767 rows
 
-The daily table is *derived from* the hourly one rather than being a second independent fan-out, so the
+The daily table is _derived from_ the hourly one rather than being a second independent fan-out, so the
 two grains cannot disagree — a derivation cannot drift where two parallel aggregations can.
 
-Measured across a representative call mix (`clickhouse/rollup-bench.json`):
+Measured across a representative call mix (`backend/clickhouse/rollup-bench.json`):
 
-| | raw | rollup |
-|---|---|---|
-| rows read | 213,625,303 | 3,690,604 |
-| bytes read | 2.6 GiB | 117 MiB |
-| server time | 41,235 ms | 923 ms |
-| peak memory | 884 MiB | 40.5 MiB |
+|             | raw         | rollup    |
+| ----------- | ----------- | --------- |
+| rows read   | 213,625,303 | 3,690,604 |
+| bytes read  | 2.6 GiB     | 117 MiB   |
+| server time | 41,235 ms   | 923 ms    |
+| peak memory | 884 MiB     | 40.5 MiB  |
 
 The compression factor is `events_per_day / distinct_attribute_combinations`, so it **improves** with
 scale: the rollup grows with dimension cardinality x time, not with events.
 
 ## What is converted, and what is not
 
-| Component | Reads the MV | Evidence |
-|---|---|---|
-| All 10 MCP tools | yes | `servedFrom=rollup:daily:...`, 40-65 ms per call |
-| `find_incidents` sweep | yes | 9,446 ms -> 325 ms |
-| `detect`, `confirm`, `decompose` | yes | `bun run parity` reports `rollup-served` |
-| `localize` (unmasked sweep) | yes | `parity` bit-identical with the rollup in use |
-| `residualize` (masked re-sweeps) | **no** | ~4 queries per investigation, see below |
-| `classify` | no, and cannot | `uniqExact(advertiser_id)` is not additive over sums |
+| Component                        | Reads the MV   | Evidence                                             |
+| -------------------------------- | -------------- | ---------------------------------------------------- |
+| All 10 MCP tools                 | yes            | `servedFrom=rollup:daily:...`, 40-65 ms per call     |
+| `find_incidents` sweep           | yes            | 9,446 ms -> 325 ms                                   |
+| `detect`, `confirm`, `decompose` | yes            | `bun run parity` reports `rollup-served`             |
+| `localize` (unmasked sweep)      | yes            | `parity` bit-identical with the rollup in use        |
+| `residualize` (masked re-sweeps) | **no**         | ~4 queries per investigation, see below              |
+| `classify`                       | no, and cannot | `uniqExact(advertiser_id)` is not additive over sums |
 
 **Five of six investigation stages are converted.** The sixth cannot be: `classify` counts distinct
 advertisers, and a distinct count cannot be recovered from sums.
 
-What remains on raw is `residualize`'s *masked* re-sweeps — about four queries per investigation.
+What remains on raw is `residualize`'s _masked_ re-sweeps — about four queries per investigation.
 A measurement is 40 ms; a full investigation is a few seconds.
 
 ## Why the last masked path is not done
@@ -64,7 +64,7 @@ dimensions cannot be paired, three-or-more-dimension cuts exceed the key space, 
 never qualify), and the loop is **inherently sequential**: each iteration's exclusion is built from the
 previous iteration's chosen cause, so it cannot be parallelised either.
 
-And it is the arithmetic behind the *cleared-as-contamination* list, which is our differentiator. A
+And it is the arithmetic behind the _cleared-as-contamination_ list, which is our differentiator. A
 wrong residual does not error. It prints a plausible list of segments we claim to have ruled out.
 
 That is the whole reason it is not done: the remaining work is the part where being wrong is invisible,
@@ -87,9 +87,9 @@ returned plausible numbers.
 
 ## The honest summary
 
-- The scalability *design* is proven: rows read and rows returned are both bounded by cardinality
+- The scalability _design_ is proven: rows read and rows returned are both bounded by cardinality
   rather than by event count, and the measured delta is 58x on rows and 45x on server time.
-- The *conversion* is the tool layer plus five of six investigation stages. The sixth is arithmetically
+- The _conversion_ is the tool layer plus five of six investigation stages. The sixth is arithmetically
   impossible to convert, not merely unfinished.
 - What remains is one masked query shape inside `residualize`, roughly four queries per investigation,
   with a documented approach and a gate that can prove it correct. It is a deferred decision, not a

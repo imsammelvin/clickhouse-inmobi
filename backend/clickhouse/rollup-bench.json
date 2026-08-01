@@ -1,0 +1,325 @@
+{
+  "measuredAt": "2026-08-01T18:19:03.910Z",
+  "calls": [
+    {
+      "label": "find_incidents (full sweep, 4 metrics)",
+      "tool": "find_incidents",
+      "args": {
+        "limit": 50
+      },
+      "raw": {
+        "label": "find_incidents (full sweep, 4 metrics)",
+        "wallMs": 32284,
+        "queries": 10,
+        "serverMs": 31582,
+        "readRows": 135000000,
+        "readBytes": 1821861457,
+        "peakMemoryBytes": 884057359
+      },
+      "rollup": {
+        "label": "find_incidents (full sweep, 4 metrics)",
+        "wallMs": 1053,
+        "queries": 10,
+        "serverMs": 600,
+        "readRows": 2323250,
+        "readBytes": 76626963,
+        "peakMemoryBytes": 40537125
+      }
+    },
+    {
+      "label": "find_incidents (fortnight window)",
+      "tool": "find_incidents",
+      "args": {
+        "metrics": ["fill_rate", "ecpm"],
+        "from": "2026-06-15",
+        "to": "2026-06-30",
+        "limit": 20
+      },
+      "raw": {
+        "label": "find_incidents (fortnight window)",
+        "wallMs": 9311,
+        "queries": 4,
+        "serverMs": 9140,
+        "readRows": 44301098,
+        "readBytes": 619184367,
+        "peakMemoryBytes": 803206885
+      },
+      "rollup": {
+        "label": "find_incidents (fortnight window)",
+        "wallMs": 334,
+        "queries": 4,
+        "serverMs": 207,
+        "readRows": 765548,
+        "readBytes": 26021322,
+        "peakMemoryBytes": 31294002
+      }
+    },
+    {
+      "label": "describe_data",
+      "tool": "describe_data",
+      "args": {},
+      "raw": {
+        "label": "describe_data",
+        "wallMs": 123,
+        "queries": 1,
+        "serverMs": 86,
+        "readRows": 9000000,
+        "readBytes": 126299678,
+        "peakMemoryBytes": 201725855
+      },
+      "rollup": {
+        "label": "describe_data",
+        "wallMs": 51,
+        "queries": 1,
+        "serverMs": 18,
+        "readRows": 151508,
+        "readBytes": 6575223,
+        "peakMemoryBytes": 20493725
+      }
+    },
+    {
+      "label": "get_metric fill_rate, filtered",
+      "tool": "get_metric",
+      "args": {
+        "metric": "fill_rate",
+        "from": "2026-06-23",
+        "to": "2026-06-25",
+        "filters": {
+          "os_version": "Android 15"
+        }
+      },
+      "raw": {
+        "label": "get_metric fill_rate, filtered",
+        "wallMs": 65,
+        "queries": 1,
+        "serverMs": 30,
+        "readRows": 843741,
+        "readBytes": 6971107,
+        "peakMemoryBytes": 40765764
+      },
+      "rollup": {
+        "label": "get_metric fill_rate, filtered",
+        "wallMs": 36,
+        "queries": 1,
+        "serverMs": 7,
+        "readRows": 12663,
+        "readBytes": 497664,
+        "peakMemoryBytes": 7094633
+      }
+    },
+    {
+      "label": "get_metric revenue by day",
+      "tool": "get_metric",
+      "args": {
+        "metric": "revenue",
+        "from": "2026-06-01",
+        "to": "2026-07-05",
+        "granularity": "day"
+      },
+      "raw": {
+        "label": "get_metric revenue by day",
+        "wallMs": 109,
+        "queries": 1,
+        "serverMs": 76,
+        "readRows": 9000000,
+        "readBytes": 108000000,
+        "peakMemoryBytes": 88570594
+      },
+      "rollup": {
+        "label": "get_metric revenue by day",
+        "wallMs": 48,
+        "queries": 1,
+        "serverMs": 16,
+        "readRows": 151508,
+        "readBytes": 2939031,
+        "peakMemoryBytes": 20192898
+      }
+    },
+    {
+      "label": "get_metric fill_rate by hour",
+      "tool": "get_metric",
+      "args": {
+        "metric": "fill_rate",
+        "from": "2026-06-23",
+        "to": "2026-06-25",
+        "granularity": "hour",
+        "limit": 100
+      },
+      "raw": {
+        "label": "get_metric fill_rate by hour",
+        "wallMs": 45,
+        "queries": 1,
+        "serverMs": 15,
+        "readRows": 843741,
+        "readBytes": 4218705,
+        "peakMemoryBytes": 17981006
+      },
+      "rollup": {
+        "label": "get_metric fill_rate by hour",
+        "wallMs": 40,
+        "queries": 1,
+        "serverMs": 8,
+        "readRows": 28025,
+        "readBytes": 647756,
+        "peakMemoryBytes": 21273908
+      }
+    },
+    {
+      "label": "get_metric ecpm by app_category x ad_format",
+      "tool": "get_metric",
+      "args": {
+        "metric": "ecpm",
+        "from": "2026-06-19",
+        "to": "2026-06-22",
+        "group_by": ["app_category", "ad_format"]
+      },
+      "raw": {
+        "label": "get_metric ecpm by app_category x ad_format",
+        "wallMs": 84,
+        "queries": 1,
+        "serverMs": 51,
+        "readRows": 896618,
+        "readBytes": 15020820,
+        "peakMemoryBytes": 97788930
+      },
+      "rollup": {
+        "label": "get_metric ecpm by app_category x ad_format",
+        "wallMs": 41,
+        "queries": 1,
+        "serverMs": 9,
+        "readRows": 18272,
+        "readBytes": 869237,
+        "peakMemoryBytes": 7237644
+      }
+    },
+    {
+      "label": "compare_periods fill_rate by os_version",
+      "tool": "compare_periods",
+      "args": {
+        "metric": "fill_rate",
+        "from": "2026-06-23",
+        "to": "2026-06-25",
+        "group_by": ["os_version"]
+      },
+      "raw": {
+        "label": "compare_periods fill_rate by os_version",
+        "wallMs": 126,
+        "queries": 1,
+        "serverMs": 90,
+        "readRows": 3271277,
+        "readBytes": 26844099,
+        "peakMemoryBytes": 79882286
+      },
+      "rollup": {
+        "label": "compare_periods fill_rate by os_version",
+        "wallMs": 45,
+        "queries": 1,
+        "serverMs": 15,
+        "readRows": 52324,
+        "readBytes": 2062135,
+        "peakMemoryBytes": 11722290
+      }
+    },
+    {
+      "label": "compare_periods revenue by app_id",
+      "tool": "compare_periods",
+      "args": {
+        "metric": "revenue",
+        "from": "2026-06-21",
+        "to": "2026-06-21",
+        "group_by": ["app_id"],
+        "limit": 50
+      },
+      "raw": {
+        "label": "compare_periods revenue by app_id",
+        "wallMs": 78,
+        "queries": 1,
+        "serverMs": 43,
+        "readRows": 572210,
+        "readBytes": 8538552,
+        "peakMemoryBytes": 46955522
+      },
+      "rollup": {
+        "label": "compare_periods revenue by app_id",
+        "wallMs": 46,
+        "queries": 1,
+        "serverMs": 12,
+        "readRows": 12663,
+        "readBytes": 497664,
+        "peakMemoryBytes": 8554474
+      }
+    },
+    {
+      "label": "rank_segments ecpm by country",
+      "tool": "rank_segments",
+      "args": {
+        "metric": "ecpm",
+        "dimension": "country",
+        "from": "2026-06-19",
+        "to": "2026-06-22"
+      },
+      "raw": {
+        "label": "rank_segments ecpm by country",
+        "wallMs": 67,
+        "queries": 1,
+        "serverMs": 33,
+        "readRows": 896618,
+        "readBytes": 14698158,
+        "peakMemoryBytes": 48512465
+      },
+      "rollup": {
+        "label": "rank_segments ecpm by country",
+        "wallMs": 42,
+        "queries": 1,
+        "serverMs": 10,
+        "readRows": 18272,
+        "readBytes": 869237,
+        "peakMemoryBytes": 7218927
+      }
+    },
+    {
+      "label": "list_dimension_values app_id",
+      "tool": "list_dimension_values",
+      "args": {
+        "dimension": "app_id",
+        "limit": 50
+      },
+      "raw": {
+        "label": "list_dimension_values app_id",
+        "wallMs": 126,
+        "queries": 1,
+        "serverMs": 89,
+        "readRows": 9000000,
+        "readBytes": 59179184,
+        "peakMemoryBytes": 85597202
+      },
+      "rollup": {
+        "label": "list_dimension_values app_id",
+        "wallMs": 54,
+        "queries": 1,
+        "serverMs": 21,
+        "readRows": 156571,
+        "readBytes": 4932512,
+        "peakMemoryBytes": 17764337
+      }
+    }
+  ],
+  "totals": {
+    "raw": {
+      "readRows": 213625303,
+      "readBytes": 2810816127,
+      "serverMs": 41235,
+      "wallMs": 42418,
+      "queries": 23,
+      "peakMemoryBytes": 884057359
+    },
+    "rollup": {
+      "readRows": 3690604,
+      "readBytes": 122538744,
+      "serverMs": 923,
+      "wallMs": 1790,
+      "queries": 23,
+      "peakMemoryBytes": 40537125
+    }
+  }
+}
