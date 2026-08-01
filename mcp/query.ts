@@ -867,7 +867,7 @@ export async function dimensionValues(
   metricName: string,
   window: Window,
   limit = 30,
-): Promise<DimensionValue[]> {
+): Promise<{ values: DimensionValue[]; servedFrom: string }> {
   const def = resolveMetric(metricName);
   const dim = assertDimension(dimension, def);
   const src = source(def, [dim]);
@@ -883,11 +883,14 @@ GROUP BY ${dim}
 ORDER BY requests DESC, value
 LIMIT ${Math.min(Math.max(1, Math.floor(limit)), MAX_ROWS)}`.trim(),
   );
-  return rows.map((r) => ({
-    value: String(r.value ?? ""),
-    requests: num(r.requests),
-    sharePct: num(r.share_pct),
-  }));
+  return {
+    servedFrom: src.label,
+    values: rows.map((r) => ({
+      value: String(r.value ?? ""),
+      requests: num(r.requests),
+      sharePct: num(r.share_pct),
+    })),
+  };
 }
 
 /** Daily series for one metric across the whole dataset — the input to the growth estimate. */
@@ -919,6 +922,8 @@ export interface DatasetOverview {
   impressions: number;
   clicks: number;
   revenue: number;
+  /** Which surface answered — see the note on `MeasureResult.servedFrom`. */
+  servedFrom: string;
 }
 
 export async function datasetOverview(ledger: Ledger): Promise<DatasetOverview> {
@@ -938,6 +943,7 @@ WHERE event_date BETWEEN '${DATASET_START}' AND '${DATASET_END}'`.trim(),
   );
   if (!row) throw new QueryError("describe_data: the events table returned no rows.");
   return {
+    servedFrom: src.label,
     from: String(row.from_d ?? DATASET_START),
     to: String(row.to_d ?? DATASET_END),
     days: num(row.days),

@@ -103,6 +103,7 @@ const describeData: ToolDef = {
     return {
       summary: `${o.days} days, ${o.requests.toLocaleString()} requests`,
       payload: {
+        servedFrom: o.servedFrom,
         window: { from: o.from, to: o.to, days: o.days },
         volumes: {
           requests: o.requests,
@@ -175,7 +176,7 @@ const listDimensionValues: ToolDef = {
   handler: async (args, ledger) => {
     const metric = typeof args.metric === "string" ? args.metric : "revenue";
     const window = assertWindow(args.from ?? DATASET_START, args.to ?? DATASET_END);
-    const values = await dimensionValues(
+    const { values, servedFrom } = await dimensionValues(
       ledger,
       String(args.dimension),
       metric,
@@ -184,7 +185,13 @@ const listDimensionValues: ToolDef = {
     );
     return {
       summary: `${values.length} value(s) of ${String(args.dimension)}`,
-      payload: { dimension: args.dimension, window, values, truncated: values.length >= MAX_ROWS },
+      payload: {
+        dimension: args.dimension,
+        window,
+        values,
+        truncated: values.length >= MAX_ROWS,
+        servedFrom,
+      },
     };
   },
 };

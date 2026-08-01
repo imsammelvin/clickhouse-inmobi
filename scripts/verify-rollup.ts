@@ -98,8 +98,7 @@ function buildProbes(): Probe[] {
     run: async (ledger) => {
       const o = await datasetOverview(ledger);
       return {
-        // datasetOverview has no group rows, so the surface is asserted by the probes below instead.
-        servedFrom: "n/a",
+        servedFrom: o.servedFrom,
         values: {
           from: o.from,
           to: o.to,
@@ -204,22 +203,44 @@ function buildProbes(): Probe[] {
     { metric: "fill_rate", group_by: [], filters: { os_version: "Android 15" } },
   ];
 
+  /**
+   * Every cut above is run at BOTH grains, because they are two different tables.
+   *
+   * The first version of this file only exercised `granularity: "hour"` without a group-by, so the
+   * hourly rollup was verified for platform totals and nothing else — a mis-projected dimension or a
+   * mis-split pair in `rollup_segment_hourly` would have passed. Two tables, two sets of rows, two
+   * chances to be wrong: both get the full matrix. The daily pass also pins that `granularity: "day"`
+   * groups the daily table by its own `event_date` rather than quietly reaching for hours.
+   */
   for (const [i, c] of pairCases.entries()) {
     const label = `${c.metric}/${c.group_by.join("+") || "total"}${c.filters ? `/filtered` : ""}`;
-    probes.push({
-      id: `get_metric/pair${i}/${label}`,
-      expect: "rollup",
-      run: async (ledger) => {
-        const r = await measure(ledger, {
-          metric: c.metric,
-          ...W,
-          group_by: c.group_by,
-          filters: c.filters,
-          limit: 200,
-        });
-        return rowsSnapshot(r.servedFrom, r.rows, MEASURE_FIELDS);
-      },
-    });
+    for (const granularity of [undefined, "day", "hour"] as const) {
+      probes.push({
+        id: `get_metric/pair${i}/${label}/${granularity ?? "window"}`,
+        expect: "rollup",
+        run: async (ledger) => {
+          const r = await measure(ledger, {
+            metric: c.metric,
+            ...W,
+            group_by: c.group_by,
+            filters: c.filters,
+            granularity,
+            limit: 200,
+          });
+          // The grain is part of what is being asserted: an `hour` request that silently landed on
+          // the daily table (or the reverse) would still return plausible rows. Only meaningful on
+          // the rollup pass — the reference pass is raw by construction.
+          const expectedGrain = granularity === "hour" ? "hourly" : "daily";
+          if (rollupOn && !r.servedFrom.startsWith(`rollup:${expectedGrain}:`)) {
+            return {
+              servedFrom: `WRONG-GRAIN(${r.servedFrom}, wanted rollup:${expectedGrain})`,
+              values: {},
+            };
+          }
+          return rowsSnapshot(r.servedFrom, r.rows, MEASURE_FIELDS);
+        },
+      });
+    }
   }
 
   // --- the fallback path, asserted rather than assumed ------------------------------------------
@@ -303,13 +324,13 @@ function buildProbes(): Probe[] {
       id: `list_dimension_values/${dimension}`,
       expect: "rollup",
       run: async (ledger) => {
-        const values = await dimensionValues(ledger, dimension, "revenue", W, 200);
-        const out: Record<string, number | string | null> = { __rows: values.length };
-        for (const v of [...values].sort((a, b) => a.value.localeCompare(b.value))) {
+        const r = await dimensionValues(ledger, dimension, "revenue", W, 200);
+        const out: Record<string, number | string | null> = { __rows: r.values.length };
+        for (const v of [...r.values].sort((a, b) => a.value.localeCompare(b.value))) {
           out[`${v.value}.requests`] = v.requests;
           out[`${v.value}.sharePct`] = v.sharePct;
         }
-        return { servedFrom: "n/a", values: out };
+        return { servedFrom: r.servedFrom, values: out };
       },
     });
   }
