@@ -11,6 +11,7 @@ import { baselineDates, datesBetween, median, sqlDateList } from "../baseline";
 import type { Candidate } from "./localize";
 import type { Decomposition } from "./decompose";
 import { type Channel, segmentPredicate } from "../types";
+import { withSpan } from "../../utils/telemetryUtils";
 
 export interface Classification {
   channel: Channel;
@@ -49,6 +50,37 @@ const OWNERS: Record<Channel, string> = {
  * did advertisers leave, did rendering break, did price move, did volume move?
  */
 export async function classify(
+  ledger: Ledger,
+  from: string,
+  to: string,
+  cause: Candidate | null,
+  decomposition: Decomposition,
+  uniform: boolean,
+): Promise<Classification> {
+  return withSpan(
+    "stage.classify",
+    {
+      "app.stage": "classify",
+      "app.window.from": from,
+      "app.window.to": to,
+      "app.classify.cause": cause ? `${cause.dimension}='${cause.value}'` : "none",
+      "app.classify.uniform": uniform,
+    },
+    async (span) => {
+      const result = await classifyInner(ledger, from, to, cause, decomposition, uniform);
+      // The channel and the owner ARE the output of the pipeline — the thing an operator acts on.
+      // On the span they become filterable: "show me every run that ended in technical_break".
+      span.setAttributes({
+        "app.classify.channel": result.channel,
+        "app.classify.owner": result.owner,
+        "app.classify.cleared_checks": result.cleared.length,
+      });
+      return result;
+    },
+  );
+}
+
+async function classifyInner(
   ledger: Ledger,
   from: string,
   to: string,

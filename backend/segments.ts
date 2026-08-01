@@ -18,6 +18,7 @@
 import type { Ledger } from "./ledger";
 import { DATASET_END, DATASET_START } from "./baseline";
 import { DIMENSION_PAIRS, METRICS, dimensionsFor, metricExpr } from "./metrics";
+import { withSpan } from "../utils/telemetryUtils";
 
 /** A segment must carry at least this many requests on a day before it can fire. */
 export const SEGMENT_MIN_REQUESTS = 150;
@@ -148,6 +149,28 @@ ORDER BY day, abs(pct) DESC`.trim();
 }
 
 export async function scanSegments(
+  ledger: Ledger,
+  metric: string,
+  weeklyGrowth: number,
+  window?: { from: string; to: string },
+): Promise<SegmentFiring[]> {
+  return withSpan(
+    "segments.scan",
+    {
+      "app.metric": metric,
+      "app.weekly_growth": Number(weeklyGrowth.toFixed(6)),
+      "app.window.from": window?.from ?? "(full history)",
+      "app.window.to": window?.to ?? "(full history)",
+    },
+    async (span) => {
+      const firings = await scanSegmentsInner(ledger, metric, weeklyGrowth, window);
+      span.setAttribute("app.segments.firings", firings.length);
+      return firings;
+    },
+  );
+}
+
+async function scanSegmentsInner(
   ledger: Ledger,
   metric: string,
   weeklyGrowth: number,

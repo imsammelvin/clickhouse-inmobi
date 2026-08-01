@@ -23,7 +23,7 @@ import {
   datesBetween,
 } from "./baseline";
 import { MIN_ABS_PCT, MIN_SIGMA } from "./stages/detect";
-import { log } from "../utils/telemetryUtils";
+import { initObservability, log, shutdownObservability, withSpan } from "../utils/telemetryUtils";
 import { type IncidentWindow, clusterWindows, groupIntoIncidents, scanSegments } from "./segments";
 
 /**
@@ -56,6 +56,14 @@ interface Row {
 }
 
 async function seriesFor(ledger: Ledger, metric: string): Promise<Map<string, number>> {
+  return withSpan("scan.series_for", { "app.metric": metric }, async (span) => {
+    const series = await seriesForInner(ledger, metric);
+    span.setAttribute("app.series.days", series.size);
+    return series;
+  });
+}
+
+async function seriesForInner(ledger: Ledger, metric: string): Promise<Map<string, number>> {
   const def = METRICS[metric]!;
   const sql = `
 SELECT toString(event_date) AS d, ${metricExpr(def)} AS v
@@ -113,11 +121,35 @@ export interface ScanResult {
 export const DEFAULT_METRICS = ["revenue", "requests", "fill_rate", "ecpm", "ctr"];
 
 export async function scanAll(metrics: string[] = DEFAULT_METRICS): Promise<ScanResult> {
+  return withSpan(
+    "scan.all",
+    { "app.metrics": metrics.join(","), "app.metrics.count": metrics.length },
+    async (span) => {
+      const result = await scanAllInner(metrics);
+      // Recall and false-alarm counts are the two numbers this whole file exists to produce.
+      span.setAttributes({
+        "app.scan.fired": result.fired.length,
+        "app.scan.found": result.found.length,
+        "app.scan.missed": result.missed.length,
+        "app.scan.untriaged": result.extra.length,
+        "app.scan.segment_windows": result.segments.length,
+      });
+      return result;
+    },
+  );
+}
+
+async function scanAllInner(metrics: string[]): Promise<ScanResult> {
   const ledger = new Ledger();
   const fired: Firing[] = [];
   const segmentFirings = [];
   try {
     for (const metric of metrics) {
+      // Name the stage before each query. Without this the ledger sits on its "init" default for
+      // the whole scan, so every span came out as `ledger.run.init` and — the part that actually
+      // costs something — every SQL comment read `stage=init`, which is the key benchmark.ts
+      // groups server-side cost on. Both halves of the scan were landing in one unlabelled bucket.
+      ledger.beginStage("scan.series");
       const series = await seriesFor(ledger, metric);
       // Estimated once per metric from the full series, then applied to every day.
       const weeklyGrowth = estimateWeeklyGrowth(series);
@@ -126,6 +158,7 @@ export async function scanAll(metrics: string[] = DEFAULT_METRICS): Promise<Scan
         if (r.fired) fired.push({ metric, day, pct: r.pct, sigma: r.sigma });
       }
       // One extra query per metric, all detection server-side, only firings returned.
+      ledger.beginStage("scan.segments");
       segmentFirings.push(...(await scanSegments(ledger, metric, weeklyGrowth)));
     }
   } finally {
@@ -166,6 +199,19 @@ export async function scanAll(metrics: string[] = DEFAULT_METRICS): Promise<Scan
 }
 
 async function main(): Promise<void> {
+  // Every span below is a no-op without this, and a no-op span looks exactly like a working one
+  // from inside the process — see the initObservability() note in utils/telemetryUtils.ts.
+  initObservability();
+  try {
+    await withSpan("scan.main", {}, () => run());
+  } finally {
+    // Batch processors hold un-exported spans; a CLI that exits without flushing loses the tail
+    // of its own run, which is the part you actually wanted.
+    await shutdownObservability();
+  }
+}
+
+async function run(): Promise<void> {
   const only = process.argv.indexOf("--metric");
   const metrics = only >= 0 ? [process.argv[only + 1]!] : DEFAULT_METRICS;
   const { fired, found, missed, extra, segments } = await scanAll(metrics);

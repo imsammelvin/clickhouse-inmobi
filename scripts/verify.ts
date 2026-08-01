@@ -211,12 +211,20 @@ const main = async (): Promise<void> => {
       const { version } = await selectOne<VersionRow>(client, Q.VERSION);
       log.info(`ClickHouse ${version}, database "${DATABASE}"\n`);
 
-      await verifyDimensions(client);
-      await verifyTotals(client);
-      await verifyPerDay(client);
-      await verifyEnrichment(client);
-      await verifyMetrics(client);
-      await reportStorage(client);
+      // One span per check rather than one for the lot: these are independent assertions with very
+      // different costs (the per-day cross-check against DuckDB dominates), and a single
+      // `verify.run` span hides which one is slow or which one hung.
+      const checks: Array<[string, (c: ClickHouseClient) => Promise<void>]> = [
+        ["dimensions", verifyDimensions],
+        ["totals", verifyTotals],
+        ["per_day", verifyPerDay],
+        ["enrichment", verifyEnrichment],
+        ["metrics", verifyMetrics],
+        ["storage", reportStorage],
+      ];
+      for (const [name, fn] of checks) {
+        await withSpan(`verify.${name}`, { "verify.check": name }, () => fn(client));
+      }
     });
   } finally {
     await client.close();

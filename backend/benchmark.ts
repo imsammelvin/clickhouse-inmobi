@@ -16,7 +16,7 @@
 import { writeFileSync, readFileSync, existsSync } from "node:fs";
 import { Ledger } from "./ledger";
 import { investigate } from "./orchestrate";
-import { log } from "../utils/telemetryUtils";
+import { initObservability, log, shutdownObservability, withSpan } from "../utils/telemetryUtils";
 
 /** The scenarios we benchmark. Deliberately the three demo cases — cheap, and representative. */
 const SCENARIOS = [
@@ -77,6 +77,21 @@ async function collectCosts(
   runIds: string[],
   expectedTotal: number,
   timeoutMs = 240_000,
+): Promise<Map<string, StageCost[]>> {
+  // Spanned because this is a poll loop against an asynchronously-flushed `query_log` — when a
+  // benchmark run feels stuck, this span's duration is the answer.
+  return withSpan(
+    "bench.collect_costs",
+    { "bench.runs": runIds.length, "bench.expected_queries": expectedTotal },
+    () => collectCostsInner(ledger, runIds, expectedTotal, timeoutMs),
+  );
+}
+
+async function collectCostsInner(
+  ledger: Ledger,
+  runIds: string[],
+  expectedTotal: number,
+  timeoutMs: number,
 ): Promise<Map<string, StageCost[]>> {
   const inList = runIds.map((r) => `'${r}'`).join(",");
   const sql = `
@@ -162,6 +177,22 @@ interface RunHandle {
 }
 
 async function runScenario(s: (typeof SCENARIOS)[number]): Promise<RunHandle> {
+  return withSpan(
+    "bench.scenario",
+    { "bench.scenario": s.name, "bench.metric": s.metric, "bench.from": s.from, "bench.to": s.to },
+    async (span) => {
+      const handle = await runScenarioInner(s);
+      span.setAttributes({
+        "bench.run_id": handle.runId,
+        "bench.wall_ms": handle.wallMs,
+        "bench.client_queries": handle.clientQueries,
+      });
+      return handle;
+    },
+  );
+}
+
+async function runScenarioInner(s: (typeof SCENARIOS)[number]): Promise<RunHandle> {
   const ledger = new Ledger();
   const t0 = Date.now();
   try {
@@ -237,6 +268,15 @@ function print(report: Report, baseline?: Report): void {
 }
 
 async function main(): Promise<void> {
+  initObservability();
+  try {
+    await withSpan("bench.main", { "bench.scenarios": SCENARIOS.length }, () => run());
+  } finally {
+    await shutdownObservability();
+  }
+}
+
+async function run(): Promise<void> {
   const argv = process.argv;
   const saveIdx = argv.indexOf("--save");
   const cmpIdx = argv.indexOf("--compare");

@@ -17,7 +17,7 @@ import {
   REQUEST_TIMEOUT_MS,
 } from "../constants";
 import { DataFormat, EnvVar } from "../enums";
-import { withSpan } from "../utils/telemetryUtils";
+import { histogram, withSpan } from "../utils/telemetryUtils";
 
 const required = (name: EnvVar): string => {
   const value = process.env[name];
@@ -61,12 +61,25 @@ const operation = (query: string): string => {
   return query.trim().split(/\s+/, 1)[0]!.toUpperCase();
 };
 
+/**
+ * Cap on the SQL recorded on a span.
+ *
+ * Deliberately generous rather than the 500 chars this used to use. The queries worth debugging are
+ * exactly the ones that exceeded it: the localize sweep and the segment detection SQL are ~1.5-3 KB,
+ * so a 500-char cap kept the boilerplate SELECT list and cut away every predicate, window and floor
+ * that determines what the query actually did. A cap still exists so a pathological generated query
+ * cannot blow up a span payload, but at this size nothing in this codebase is truncated.
+ */
+const MAX_QUERY_TEXT = 16_384;
+
 /** db.* attributes shared by every span this client creates. */
 const dbAttributes = (query: string): Record<string, string> => {
   return {
     "db.system": "clickhouse",
     "db.operation": operation(query),
-    "db.query.text": query.length > 500 ? `${query.slice(0, 500)}...` : query,
+    "db.query.text":
+      query.length > MAX_QUERY_TEXT ? `${query.slice(0, MAX_QUERY_TEXT)}...[truncated]` : query,
+    "db.query.length": String(query.length),
     "db.collection.name": DATABASE,
   };
 };
@@ -101,11 +114,33 @@ export const exec = async (
   });
 };
 
+/**
+ * Rows handed back to the client, per query.
+ *
+ * The companion to the span attribute: the attribute answers "what did THIS query return", the
+ * histogram answers "what do our queries return in general" — which is the criterion-3 invariant
+ * (result sets bounded by dimension cardinality, never by event count) as a chartable series
+ * rather than a one-off assertion in the gate.
+ */
+const rowsReturned = histogram(
+  "db.rows_returned",
+  "Rows returned to the client by a SELECT",
+  "{row}",
+);
+
 /** Run a SELECT and return typed rows. */
 export const select = async <T>(client: ClickHouseClient, query: string): Promise<T[]> => {
-  return withSpan("clickhouse.select", dbAttributes(query), async () => {
+  return withSpan("clickhouse.select", dbAttributes(query), async (span) => {
     const rs = await client.query({ query, format: DataFormat.JsonEachRow });
-    return (await rs.json()) as T[];
+    const rows = (await rs.json()) as T[];
+    // Recorded on the span next to the SQL that produced it, so a trace answers "what ran and how
+    // much came back" without a second lookup.
+    span.setAttribute("db.response.returned_rows", rows.length);
+    rowsReturned().record(rows.length, {
+      "db.operation": operation(query),
+      "db.collection.name": DATABASE,
+    });
+    return rows;
   });
 };
 
