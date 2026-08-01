@@ -61,10 +61,10 @@ const NARRATION_MODEL = "claude-haiku-4-5-20251001";
 async function narrate(
   input: object,
 ): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
-  const apiKey = process.env[NarrationEnvVar.AnthropicApiKey];
+  const apiKey = process.env[NarrationEnvVar.DeepseekApiKey];
   if (!apiKey) {
     const text =
-      "[stub narration -- set ANTHROPIC_API_KEY to generate this for real] " +
+      "[stub narration -- set DEEPSEEK_API_KEY to generate this for real] " +
       "Revenue fell 12% in the 14:00-15:00 window, driven almost entirely by a fill-rate drop " +
       "concentrated in Android 14 devices, contributing 82% of the decline. Requests, eCPM, " +
       "region, and device model were checked and ruled out.";
@@ -145,7 +145,7 @@ async function main() {
     )
     .end();
 
-  const hasRealNarration = Boolean(process.env[NarrationEnvVar.AnthropicApiKey]);
+  const hasRealNarration = Boolean(process.env[NarrationEnvVar.DeepseekApiKey]);
   const generation = investigation.startObservation(
     "narration",
     { input: MOCK_RANKING, model: hasRealNarration ? NARRATION_MODEL : "stub" },

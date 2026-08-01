@@ -10,7 +10,7 @@ const REQUIRED_LANGFUSE_VARS = [
 ] as const;
 
 export enum NarrationEnvVar {
-  AnthropicApiKey = "ANTHROPIC_API_KEY",
+  DeepseekApiKey = "DEEPSEEK_API_KEY",
 }
 
 export function assertLangfuseEnv(): void {
