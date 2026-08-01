@@ -1,0 +1,496 @@
+/* Mission Control — visual styling. Split from index.html for readability; no build step needed. */
+
+:root {
+  --bg: #05060a;
+  --bg-2: #0c0f18;
+  --panel: rgba(22, 26, 38, 0.72);
+  --panel-solid: #141826;
+  --border: rgba(255, 255, 255, 0.08);
+  --text: #eef0f6;
+  --muted: #8b93a7;
+  --accent: #6c8cff;
+  --accent-2: #a86cff;
+  --good: #3ecf8e;
+  --warn: #e8a33d;
+  --bad: #ff5d6c;
+  --shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+}
+:root[data-theme="light"] {
+  --bg: #eef1f7;
+  --bg-2: #e3e7f0;
+  --panel: rgba(255, 255, 255, 0.75);
+  --panel-solid: #ffffff;
+  --border: rgba(20, 25, 40, 0.08);
+  --text: #12141c;
+  --muted: #5b6272;
+  --shadow: 0 8px 24px rgba(20, 25, 40, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  height: 100%;
+}
+body {
+  margin: 0;
+  color: var(--text);
+  font:
+    14px/1.55 -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background:
+    radial-gradient(1200px 600px at 15% -10%, rgba(108, 140, 255, 0.16), transparent 60%),
+    radial-gradient(900px 500px at 100% 0%, rgba(168, 108, 255, 0.14), transparent 55%),
+    linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%);
+  background-attachment: fixed;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(140, 150, 190, 0.25);
+  border-radius: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ---------------- nav (top tab bar) ---------------- */
+/* Horizontal, not a sidebar -- the Chat tab already embeds LibreChat, which has its own sidebar, so
+   a second vertical nav down the left edge read as two navbars stacked side by side. */
+nav {
+  width: 100%;
+  flex-shrink: 0;
+  padding: 10px 20px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(16px);
+  display: flex;
+  align-items: center;
+  gap: 22px;
+}
+nav .brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 800;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+nav .brand .grad {
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+nav .brand .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--good);
+  box-shadow: 0 0 0 0 rgba(62, 207, 142, 0.6);
+  animation: pulse 2s infinite;
+  flex-shrink: 0;
+}
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(62, 207, 142, 0.55);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(62, 207, 142, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(62, 207, 142, 0);
+  }
+}
+nav .tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+}
+nav button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--muted);
+  padding: 9px 14px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    transform 0.15s ease;
+}
+nav button .ic {
+  font-size: 14px;
+  filter: grayscale(0.4);
+}
+nav button:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  transform: translateY(-1px);
+}
+nav button.active {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: white;
+  box-shadow: 0 4px 16px rgba(108, 140, 255, 0.35);
+}
+nav button.active .ic {
+  filter: none;
+}
+.nav-foot {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 10.5px;
+  opacity: 0.6;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* ---------------- layout ---------------- */
+main {
+  flex: 1;
+  overflow: auto;
+  position: relative;
+}
+.view {
+  display: none;
+  height: 100%;
+}
+.view.active {
+  display: block;
+  animation: fadeUp 0.35s ease;
+}
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.view iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+.pad {
+  padding: 28px 32px 60px;
+  max-width: 1180px;
+  margin: 0 auto;
+}
+h1 {
+  font-size: 21px;
+  margin: 0 0 4px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+.sub {
+  color: var(--muted);
+  font-size: 13px;
+  margin-bottom: 22px;
+  max-width: 760px;
+}
+code {
+  background: rgba(140, 150, 190, 0.14);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+/* ---------------- cards ---------------- */
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px 20px;
+  margin-bottom: 18px;
+  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow);
+  transition: border-color 0.2s ease;
+}
+.card:hover {
+  border-color: rgba(108, 140, 255, 0.35);
+}
+.card h2 {
+  font-size: 12.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 0 0 14px;
+  font-weight: 700;
+}
+
+/* ---------------- stat cards ---------------- */
+/* Sticky, not just top-of-content -- these summary numbers stay pinned right below the tab bar as
+   the table beneath scrolls, instead of scrolling away with it. Same reasoning as the top nav: the
+   summary is what you want visible while you're scanning a long table, not just on first paint. */
+.stat-grid {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 18px;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  padding-top: 12px;
+  margin-top: -12px;
+  background: linear-gradient(var(--bg-2), var(--bg-2) 85%, transparent);
+}
+.stat {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px 18px;
+  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow);
+  transition: transform 0.15s ease;
+  flex: 0 1 160px;
+  text-align: center;
+}
+.stat:hover {
+  transform: translateY(-2px);
+}
+.stat .n {
+  font-size: 26px;
+  font-weight: 800;
+  background: linear-gradient(90deg, var(--text), var(--accent));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  letter-spacing: -0.02em;
+}
+.stat .l {
+  color: var(--muted);
+  font-size: 11.5px;
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+/* ---------------- tables ---------------- */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+th,
+td {
+  text-align: left;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--border);
+}
+th {
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+th:hover {
+  color: var(--text);
+}
+th.sorted::after {
+  content: " ▾";
+  color: var(--accent);
+}
+th.sorted.asc::after {
+  content: " ▴";
+}
+tbody tr {
+  transition: background 0.12s ease;
+}
+tbody tr:hover {
+  background: rgba(108, 140, 255, 0.06);
+}
+.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.mono {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+/* row severity accents (anomalies) */
+tr.sev-drop td:first-child {
+  box-shadow: inset 3px 0 0 var(--bad);
+}
+tr.sev-rise td:first-child {
+  box-shadow: inset 3px 0 0 var(--good);
+}
+
+/* ---------------- bars ---------------- */
+.bar-row {
+  display: grid;
+  grid-template-columns: 170px 1fr 90px;
+  gap: 10px;
+  align-items: center;
+  margin: 9px 0;
+}
+.bar-track {
+  background: rgba(140, 150, 190, 0.14);
+  border-radius: 6px;
+  height: 16px;
+  overflow: hidden;
+  display: flex;
+}
+.bar-fill {
+  height: 100%;
+  border-radius: 6px 0 0 6px;
+  transition: width 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.bar-fill.raw {
+  background: linear-gradient(90deg, var(--bad), #ff8a7a);
+}
+.bar-fill.rollup {
+  background: linear-gradient(90deg, var(--good), #6cf0c2);
+}
+.bar-fill.latency {
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+}
+.label {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+/* ---------------- pills / badges ---------------- */
+.pill {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.pill.good {
+  background: rgba(62, 207, 142, 0.15);
+  color: var(--good);
+}
+.pill.warn {
+  background: rgba(232, 163, 61, 0.15);
+  color: var(--warn);
+}
+.pill.bad {
+  background: rgba(255, 93, 108, 0.15);
+  color: var(--bad);
+}
+
+/* ---------------- filter bar ---------------- */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+  align-items: center;
+}
+.filters select,
+.filters input[type="search"] {
+  background: var(--panel-solid);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 9px;
+  padding: 8px 12px;
+  font-size: 12.5px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+.filters select:focus,
+.filters input[type="search"]:focus {
+  border-color: var(--accent);
+}
+.filters input[type="search"] {
+  min-width: 200px;
+}
+.filters .chip-group {
+  display: flex;
+  gap: 4px;
+  background: var(--panel-solid);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 3px;
+}
+.filters .chip {
+  padding: 6px 12px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--muted);
+  transition: all 0.15s ease;
+}
+.filters .chip.active {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: white;
+}
+.filters .count {
+  color: var(--muted);
+  font-size: 12px;
+  margin-left: auto;
+}
+
+/* ---------------- misc ---------------- */
+.loading,
+.err {
+  color: var(--muted);
+  padding: 30px 0;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.err {
+  color: var(--bad);
+}
+.spinner {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid rgba(140, 150, 190, 0.25);
+  border-top-color: var(--accent);
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.empty {
+  color: var(--muted);
+  padding: 20px 4px;
+}
+.row-detail {
+  background: rgba(108, 140, 255, 0.05);
+  font-size: 12px;
+  color: var(--muted);
+}
+.row-detail td {
+  padding: 10px 14px;
+}
+.expand-btn {
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 11px;
+  user-select: none;
+}

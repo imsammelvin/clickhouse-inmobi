@@ -184,7 +184,14 @@ async function serveStatic(pathname: string): Promise<Response | null> {
   if (rel.includes("..")) return null;
   const file = Bun.file(join(PUBLIC_DIR, rel));
   if (!(await file.exists())) return null;
-  return new Response(file);
+  // `new Response(file)` alone does not forward `file.type` as a header -- without an explicit
+  // Content-Type, some browsers refuse to apply a stylesheet or execute a script served this way.
+  // no-store because this is under active development: without it, a browser can keep serving a
+  // stale cached copy of style.css/app.js across edits and reloads, so a real fix looks like it
+  // did nothing.
+  return new Response(file, {
+    headers: { "Content-Type": file.type, "Cache-Control": "no-store" },
+  });
 }
 
 function main(): void {
