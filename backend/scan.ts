@@ -17,8 +17,12 @@ import { METRICS, metricExpr } from "./metrics";
 import { MIN_BASELINE_DAYS, robustBaseline, DATASET_START, DATASET_END, datesBetween } from "./baseline";
 import { MIN_ABS_PCT, MIN_SIGMA } from "./stages/detect";
 
-/** Known planted incidents, for scoring the scan. See pitch/incident-dossier.md. */
-const KNOWN: Array<{ dates: string[]; metric: string; label: string }> = [
+/**
+ * Incidents we located by hand (pitch/incident-dossier.md). This is NOT the answer key — it is our
+ * own homework, so recall against it is a floor, not a score. The private key may contain planted
+ * anomalies we never spotted, which would make real recall lower than this reports, never higher.
+ */
+export const KNOWN_INCIDENTS: Array<{ dates: string[]; metric: string; label: string }> = [
   { dates: ["2026-06-23", "2026-06-24", "2026-06-25"], metric: "fill_rate", label: "A Android 15 fill collapse" },
   { dates: ["2026-06-21"], metric: "requests", label: "B global volume collapse" },
   { dates: ["2026-06-19", "2026-06-20", "2026-06-21", "2026-06-22"], metric: "ecpm", label: "C finance eCPM" },
@@ -55,12 +59,21 @@ function evaluate(series: Map<string, number>, day: string): { pct: number; sigm
   return { pct, sigma, fired: Math.abs(pct) >= MIN_ABS_PCT && Math.abs(sigma) >= MIN_SIGMA, n: base.length };
 }
 
-async function main(): Promise<void> {
-  const only = process.argv.indexOf("--metric");
-  const metrics = only >= 0 ? [process.argv[only + 1]!] : ["revenue", "requests", "fill_rate", "ecpm", "ctr"];
-  const ledger = new Ledger();
-  const fired: Array<{ metric: string; day: string; pct: number; sigma: number }> = [];
+export interface Firing { metric: string; day: string; pct: number; sigma: number }
 
+export interface ScanResult {
+  fired: Firing[];
+  found: string[];
+  missed: string[];
+  /** Fired but not attributable to a known incident — hallucination risk until triaged. */
+  extra: Firing[];
+}
+
+export const DEFAULT_METRICS = ["revenue", "requests", "fill_rate", "ecpm", "ctr"];
+
+export async function scanAll(metrics: string[] = DEFAULT_METRICS): Promise<ScanResult> {
+  const ledger = new Ledger();
+  const fired: Firing[] = [];
   try {
     for (const metric of metrics) {
       const series = await seriesFor(ledger, metric);
@@ -69,27 +82,42 @@ async function main(): Promise<void> {
         if (r.fired) fired.push({ metric, day, pct: r.pct, sigma: r.sigma });
       }
     }
+  } finally {
+    await ledger.close();
+  }
+
+  const found: string[] = [];
+  const missed: string[] = [];
+  for (const k of KNOWN_INCIDENTS) {
+    const hit = fired.some((f) => f.metric === k.metric && k.dates.includes(f.day));
+    (hit ? found : missed).push(`${k.label}  (${k.metric})`);
+  }
+  const knownDays = new Set(KNOWN_INCIDENTS.flatMap((k) => k.dates.map((d) => `${k.metric}|${d}`)));
+  const extra = fired.filter((f) => !knownDays.has(`${f.metric}|${f.day}`));
+
+  return { fired: fired.sort((a, b) => a.day.localeCompare(b.day)), found, missed, extra };
+}
+
+async function main(): Promise<void> {
+  const only = process.argv.indexOf("--metric");
+  const metrics = only >= 0 ? [process.argv[only + 1]!] : DEFAULT_METRICS;
+  const { fired, found, missed, extra } = await scanAll(metrics);
+  {
 
     console.log(`\nFIRED (${fired.length})`);
-    for (const f of fired.sort((a, b) => a.day.localeCompare(b.day))) {
+    for (const f of fired) {
       console.log(`  ${f.day}  ${f.metric.padEnd(10)} ${f.pct >= 0 ? "+" : ""}${f.pct.toFixed(1)}%  ${f.sigma.toFixed(1)} sigma`);
     }
 
     console.log(`\nAGAINST KNOWN INCIDENTS`);
-    for (const k of KNOWN) {
-      const hit = fired.some((f) => f.metric === k.metric && k.dates.includes(f.day));
-      console.log(`  ${hit ? "FOUND " : "MISSED"}  ${k.label}  (${k.metric})`);
-    }
+    for (const f of found) console.log(`  FOUND   ${f}`);
+    for (const m of missed) console.log(`  MISSED  ${m}`);
 
-    const knownDays = new Set(KNOWN.flatMap((k) => k.dates.map((d) => `${k.metric}|${d}`)));
-    const extra = fired.filter((f) => !knownDays.has(`${f.metric}|${f.day}`));
-    console.log(`\nNOT IN THE KNOWN LIST (${extra.length}) — either undiscovered incidents or false alarms`);
+    console.log(`\nNOT IN THE KNOWN LIST (${extra.length}) — undiscovered incidents or false alarms`);
     for (const f of extra.slice(0, 20)) {
       console.log(`  ${f.day}  ${f.metric.padEnd(10)} ${f.pct >= 0 ? "+" : ""}${f.pct.toFixed(1)}%  ${f.sigma.toFixed(1)} sigma`);
     }
     console.log("");
-  } finally {
-    await ledger.close();
   }
 }
 

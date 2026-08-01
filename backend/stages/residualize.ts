@@ -94,6 +94,20 @@ export async function residualize(
 ): Promise<ResidualizeResult> {
   const uniformity = isUniform(initial);
   if (uniformity.uniform) {
+    // The uniformity verdict quotes six figures in prose. Each is a claim about the data and each
+    // must resolve, or the most important sentence we produce would be ungrounded.
+    const moved = initial.filter((c) => magnitude(c) > 1);
+    const mags = moved.map(magnitude).sort((a, b) => a - b);
+    const med = mags[Math.floor(mags.length / 2)] ?? 0;
+    const sqlRef = initial[0]?.sql ?? "";
+    const rec = (label: string, value: number, unit: "count" | "pct") =>
+      ledger.record({ label, value: Number(value.toFixed(4)), unit, sql: sqlRef, window: { from, to }, filters: {} });
+    rec("uniformity.segments_moved", moved.length, "count");
+    rec("uniformity.dimensions", new Set(moved.map((c) => c.dimension)).size, "count");
+    rec("uniformity.min_magnitude", mags[0] ?? 0, "pct");
+    rec("uniformity.max_magnitude", mags[mags.length - 1] ?? 0, "pct");
+    rec("uniformity.median_magnitude", med, "pct");
+    rec("uniformity.spread_ratio_pct", med === 0 ? 0 : (((mags[mags.length - 1] ?? 0) - (mags[0] ?? 0)) / med) * 100, "pct");
     return {
       causes: [],
       contamination: [],

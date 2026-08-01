@@ -111,6 +111,14 @@ ORDER BY event_date`.trim();
       filters: { baseline_dates: base.join(",") },
     }),
     ledger.record({
+      label: `${metric}.delta_pct`,
+      value: Number(deltaPct.toFixed(4)),
+      unit: "pct",
+      sql,
+      window: { from, to },
+      filters: {},
+    }),
+    ledger.record({
       label: `${metric}.sigma`,
       value: Number(sigma.toFixed(3)),
       unit: "sigma",
@@ -118,7 +126,25 @@ ORDER BY event_date`.trim();
       window: { from, to },
       filters: { baseline_days: String(baseVals.length) },
     }),
+    // Gates are configuration, not measurement — but they are printed, so they must still resolve.
+    // Recording them keeps the grounding check total rather than carving out exceptions.
+    ledger.record({
+      label: "gate.min_abs_pct", value: MIN_ABS_PCT, unit: "pct",
+      sql: "configuration: backend/stages/detect.ts MIN_ABS_PCT",
+      window: { from, to }, filters: {},
+    }),
+    ledger.record({
+      label: "gate.min_sigma", value: MIN_SIGMA, unit: "sigma",
+      sql: "configuration: backend/stages/detect.ts MIN_SIGMA",
+      window: { from, to }, filters: {},
+    }),
   );
+  if (deltaPp !== null) {
+    evidenceIds.push(ledger.record({
+      label: `${metric}.delta_pp`, value: Number(deltaPp.toFixed(4)), unit: "pp",
+      sql, window: { from, to }, filters: {},
+    }));
+  }
 
   // Refusing is a legitimate output. Better than a confident answer off two observations.
   if (baseVals.length < MIN_BASELINE_DAYS) {

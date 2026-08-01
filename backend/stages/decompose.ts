@@ -24,6 +24,8 @@ export interface Factor {
   revenueEffect: number;
   isDriver: boolean;
   evidenceId: string;
+  evidenceIdPct: string;
+  evidenceIdUsd: string;
 }
 
 export interface Decomposition {
@@ -110,6 +112,16 @@ export async function decompose(
       deltaPct: b[name] === 0 ? 0 : ((i[name] - b[name]) / b[name]) * 100,
       revenueEffect: effect,
       isDriver: false,
+      evidenceIdPct: ledger.record({
+        label: `decompose.${name}.delta_pct`,
+        value: Number((b[name] === 0 ? 0 : ((i[name] - b[name]) / b[name]) * 100).toFixed(4)),
+        unit: "pct", sql, window: { from, to }, filters: {},
+      }),
+      evidenceIdUsd: ledger.record({
+        label: `decompose.${name}.revenue_effect_usd`,
+        value: Number(effect.toFixed(4)),
+        unit: "usd", sql, window: { from, to }, filters: {},
+      }),
       evidenceId: ledger.record({
         label: `decompose.${name}`,
         value: Number(i[name].toFixed(6)),

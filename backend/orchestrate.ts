@@ -116,6 +116,19 @@ export async function investigate(opts: InvestigateOptions): Promise<Investigati
   ledger.endStage(`${fmtUsd(revPerDay)}/day over ${dayCount} day(s).`);
 
   for (const c of res.causes) {
+    const causeSqlRef = c.sql;
+    ledger.record({
+      label: `cause.${c.dimension}.${c.value}.delta`,
+      value: Number((c.deltaPp ?? c.deltaPct).toFixed(4)),
+      unit: c.deltaPp !== null ? "pp" : "pct",
+      sql: causeSqlRef, window: { from, to }, filters: { segment: `${c.dimension}='${c.value}'` },
+      segmentSharePct: Number(c.sharePct.toFixed(4)),
+    });
+    ledger.record({
+      label: `cause.${c.dimension}.${c.value}.share_pct`,
+      value: Number(c.sharePct.toFixed(4)), unit: "pct",
+      sql: causeSqlRef, window: { from, to }, filters: { segment: `${c.dimension}='${c.value}'` },
+    });
     findings.push({
       channel: cls.channel,
       segment: { dimension: c.dimension, value: c.value },
@@ -149,6 +162,19 @@ export async function investigate(opts: InvestigateOptions): Promise<Investigati
   }
 
   for (const c of res.contamination) {
+    // Both sides of "was X, now Y once the cause is excluded" are claims about the data.
+    ledger.record({
+      label: `cleared.${c.dimension}.${c.value}.raw`,
+      value: Number((c.deltaPp ?? c.deltaPct).toFixed(4)),
+      unit: c.deltaPp !== null ? "pp" : "pct",
+      sql: c.sql, window: { from, to }, filters: { segment: `${c.dimension}='${c.value}'` },
+    });
+    ledger.record({
+      label: `cleared.${c.dimension}.${c.value}.residual`,
+      value: Number((c.residualPp ?? c.residualDelta).toFixed(4)),
+      unit: c.residualPp !== null ? "pp" : "pct",
+      sql: c.sql, window: { from, to }, filters: { segment: `${c.dimension}='${c.value}'` },
+    });
     ruledOut.push({
       channel: cls.channel,
       segment: { dimension: c.dimension, value: c.value },
@@ -167,6 +193,24 @@ export async function investigate(opts: InvestigateOptions): Promise<Investigati
         `${fmtDelta(c.residualPp, c.residualDelta)} once ${res.causes[0]?.dimension} = ` +
         `'${res.causes[0]?.value}' is excluded — dilution, not a cause.`,
     });
+  }
+
+  if (res.contamination.length) {
+    // The renderer prints "N segment(s) cleared as contamination" and "... and M more"; both are
+    // claims about how much was checked, which is exactly what criterion 2 asks us to substantiate.
+    const SHOWN = 6;
+    ledger.record({
+      label: "cleared_as_contamination.count",
+      value: res.contamination.length, unit: "count",
+      sql: res.contamination[0]?.sql ?? "", window: { from, to }, filters: {},
+    });
+    if (res.contamination.length > SHOWN) {
+      ledger.record({
+        label: "cleared_as_contamination.not_shown",
+        value: res.contamination.length - SHOWN, unit: "count",
+        sql: res.contamination[0]?.sql ?? "", window: { from, to }, filters: {},
+      });
+    }
   }
 
   for (const chk of cls.cleared) {

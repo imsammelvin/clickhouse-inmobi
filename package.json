@@ -9,7 +9,11 @@
     "ch:load": "bun run scripts/load.ts",
     "ch:verify": "bun run scripts/verify.ts",
     "ch:setup": "bun run ch:schema && bun run ch:load && bun run ch:verify",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "criteria": "bun run backend/criteria.ts",
+    "scan": "bun run backend/scan.ts",
+    "bench": "bun run backend/benchmark.ts",
+    "explain": "bun run backend/cli.ts"
   },
   "devDependencies": {
     "@types/bun": "latest"
