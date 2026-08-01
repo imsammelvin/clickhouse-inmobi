@@ -22,7 +22,7 @@
 import { readFileSync } from "node:fs";
 import { ROLLUP_TABLES, rollupStatements } from "../../clickhouse/rollup";
 import { splitStatements } from "../../utils/sql.utils";
-import { DIMS, PLANTED, SHAPE, dateOf } from "./spec";
+import { DIMS, PLANTED, SHAPE, dateOf, specFingerprint } from "./spec";
 import { resolveTargetDatabase, scratchClient, serverClient } from "./target";
 
 const flag = (name: string): boolean => process.argv.includes(`--${name}`);
@@ -168,6 +168,10 @@ FROM numbers(${SHAPE.geoDevices})`,
     `SYSTEM RELOAD DICTIONARY dict_apps`,
     `SYSTEM RELOAD DICTIONARY dict_advertisers`,
     `SYSTEM RELOAD DICTIONARY dict_geo_device`,
+    // Stamp what built this data, so the scorer can refuse a database the spec has moved on from.
+    `CREATE TABLE IF NOT EXISTS synth_meta (fingerprint String, built_at DateTime) ENGINE = MergeTree ORDER BY built_at`,
+    `TRUNCATE TABLE synth_meta`,
+    `INSERT INTO synth_meta SELECT '${specFingerprint().replace(/'/g, "\\'")}', now()`,
   ];
 }
 
