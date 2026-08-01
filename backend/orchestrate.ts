@@ -7,6 +7,7 @@
  */
 import { Ledger } from "./ledger";
 import { ensureDatasetBounds } from "./baseline";
+import { ensureRollupReady } from "../clickhouse/rollup";
 import { METRICS } from "./metrics";
 import { detect } from "./stages/detect";
 import { decompose } from "./stages/decompose";
@@ -25,8 +26,7 @@ import {
   type Mask,
   NO_MASK,
   type Segment,
-  dimsOf,
-  segmentPredicate,
+  segmentMask,
 } from "./types";
 import { withSpan } from "../utils/telemetryUtils";
 
@@ -68,12 +68,8 @@ export interface InvestigateOptions {
 }
 
 /** Restrict every stage to one segment. Stages already accept a Mask; this just builds one. */
-function segmentMask(segment: Segment): Mask {
-  return {
-    sql: segmentPredicate(segment.dimension, segment.value),
-    description: `${segment.dimension}='${segment.value}'`,
-    dims: dimsOf(segment.dimension),
-  };
+function maskFor(segment: Segment): Mask {
+  return segmentMask(segment.dimension, segment.value);
 }
 
 /**
@@ -117,10 +113,26 @@ async function investigateInner(opts: InvestigateOptions): Promise<Investigation
   const traceId = "";
   // Same reason as scanAll: bounds feed WHERE clauses downstream.
   await ensureDatasetBounds((sql) => ledger.run(sql));
+
+  /**
+   * Resolve rollup readiness here, for exactly the reason the bounds check is here.
+   *
+   * `planRollup` refuses to serve anything until the rollup has been proven to account for every
+   * event in `ad_events` — an unchecked rollup is treated as an absent one. That check lived only in
+   * `Session.ready()` on the MCP path, so `investigate()` reached directly — `bun run explain`,
+   * `criteria`, `parity`, any test — left it unresolved and **every stage silently fell back to the
+   * raw scan.** Not a wrong answer, but the whole point of T-050 was missing on half the entry
+   * points, and it was invisible because the numbers are identical either way.
+   *
+   * Found by sam's `bun run parity`, which reported `[raw]` while the MCP path was demonstrably
+   * rollup-served. That gate exists to catch a rollup that changes a number; it caught a rollup that
+   * was not being read at all, which is the failure one layer up.
+   */
+  await ensureRollupReady((sql) => ledger.run(sql));
   const findings: Finding[] = [];
   const ruledOut: Finding[] = [];
 
-  const scope: Mask = opts.segment ? segmentMask(opts.segment) : NO_MASK;
+  const scope: Mask = opts.segment ? maskFor(opts.segment) : NO_MASK;
 
   // ---- Stage 0: detect -----------------------------------------------------------------
   ledger.beginStage("detect");
@@ -146,7 +158,7 @@ async function investigateInner(opts: InvestigateOptions): Promise<Investigation
     const lead = windows[0]?.lead;
     if (lead) {
       scopedTo = { dimension: lead.dimension, value: lead.value };
-      const rescoped = await detect(ledger, metric, from, to, segmentMask(scopedTo));
+      const rescoped = await detect(ledger, metric, from, to, maskFor(scopedTo));
       if (rescoped.anomalous) {
         det = rescoped;
         platformInBand = { pct: platformDet.deltaPct, sigma: platformDet.sigma };
@@ -282,11 +294,7 @@ async function investigateInner(opts: InvestigateOptions): Promise<Investigation
     [];
 
   for (const c of res.causes) {
-    const segDet = await detect(ledger, sweepMetric, from, to, {
-      sql: segmentPredicate(c.dimension, c.value),
-      description: `${c.dimension}='${c.value}'`,
-      dims: dimsOf(c.dimension),
-    });
+    const segDet = await detect(ledger, sweepMetric, from, to, segmentMask(c.dimension, c.value));
     if (segDet.anomalous) confirmed.push(c);
     else insignificant.push({ cause: c, sigma: segDet.sigma, pct: segDet.deltaPct });
   }
@@ -441,13 +449,7 @@ async function investigateInner(opts: InvestigateOptions): Promise<Investigation
   // Publisher ops. A segment-level finding has to be classified on the segment's own funnel, not
   // on what the rest of the platform was doing around it.
   const causeSegment = res.causes[0];
-  const causeMask = causeSegment
-    ? {
-        sql: segmentPredicate(causeSegment.dimension, causeSegment.value),
-        description: `${causeSegment.dimension}='${causeSegment.value}'`,
-        dims: dimsOf(causeSegment.dimension),
-      }
-    : null;
+  const causeMask = causeSegment ? segmentMask(causeSegment.dimension, causeSegment.value) : null;
   const scoped = causeMask ? await decompose(ledger, from, to, causeMask) : dec;
 
   ledger.beginStage("classify");

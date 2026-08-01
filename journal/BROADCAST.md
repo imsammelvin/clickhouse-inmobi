@@ -661,3 +661,87 @@ The rollup equivalent needs one query per relevant dim key, UNION'd — the same
 **Commits:** none yet (working tree only) — `backend/types.ts`, `backend/orchestrate.ts`,
 `backend/stages/detect.ts`, `backend/stages/decompose.ts`, `mcp/eval/parity.ts`. Not pushed (loges'
 own rule: only loges pushes their own commits).
+> **This entry resolves the blocker sam raises immediately above, written before either of us saw
+> the other's work.** `Mask.dims` is exactly the interface change they specify, `detect` is
+> repointed, and their `bun run parity` — which correctly reported VACUOUS because no stage read
+> the rollup — is now a real assertion. Their measurement table and mine were taken on different
+> runs; where they differ, theirs is the wider sweep and mine is one controlled investigation.
+
+## 2026-08-02 — T-050 done: `detect` reads the rollup. Crosses into `backend/`, loges please review. — samarth
+
+Branch `dev/samarth/detect-rollup`. Editing `backend/` on the human's instruction (AGENTS.md § 2 —
+`Crosses-lane: loges` on the commit, and this entry). Five files: `types.ts`, `stages/detect.ts`,
+`orchestrate.ts`, `stages/residualize.ts`, plus one Mask literal in `mcp/tools.ts`.
+
+**Measured, same code either side of the change:**
+
+    mcp:eval wall clock       76,287ms  ->  40,047ms     1.9x
+    investigate median         10,437ms ->   6,648ms     1.6x
+    investigate worst          27,569ms ->  12,165ms     2.3x
+    diagnose wall clock       100,407ms ->  59,882ms     1.7x
+    platform detect query    3,271,278 rows -> 50,652    65x   (system.query_log, one investigation)
+
+Nothing moved: `mcp:eval` 16/16 and 60/60 gated, `criteria` 4/4, `diagnose` finds the same six
+incidents with every report 100% grounded, `ch:verify-rollup` 281/281.
+
+### The contract change you need to know about
+
+`Mask` gained `dims: readonly string[]`. It recorded `sql` and `description` only, so a stage could
+not ask whether the rollup can serve its query — `segmentPredicate` and `andMask` knew the dimension
+names at construction and discarded them. Now:
+
+- `segmentMask(dimension, value)` and `exclusionMask(dimension, value)` in `backend/types.ts` are the
+  only sanctioned way to build one. Every hand-rolled `{sql, description}` literal is gone.
+- `andMask` unions `dims`, so a combined predicate reports everything either side constrained.
+- `NO_MASK` is `dims: []`.
+
+**The obligation, and it is the sharp edge of this whole design: every dimension the predicate
+references must be listed.** The rollup pre-sums each cut, so a dimension left out of `dims` is one
+that has already been summed away — `planRollup` hands back a cut that cannot express the filter and
+the query answers for the WHOLE slice instead of the filtered one. In `detect` that is worse than a
+wrong number, because its output is a boolean gate: it would return `anomalous: true` for a segment
+that never moved, and the investigation would name a cause that does not exist. Use the builders.
+
+### A prediction of mine that was wrong, and the probe that caught it
+
+I expected two exclusions on two dimensions to fall back to raw. They do not:
+`NOT(os_version='Android 15') AND NOT(app_category='finance')` is exactly expressible against the
+materialised `app_category|os_version` pair, since every row of that cut names both columns. The values
+agreed on the first run — the expectation was wrong, not the planner. **So residualize's second
+deflation iteration is rollup-served too**, which is more than T-050 was scoped to buy. Three
+dimensions is where it genuinely stops, and that is now asserted rather than assumed.
+
+### What is left, measured on ONE investigation (7.8s, `fill_rate` Jun 23-25)
+
+Attributed per query from `system.query_log`:
+
+| stage | surface | queries | rows read |
+| --- | --- | --- | --- |
+| residualize | raw | 8 | 26,170,224 |
+| bounds | rollup + raw | 2 | 18,713,821 (**102ms server — metadata-shaped, not a real scan**) |
+| classify | raw | 2 | 6,542,554 |
+| localize | raw | 1 | 3,271,278 |
+| decompose | raw | 2 | 3,271,277 |
+| confirm | raw | 2 | 3,271,277 |
+| confirm | **rollup** | 4 | 202,608 |
+| price | **rollup** | 1 | 147,735 |
+| **detect** | **rollup** | 1 | **50,652** |
+
+Priority order for the rest of T-043, and all of it is yours:
+
+1. **`residualize`** — 42.5% of one investigation. Its masked `localize` re-sweeps are the cost, and
+   the two-exclusion finding above says more of them are servable than I assumed.
+2. **`localize`** unmasked first pass — it does its own `arrayJoin` fan-out, which is precisely what
+   `rollup_segment_daily` already holds. `mcp/sweep.ts` is the worked example: same statistics, `dim IN
+   (...)` instead of a fan-out, verified firing-for-firing.
+3. **`decompose`** — its `Mask` now carries `dims`, so it is the same three-line change `detect` was.
+4. **`classify`** cannot use the rollup: `uniqExact` on advertisers is not a sum. Leave it.
+
+Two queries tagged `confirm` still read raw and read ~1.6M rows each. `confirm` only calls `detect`,
+and every detect in it is now rollup-served, so those are something else running while that stage is
+open — worth 5 minutes of yours to identify, because it is 5% of an investigation.
+
+**Not a win despite appearances:** `bounds` reads 18.7M rows but costs 102ms, because `min/max
+(event_date)` and `count()` are answered from partition metadata. I nearly reported it as low-hanging
+fruit; it is not. Rows read is the right scalability metric and the wrong latency metric, and this is
+the one place in the codebase where they disagree.

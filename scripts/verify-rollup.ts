@@ -19,13 +19,17 @@
  * nothing, which is worse than a red one.
  */
 import { Ledger } from "../backend/ledger";
-import { DIMENSIONS, FILLED_ONLY_DIMENSIONS, METRICS } from "../backend/metrics";
+import { DIMENSIONS, FILLED_ONLY_DIMENSIONS, METRICS, metricExpr } from "../backend/metrics";
+import { detect } from "../backend/stages/detect";
+import { type Mask, NO_MASK, andMask, exclusionMask, segmentMask } from "../backend/types";
 import { DATASET_END, DATASET_START, ensureDatasetBounds } from "../backend/baseline";
 import {
   disableRollup,
   ensureRollupReady,
+  planRollup,
   resetRollupReady,
   rollupHealth,
+  sourceLabel,
 } from "../clickhouse/rollup";
 import { makeClient } from "../clickhouse/client";
 import {
@@ -331,6 +335,91 @@ function buildProbes(): Probe[] {
           out[`${v.value}.sharePct`] = v.sharePct;
         }
         return { servedFrom: r.servedFrom, values: out };
+      },
+    });
+  }
+
+  /**
+   * --- detect: the stage T-050 put on the rollup, and the largest one -------------------------
+   *
+   * `detect` runs once for the platform and then once per candidate in `confirm`, so it was 41.8% of
+   * every row the engine read. It is also the stage where a mask that the rollup cannot express would
+   * do the most damage: its verdict is a boolean gate, so a filtered query silently answering for the
+   * WHOLE platform does not return a wrong-looking number — it returns `anomalous: true` on a segment
+   * that never moved, and the investigation names a cause that does not exist.
+   *
+   * So every mask shape is checked: no mask, a single dimension, a synthetic pair, an entity
+   * dimension, an exclusion (residualize's shape), and two exclusions at once — which must fall back,
+   * because no single materialised cut can express two dimensions of exclusion.
+   */
+  const maskCases: Array<{ label: string; metric: string; mask: Mask; expect: "rollup" | "raw" }> = [
+    { label: "platform", metric: "fill_rate", mask: NO_MASK, expect: "rollup" },
+    { label: "single-dim", metric: "fill_rate", mask: segmentMask("os_version", "Android 15"), expect: "rollup" },
+    { label: "pair", metric: "fill_rate", mask: segmentMask("region|os_version", "EU|Android 15"), expect: "rollup" },
+    { label: "app-entity", metric: "revenue", mask: segmentMask("app_id", "app_00091"), expect: "rollup" },
+    { label: "category", metric: "ecpm", mask: segmentMask("app_category", "finance"), expect: "rollup" },
+    { label: "exclusion", metric: "fill_rate", mask: exclusionMask("os_version", "Android 15"), expect: "rollup" },
+    { label: "pair-exclusion", metric: "requests", mask: exclusionMask("country|ad_format", "IN|banner"), expect: "rollup" },
+    // Two exclusions on two dimensions land on the materialised pair, and this probe is here because
+    // I predicted it would fall back and it did not. `NOT(os_version='Android 15') AND
+    // NOT(app_category='finance')` is exactly expressible against `app_category|os_version`: every row
+    // of that cut names both columns, so the predicate selects the cells that are neither and their
+    // sum is the same set of events the raw predicate selects. The values agreed on the first run --
+    // it was the expectation that was wrong, not the planner. Residualize's second deflation
+    // iteration therefore stays on the rollup, which is a bigger win than the one T-050 was scoped for.
+    {
+      label: "two-exclusions",
+      metric: "fill_rate",
+      mask: andMask(
+        exclusionMask("os_version", "Android 15"),
+        exclusionMask("app_category", "finance"),
+      ),
+      expect: "rollup",
+    },
+    // Three dimensions is where it genuinely stops: no cut carries three columns, so the plan must
+    // decline and the raw scan must answer. This is the assertion that proves the budget is enforced
+    // rather than merely documented.
+    {
+      label: "three-exclusions",
+      metric: "fill_rate",
+      mask: andMask(
+        andMask(
+          exclusionMask("os_version", "Android 15"),
+          exclusionMask("app_category", "finance"),
+        ),
+        exclusionMask("region", "EU"),
+      ),
+      expect: "raw",
+    },
+  ];
+
+  for (const c of maskCases) {
+    probes.push({
+      id: `detect/${c.metric}/${c.label}`,
+      expect: c.expect,
+      run: async (ledger) => {
+        const d = await detect(ledger, c.metric, W.from, W.to, c.mask);
+        return {
+          // detect has no `servedFrom`; the plan is re-derived here to assert the same decision the
+          // stage makes. Identical inputs, so it cannot disagree with what the stage did.
+          servedFrom: rollupOn
+            ? sourceLabel(planRollup({ dims: c.mask.dims, grain: "daily", expressions: [metricExpr(METRICS[c.metric]!)] }))
+            : "raw",
+          values: {
+            incidentValue: d.incidentValue,
+            baselineMean: d.baselineMean,
+            baselineStd: d.baselineStd,
+            baselineDays: d.baselineDays,
+            deltaAbs: d.deltaAbs,
+            deltaPct: d.deltaPct,
+            deltaPp: d.deltaPp,
+            sigma: d.sigma,
+            // The verdict itself, not just the numbers behind it: this is what the engine acts on.
+            anomalous: String(d.anomalous),
+            spreadFloored: String(d.spreadFloored),
+            reason: d.reason,
+          },
+        };
       },
     });
   }

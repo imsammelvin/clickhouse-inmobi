@@ -204,3 +204,34 @@ would break the next signal type that arrives. They occupy 0 bytes. Left alone; 
 **Branches left open**
 - `dev/samarth/rollup-mv` — merged `origin/main` in (merge, not rebase, at the human's instruction;
   AGENTS.md § 3 prefers rebase). Not pushed yet.
+
+### 2026-08-02 — session 2 (samarth / Lane B, crossing into Lane A with authorisation)
+
+**Done — T-050 + the `detect` half of T-043, and #3 from my own list.**
+
+`Mask` now carries `dims`, built only through `segmentMask`/`exclusionMask`, unioned by `andMask`.
+`detect` plans the rollup from it. Measured, same code either side: `mcp:eval` wall 76,287 -> 40,047ms,
+`investigate` median 10,437 -> 6,648ms, worst 27,569 -> 12,165ms, `diagnose` 100,407 -> 59,882ms,
+platform detect query 3,271,278 rows -> 50,652.
+
+Also extended `ensureRollupReady` to check hourly per-key, following sam's fix to the daily side. Their
+argument applied unchanged to the table holding 3.09M of the 3.24M rollup rows, and hourly-grain reads
+go straight there.
+
+**Two things I got wrong, both caught by the gate rather than by review.**
+
+1. I predicted two exclusions on two dimensions would fall back. They do not — the pair cut expresses
+   it exactly, and the values agreed on the first run. **The expectation was wrong, not the code**, and
+   the useful consequence is that residualize's second deflation iteration is rollup-served.
+2. I nearly reported `bounds` (18.7M rows read) as low-hanging fruit. It costs **102ms** — `min/max
+   (event_date)` and `count()` come from partition metadata. Rows read is the right scalability metric
+   and the wrong latency metric, and this is the one place in this codebase where they disagree
+   sharply. Worth remembering before quoting a row count as a latency claim.
+
+**Still open, and p95 is still not met.** § 10 wants p95 < 3s; worst investigation is 12.2s. Remaining
+cost is `residualize` (42.5% of one investigation), `localize`, `decompose`, `classify` — all Lane A,
+all in the BROADCAST entry with the measured priority order. Two queries tagged `confirm` still read
+~1.6M rows each and are not detect calls; unidentified.
+
+**Branches left open**
+- `dev/samarth/detect-rollup` — not pushed. Needs loges' review (crosses into `backend/`).

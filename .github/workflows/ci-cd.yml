@@ -13,6 +13,7 @@ concurrency:
 jobs:
   ci:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -23,47 +24,63 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
 
+
   deploy:
     needs: ci
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Install rsync
-        run: sudo apt-get update && sudo apt-get install -y rsync
-
-      - name: Configure SSH
+      - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
-          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/key
-          chmod 600 ~/.ssh/key
-          ssh-keyscan -H -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
 
-      - name: Sync project to server
+          cat > ~/.ssh/key <<'EOF'
+          ${{ secrets.SSH_PRIVATE_KEY }}
+          EOF
+
+          chmod 600 ~/.ssh/key
+
+          ssh-keyscan \
+            -p "${{ secrets.SSH_PORT || 22 }}" \
+            -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
+
+
+      - name: Test SSH connection
         run: |
-          rsync -az --delete \
+          ssh \
+            -i ~/.ssh/key \
+            -p "${{ secrets.SSH_PORT || 22 }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "echo SSH_WORKING && pwd"
+
+
+      - name: Sync code to server
+        run: |
+          rsync -az \
             --exclude=".git" \
             --exclude=".github" \
             --exclude=".env" \
-            -e "ssh -i ~/.ssh/key -p ${{ secrets.SSH_PORT }}" \
+            -e "ssh -i ~/.ssh/key -p ${{ secrets.SSH_PORT || 22 }}" \
             ./ \
-            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ secrets.DEPLOY_PATH }}/"
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:~/clickhouse-inmobi/"
+
 
       - name: Restart application
         run: |
-          ssh -i ~/.ssh/key -p "${{ secrets.SSH_PORT }}" \
+          ssh \
+            -i ~/.ssh/key \
+            -p "${{ secrets.SSH_PORT || 22 }}" \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" <<'EOF'
+
           set -e
 
           export PATH="$HOME/.bun/bin:$PATH"
 
-          cd "${{ secrets.DEPLOY_PATH }}"
+          cd ~/clickhouse-inmobi
 
           bun install --frozen-lockfile
 
@@ -84,5 +101,7 @@ jobs:
             -- --transport http --port 3333
 
           pm2 save --force
+
           pm2 status
+
           EOF
