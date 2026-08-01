@@ -24,6 +24,7 @@ import {
 } from "./baseline";
 import { MIN_ABS_PCT, MIN_SIGMA } from "./stages/detect";
 import { log } from "../utils/telemetryUtils";
+import { type IncidentWindow, clusterWindows, groupIntoIncidents, scanSegments } from "./segments";
 
 /**
  * Incidents we located by hand (pitch/incident-dossier.md). This is NOT the answer key — it is our
@@ -105,6 +106,8 @@ export interface ScanResult {
   missed: string[];
   /** Fired but not attributable to a known incident — hallucination risk until triaged. */
   extra: Firing[];
+  /** Distinct incident windows found below the platform number. One per event, not per segment. */
+  segments: IncidentWindow[];
 }
 
 export const DEFAULT_METRICS = ["revenue", "requests", "fill_rate", "ecpm", "ctr"];
@@ -112,6 +115,7 @@ export const DEFAULT_METRICS = ["revenue", "requests", "fill_rate", "ecpm", "ctr
 export async function scanAll(metrics: string[] = DEFAULT_METRICS): Promise<ScanResult> {
   const ledger = new Ledger();
   const fired: Firing[] = [];
+  const segmentFirings = [];
   try {
     for (const metric of metrics) {
       const series = await seriesFor(ledger, metric);
@@ -121,16 +125,24 @@ export async function scanAll(metrics: string[] = DEFAULT_METRICS): Promise<Scan
         const r = evaluate(series, day, weeklyGrowth);
         if (r.fired) fired.push({ metric, day, pct: r.pct, sigma: r.sigma });
       }
+      // One extra query per metric, all detection server-side, only firings returned.
+      segmentFirings.push(...(await scanSegments(ledger, metric, weeklyGrowth)));
     }
   } finally {
     await ledger.close();
   }
+  const segments = clusterWindows(groupIntoIncidents(segmentFirings));
 
   const found: string[] = [];
   const missed: string[] = [];
   for (const k of KNOWN_INCIDENTS) {
-    const hit = fired.some((f) => f.metric === k.metric && k.dates.includes(f.day));
-    (hit ? found : missed).push(`${k.label}  (${k.metric})`);
+    // Found if EITHER the blended sweep or the segment sweep saw it. Segment detection is the
+    // whole point: two of these four are invisible in the platform-level number.
+    const blended = fired.some((f) => f.metric === k.metric && k.dates.includes(f.day));
+    const segment = segmentFirings.some((f) => f.metric === k.metric && k.dates.includes(f.day));
+    (blended || segment ? found : missed).push(
+      `${k.label}  (${k.metric}${!blended && segment ? ", segment-level only" : ""})`,
+    );
   }
 
   // Attribution is by DATE, not by (metric, date).
@@ -144,13 +156,19 @@ export async function scanAll(metrics: string[] = DEFAULT_METRICS): Promise<Scan
   const knownDates = new Set(KNOWN_INCIDENTS.flatMap((k) => k.dates));
   const extra = fired.filter((f) => !knownDates.has(f.day));
 
-  return { fired: fired.sort((a, b) => a.day.localeCompare(b.day)), found, missed, extra };
+  return {
+    fired: fired.sort((a, b) => a.day.localeCompare(b.day)),
+    found,
+    missed,
+    extra,
+    segments,
+  };
 }
 
 async function main(): Promise<void> {
   const only = process.argv.indexOf("--metric");
   const metrics = only >= 0 ? [process.argv[only + 1]!] : DEFAULT_METRICS;
-  const { fired, found, missed, extra } = await scanAll(metrics);
+  const { fired, found, missed, extra, segments } = await scanAll(metrics);
   {
     log.info(`\nFIRED (${fired.length})`);
     for (const f of fired) {
@@ -175,6 +193,18 @@ async function main(): Promise<void> {
         `  ${f.day}  ${f.metric.padEnd(10)} ${f.pct >= 0 ? "+" : ""}${f.pct.toFixed(1)}%  ${f.sigma.toFixed(1)} sigma`,
       );
     }
+    log.info(`\nINCIDENT WINDOWS BELOW THE PLATFORM NUMBER (${segments.length})`, {
+      "scan.segment_windows": segments.length,
+    });
+    for (const w of segments.slice(0, 12)) {
+      const span = w.from === w.to ? w.from : `${w.from}..${w.to}`;
+      log.info(
+        `  ${span.padEnd(24)} ${w.metric.padEnd(9)} ${w.lead.dimension}='${w.lead.value}' ` +
+          `${w.lead.worstPct >= 0 ? "+" : ""}${w.lead.worstPct.toFixed(0)}%  ` +
+          `(+${w.correlatedSegments - 1} correlated)`,
+      );
+    }
+    if (segments.length > 12) log.info(`  ... and ${segments.length - 12} more`);
     log.info("");
   }
 }

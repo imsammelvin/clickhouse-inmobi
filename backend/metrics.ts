@@ -13,6 +13,20 @@ export type MetricKind = "ratio" | "absolute";
 export interface MetricDef {
   name: string;
   kind: MetricKind;
+  /**
+   * Minimum numerator before a ratio is trusted at all.
+   *
+   * A request-count floor is the wrong gate for a rate. CTR sits at ~0.011, so a segment with 200
+   * requests/day has under two clicks — one extra click reads as +60%, and the first segment scan
+   * duly reported `ctr +1312%` on an advertiser with 403 requests. The binding constraint is how
+   * many events landed in the numerator, not how much traffic passed through.
+   *
+   * 30 is the usual rule-of-thumb floor for treating a count as approximately normal; below it the
+   * standard error is a larger number than most anomalies we care about.
+   */
+  minNumerator?: number;
+  /** Minimum denominator, for ratios whose numerator is money rather than a count. */
+  minDenominator?: number;
   /** SQL numerator and denominator. For absolutes the denominator is `1` and unused. */
   numerator: string;
   denominator: string;
@@ -49,6 +63,7 @@ export const METRICS: Record<string, MetricDef> = {
   fill_rate: {
     name: "fill_rate",
     kind: "ratio",
+    minNumerator: 50,
     numerator: "sum(is_filled)",
     denominator: "count()",
     scale: 1,
@@ -57,6 +72,7 @@ export const METRICS: Record<string, MetricDef> = {
   render_rate: {
     name: "render_rate",
     kind: "ratio",
+    minNumerator: 50,
     numerator: "sum(is_impression)",
     denominator: "sum(is_filled)",
     scale: 1,
@@ -65,6 +81,7 @@ export const METRICS: Record<string, MetricDef> = {
   ctr: {
     name: "ctr",
     kind: "ratio",
+    minNumerator: 30,
     numerator: "sum(is_click)",
     denominator: "sum(is_impression)",
     scale: 1,
@@ -73,6 +90,8 @@ export const METRICS: Record<string, MetricDef> = {
   ecpm: {
     name: "ecpm",
     kind: "ratio",
+    // Revenue is continuous, so the count that matters is the impressions it is spread over.
+    minDenominator: 500,
     numerator: "sum(revenue)",
     denominator: "sum(is_impression)",
     scale: 1000,
@@ -81,6 +100,7 @@ export const METRICS: Record<string, MetricDef> = {
   rpr: {
     name: "rpr",
     kind: "ratio",
+    minDenominator: 500,
     numerator: "sum(revenue)",
     denominator: "count()",
     scale: 1,
