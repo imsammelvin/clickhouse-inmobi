@@ -20,10 +20,13 @@
     "ch:setup": "bun run ch:schema && bun run ch:load && bun run ch:verify",
     "typecheck": "tsc --noEmit",
     "build": "bun build api/server.ts --outdir dist --target=node",
-    "langfuse:trace": "bun run backend/langfuse/trace-stub.ts"
+    "langfuse:trace": "bun run backend/langfuse/trace-stub.ts",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "prettier": "^3.9.6"
   },
   "peerDependencies": {
     "typescript": "^5"
