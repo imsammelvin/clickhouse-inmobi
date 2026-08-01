@@ -5,7 +5,6 @@
  * input produces the same investigation every time, and a model choosing the next step destroys
  * that property. The LLM's only job is downstream: narrating the struct this returns.
  */
-import { randomUUID } from "node:crypto";
 import { Ledger } from "./ledger";
 import { ensureDatasetBounds } from "./baseline";
 import { METRICS } from "./metrics";
@@ -68,6 +67,10 @@ export async function investigate(opts: InvestigateOptions): Promise<Investigati
     },
     async (span) => {
       const inv = await investigateInner(opts);
+      // `traceId` must be THIS span's actual OTel trace id, not an unrelated identifier -- it is
+      // what a caller (API response, CLI output, LibreChat) pastes into Langfuse/ClickStack to open
+      // the trace. A random UUID here would satisfy the type but match nothing when searched.
+      inv.traceId = span.spanContext().traceId;
       span.setAttributes({
         "app.trace_id": inv.traceId,
         "app.channel": inv.primaryChannel,
@@ -83,7 +86,9 @@ export async function investigate(opts: InvestigateOptions): Promise<Investigati
 async function investigateInner(opts: InvestigateOptions): Promise<Investigation> {
   const { metric, from, to } = opts;
   const ledger = opts.ledger ?? new Ledger();
-  const traceId = randomUUID();
+  // Overwritten by investigate() above with the real OTel trace id once the root span exists --
+  // this function has no span of its own to read it from.
+  const traceId = "";
   // Same reason as scanAll: bounds feed WHERE clauses downstream.
   await ensureDatasetBounds((sql) => ledger.run(sql));
   const findings: Finding[] = [];
