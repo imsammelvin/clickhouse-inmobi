@@ -101,7 +101,19 @@ export interface Investigation {
 export interface Mask {
   sql: string;
   description: string;
-  dims?: readonly string[];
+  /**
+   * Every dimension this mask constrains. REQUIRED, and that is the whole point.
+   *
+   * `planRollup` chooses a rollup key from the dimensions a query mentions, so a mask that does not
+   * declare its own gets planned as unmasked: the filter then references a column the rollup
+   * projection does not contain. Optional (`dims?`) let two sites ship without it — one in
+   * orchestrate's confirm stage, one in mcp/tools.ts's explain_revenue — and the second was found only
+   * by making this field required and watching the compiler point at it.
+   *
+   * Required converts a silent-or-loud runtime hazard into a compile error at every construction site,
+   * which is the correct trade for a field whose absence produces a wrong number.
+   */
+  dims: readonly string[];
 }
 
 export const NO_MASK: Mask = { sql: "1", description: "no exclusions", dims: [] };

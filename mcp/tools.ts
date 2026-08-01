@@ -575,7 +575,13 @@ const explainRevenue: ToolDef = {
       ledger,
       window.from,
       window.to,
-      scope.sql === "1" ? undefined : { sql: scope.sql, description: scope.description },
+            // `dims` is not optional in spirit even where the type once allowed it: decompose passes it to
+      // planRollup, and a mask whose dimensions are not declared gets planned as UNMASKED — the
+      // filter then references a column the rollup projection does not have. This tool was the fifth
+      // Mask construction site and the only one nobody had found, because omitting the field compiled.
+      scope.sql === "1"
+        ? undefined
+        : { sql: scope.sql, description: scope.description, dims: Object.keys(scope.filters) },
     );
     return {
       summary: `driver ${dec.driver?.name ?? "none"}, ${dec.revenueDelta.toFixed(2)} USD/day`,
