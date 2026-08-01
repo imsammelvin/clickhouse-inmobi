@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Mission Control — Ad-Ops Root-Cause Analyst</title>
+<style>
+  :root {
+    --bg: #0b0d12;
+    --panel: #12151c;
+    --border: #232733;
+    --text: #e6e8ee;
+    --muted: #8b93a7;
+    --accent: #5b8cff;
+    --good: #3ecf8e;
+    --warn: #e8a33d;
+    --bad: #e85d5d;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f4f5f8; --panel: #ffffff; --border: #e1e4ea; --text: #14161c; --muted: #5b6272;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0b0d12; --panel: #12151c; --border: #232733; --text: #e6e8ee; --muted: #8b93a7;
+  }
+  :root[data-theme="light"] {
+    --bg: #f4f5f8; --panel: #ffffff; --border: #e1e4ea; --text: #14161c; --muted: #5b6272;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    display: flex; overflow: hidden;
+  }
+  nav {
+    width: 210px; flex-shrink: 0; border-right: 1px solid var(--border);
+    padding: 16px 10px; background: var(--panel);
+  }
+  nav .brand { font-weight: 700; font-size: 15px; padding: 4px 10px 16px; color: var(--text); }
+  nav .brand span { color: var(--accent); }
+  nav button {
+    display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+    background: none; border: none; color: var(--muted); padding: 10px 10px; border-radius: 8px;
+    font-size: 13.5px; cursor: pointer; margin-bottom: 2px;
+  }
+  nav button:hover { background: rgba(255,255,255,0.05); color: var(--text); }
+  nav button.active { background: var(--accent); color: white; }
+  main { flex: 1; overflow: auto; position: relative; }
+  .view { display: none; height: 100%; }
+  .view.active { display: block; }
+  .view iframe { width: 100%; height: 100%; border: none; }
+  .pad { padding: 24px 28px; max-width: 1100px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px 18px; margin-bottom: 16px;
+  }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 0 0 14px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: 11.5px; text-transform: uppercase; }
+  .bar-row { display: grid; grid-template-columns: 170px 1fr 90px; gap: 10px; align-items: center; margin: 8px 0; }
+  .bar-track { background: rgba(128,128,128,0.15); border-radius: 5px; height: 16px; overflow: hidden; display: flex; }
+  .bar-fill { height: 100%; border-radius: 5px 0 0 5px; }
+  .bar-fill.raw { background: var(--bad); }
+  .bar-fill.rollup { background: var(--good); }
+  .label { color: var(--muted); font-size: 12.5px; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+  .pill.good { background: rgba(62,207,142,0.15); color: var(--good); }
+  .pill.warn { background: rgba(232,163,61,0.15); color: var(--warn); }
+  .pill.bad { background: rgba(232,93,93,0.15); color: var(--bad); }
+  .loading, .err { color: var(--muted); padding: 20px 0; font-size: 13px; }
+  .err { color: var(--bad); }
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 4px; }
+  .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .stat .n { font-size: 22px; font-weight: 700; }
+  .stat .l { color: var(--muted); font-size: 12px; margin-top: 2px; }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="brand">Mission <span>Control</span></div>
+  <button data-view="chat" class="active">💬 Chat</button>
+  <button data-view="anomalies">🚨 Anomalies</button>
+  <button data-view="rollup">📦 Rollup vs Raw</button>
+  <button data-view="llm">🧠 LLM Cost</button>
+  <button data-view="health">💓 System Health</button>
+</nav>
+
+<main>
+  <div class="view active" id="view-chat">
+    <iframe id="chat-frame" title="LibreChat"></iframe>
+  </div>
+
+  <div class="view" id="view-anomalies">
+    <div class="pad">
+      <h1>Anomalies</h1>
+      <div class="sub">Live sweep from the investigation engine — what it actually found, not a mock.</div>
+      <div id="anomalies-body" class="loading">Loading…</div>
+    </div>
+  </div>
+
+  <div class="view" id="view-rollup">
+    <div class="pad">
+      <h1>Rollup vs Raw</h1>
+      <div class="sub">Same tool calls, twice: rollup forced on vs forced off. Measured from <code>system.query_log</code>.</div>
+      <div id="rollup-body" class="loading">Loading…</div>
+    </div>
+  </div>
+
+  <div class="view" id="view-llm">
+    <div class="pad">
+      <h1>LLM Cost</h1>
+      <div class="sub">Last 24h of real generations, pulled from Langfuse server-side.</div>
+      <div id="llm-body" class="loading">Loading…</div>
+    </div>
+  </div>
+
+  <div class="view" id="view-health">
+    <div class="pad">
+      <h1>System Health</h1>
+      <div class="sub">Stage latency &amp; error rate, last 24h, from ClickStack's own trace store. "Errors" here
+        includes deliberate validation refusals (unknown metric, invalid dimension, out-of-range window) —
+        those are the engine correctly rejecting a bad request, not a failure. A high count on
+        <code>get_metric</code>/<code>rank_segments</code> is normal eval-suite traffic, not a red flag.</div>
+      <div id="health-body" class="loading">Loading…</div>
+    </div>
+  </div>
+</main>
+
+<script>
+const $ = (sel, root = document) => root.querySelector(sel);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmtNum = (n) => Number(n).toLocaleString(undefined, { maximumFractionDigits: 1 });
+
+// ---- nav ----
+const views = ["chat", "anomalies", "rollup", "llm", "health"];
+const loaded = new Set();
+document.querySelectorAll("nav button").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const v = btn.dataset.view;
+    document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b === btn));
+    views.forEach((name) => $("#view-" + name).classList.toggle("active", name === v));
+    if (!loaded.has(v)) { loaded.add(v); loadView(v); }
+  });
+});
+
+async function loadView(v) {
+  if (v === "chat") return loadChat();
+  if (v === "anomalies") return loadAnomalies();
+  if (v === "rollup") return loadRollup();
+  if (v === "llm") return loadLlm();
+  if (v === "health") return loadHealth();
+}
+
+async function getJson(url) {
+  const res = await fetch(url);
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.error || ("HTTP " + res.status));
+  return body;
+}
+
+// ---- Chat ----
+async function loadChat() {
+  try {
+    const cfg = await getJson("/api/config");
+    $("#chat-frame").src = cfg.libreChatUrl;
+  } catch (e) {
+    $("#chat-frame").outerHTML = '<div class="pad err">Could not reach LibreChat: ' + esc(e.message) + "</div>";
+  }
+}
+// Chat is the default tab -- load it immediately, not on first click.
+loaded.add("chat"); loadChat();
+
+// ---- Anomalies ----
+async function loadAnomalies() {
+  const el = $("#anomalies-body");
+  try {
+    const data = await getJson("/api/anomalies");
+    const w = data.windows || [];
+    if (!w.length) { el.innerHTML = '<div class="card">No anomalies in the current sweep window.</div>'; return; }
+    el.innerHTML =
+      '<div class="stat-grid">' +
+        '<div class="stat"><div class="n">' + w.length + '</div><div class="l">incident window(s)</div></div>' +
+        '<div class="stat"><div class="n">' + new Set(w.map(x => x.metric)).size + '</div><div class="l">metric(s) affected</div></div>' +
+      '</div>' +
+      '<div class="card"><h2>Detected windows</h2><table><thead><tr>' +
+      "<th>Metric</th><th>Window</th><th>Lead segment</th><th class=\"num\">Move</th><th class=\"num\">Sigma</th><th class=\"num\">Req/day</th><th class=\"num\">Correlated</th>" +
+      "</tr></thead><tbody>" +
+      w.map((x) =>
+        "<tr><td>" + esc(x.metric) + "</td><td>" + esc(x.from) + " → " + esc(x.to) + "</td>" +
+        "<td>" + esc(x.leadSegment.dimension) + " = " + esc(x.leadSegment.value) + "</td>" +
+        '<td class="num">' + (x.worstPct > 0 ? "+" : "") + x.worstPct + "%</td>" +
+        '<td class="num">' + x.worstSigma + "σ</td>" +
+        '<td class="num">' + fmtNum(x.requestsPerDay) + "</td>" +
+        '<td class="num">' + x.correlatedSegments + "</td></tr>"
+      ).join("") +
+      "</tbody></table></div>";
+  } catch (e) {
+    el.outerHTML = '<div class="err">Could not load anomalies: ' + esc(e.message) + "</div>";
+  }
+}
+
+// ---- Rollup vs Raw ----
+async function loadRollup() {
+  const el = $("#rollup-body");
+  try {
+    const data = await getJson("/api/rollup-comparison");
+    const t = data.totals;
+    const maxRows = Math.max(t.raw.readRows, t.rollup.readRows) || 1;
+    const maxMs = Math.max(t.raw.serverMs, t.rollup.serverMs) || 1;
+    const rowsLess = t.rollup.readRows === 0 ? "∞" : (t.raw.readRows / t.rollup.readRows).toFixed(1) + "x";
+    const msLess = t.rollup.serverMs === 0 ? "∞" : (t.raw.serverMs / t.rollup.serverMs).toFixed(1) + "x";
+
+    const bar = (label, rawV, rollV, max, unit) =>
+      '<div class="bar-row"><div class="label">' + label + " (raw)</div>" +
+      '<div class="bar-track"><div class="bar-fill raw" style="width:' + (100 * rawV / max) + '%"></div></div>' +
+      '<div class="num">' + fmtNum(rawV) + unit + "</div></div>" +
+      '<div class="bar-row"><div class="label">' + label + " (rollup)</div>" +
+      '<div class="bar-track"><div class="bar-fill rollup" style="width:' + (100 * rollV / max) + '%"></div></div>' +
+      '<div class="num">' + fmtNum(rollV) + unit + "</div></div>";
+
+    el.innerHTML =
+      '<div class="stat-grid">' +
+        '<div class="stat"><div class="n">' + rowsLess + '</div><div class="l">fewer rows read</div></div>' +
+        '<div class="stat"><div class="n">' + msLess + '</div><div class="l">faster server time</div></div>' +
+        '<div class="stat"><div class="n">' + data.calls.length + '</div><div class="l">tool calls measured</div></div>' +
+      '</div>' +
+      '<div class="card"><h2>Totals across ' + data.calls.length + ' representative calls</h2>' +
+      bar("rows read", t.raw.readRows, t.rollup.readRows, maxRows, "") +
+      bar("server ms", t.raw.serverMs, t.rollup.serverMs, maxMs, " ms") +
+      "</div>" +
+      '<div class="card"><h2>Per-call breakdown</h2><table><thead><tr>' +
+      "<th>Call</th><th class=\"num\">Rows (raw)</th><th class=\"num\">Rows (rollup)</th><th class=\"num\">Less</th><th class=\"num\">Server ms</th>" +
+      "</tr></thead><tbody>" +
+      data.calls.map((c) => {
+        const less = c.rollup.readRows === 0 ? (c.raw.readRows === 0 ? "—" : "∞") : (c.raw.readRows / c.rollup.readRows).toFixed(1) + "x";
+        return "<tr><td>" + esc(c.label) + "</td>" +
+          '<td class="num">' + fmtNum(c.raw.readRows) + "</td>" +
+          '<td class="num">' + fmtNum(c.rollup.readRows) + "</td>" +
+          '<td class="num">' + less + "</td>" +
+          '<td class="num">' + c.raw.serverMs + " → " + c.rollup.serverMs + "</td></tr>";
+      }).join("") +
+      "</tbody></table></div>" +
+      '<div class="sub">Measured ' + new Date(data.measuredAt).toLocaleString() + "</div>";
+  } catch (e) {
+    el.outerHTML = '<div class="err">Could not load rollup comparison: ' + esc(e.message) + "</div>";
+  }
+}
+
+// ---- LLM Cost ----
+async function loadLlm() {
+  const el = $("#llm-body");
+  try {
+    const data = await getJson("/api/llm-cost");
+    const rows = data.rows || [];
+    const totalCost = rows.reduce((a, r) => a + Number(r.sum_totalCost || 0), 0);
+    const totalTokens = rows.reduce((a, r) => a + Number(r.sum_totalTokens || 0), 0);
+    const totalCalls = rows.reduce((a, r) => a + Number(r.count_count || 0), 0);
+    const maxCost = Math.max(...rows.map((r) => Number(r.sum_totalCost || 0)), 0.0001);
+
+    el.innerHTML =
+      '<div class="stat-grid">' +
+        '<div class="stat"><div class="n">$' + totalCost.toFixed(3) + '</div><div class="l">total cost, 24h</div></div>' +
+        '<div class="stat"><div class="n">' + fmtNum(totalTokens) + '</div><div class="l">total tokens</div></div>' +
+        '<div class="stat"><div class="n">' + totalCalls + '</div><div class="l">generations</div></div>' +
+      '</div>' +
+      '<div class="card"><h2>Cost by model</h2>' +
+      rows.map((r) => {
+        const model = r.providedModelName || "(unknown)";
+        const cost = Number(r.sum_totalCost || 0);
+        return '<div class="bar-row"><div class="label">' + esc(model) + '</div>' +
+          '<div class="bar-track"><div class="bar-fill rollup" style="width:' + (100 * cost / maxCost) + '%"></div></div>' +
+          '<div class="num">$' + cost.toFixed(4) + "</div></div>";
+      }).join("") +
+      "</div>" +
+      '<div class="sub">Window: last ' + data.windowHours + "h, measured " + new Date(data.measuredAt).toLocaleString() + "</div>";
+  } catch (e) {
+    el.outerHTML = '<div class="err">Could not load LLM cost: ' + esc(e.message) + "</div>";
+  }
+}
+
+// ---- System Health ----
+async function loadHealth() {
+  const el = $("#health-body");
+  try {
+    const data = await getJson("/api/system-health");
+    const stages = data.stages || [];
+    if (!stages.length) { el.innerHTML = '<div class="card">No trace data in the last ' + data.windowHours + "h.</div>"; return; }
+    el.innerHTML =
+      '<div class="card"><h2>Stage latency (last ' + data.windowHours + "h)</h2><table><thead><tr>" +
+      "<th>Span</th><th class=\"num\">Calls</th><th class=\"num\">p50 ms</th><th class=\"num\">p95 ms</th><th class=\"num\">Errors*</th>" +
+      "</tr></thead><tbody>" +
+      stages.map((s) => {
+        const pill = s.errors === 0 ? '<span class="pill good">0</span>'
+          : s.errors / s.calls > 0.05 ? '<span class="pill bad">' + s.errors + '</span>'
+          : '<span class="pill warn">' + s.errors + '</span>';
+        return "<tr><td>" + esc(s.spanName) + "</td>" +
+          '<td class="num">' + s.calls + "</td>" +
+          '<td class="num">' + s.p50Ms + "</td>" +
+          '<td class="num">' + s.p95Ms + "</td>" +
+          '<td class="num">' + pill + "</td></tr>";
+      }).join("") +
+      "</tbody></table></div>" +
+      '<div class="sub">* Includes deliberate validation refusals (bad metric/dimension/window), not just crashes — high counts on ' +
+      '<code>get_metric</code>/<code>rank_segments</code> are expected eval-suite traffic.</div>' +
+      '<div class="sub">Measured ' + new Date(data.measuredAt).toLocaleString() + "</div>";
+  } catch (e) {
+    el.outerHTML = '<div class="err">Could not load system health: ' + esc(e.message) + "</div>";
+  }
+}
+</script>
+</body>
+</html>

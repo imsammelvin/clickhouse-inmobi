@@ -90,6 +90,7 @@ jobs:
 
           pm2 delete inmobi-api 2>/dev/null || true
           pm2 delete inmobi-mcp 2>/dev/null || true
+          pm2 delete inmobi-dashboard 2>/dev/null || true
 
           pm2 start api/server.ts \
             --name inmobi-api \
@@ -99,6 +100,13 @@ jobs:
             --name inmobi-mcp \
             --interpreter "$(command -v bun)" \
             -- --transport http --port 3333
+
+          # DASHBOARD_PORT / LIBRECHAT_URL are read from THIS SERVER's own .env (never touched by
+          # CI, same as the ClickHouse/Langfuse creds) -- nothing environment-specific belongs in
+          # this committed file. Bun loads .env automatically; no extra wiring needed.
+          pm2 start dashboard/server.ts \
+            --name inmobi-dashboard \
+            --interpreter "$(command -v bun)"
 
           pm2 save --force
 
