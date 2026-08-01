@@ -3,7 +3,9 @@
 > **Status: DRAFTED, needs a fast all-four confirm at kickoff.** Drafted solo by `loges` once the
 > InMobi data package landed, then amended by `sam` with the business framing (§ 2), the
 > schema corrections forced by what actually shipped in `bec2a35` (§ 7), and decision rows D-005…
-> D-016. **This is a sanity check, not a rewrite.** Flag disagreements in `journal/BROADCAST.md` or
+> D-018. **D-018 is the one to read first — it fixes whose product this is (InMobi's own marketplace
+> view, not an advertiser tool) and reframes the § 5 second act accordingly.**
+> **This is a sanity check, not a rewrite.** Flag disagreements in `journal/BROADCAST.md` or
 > the decision log (§ 11); don't silently edit LOCKED sections (§ 1, § 4, § 7, § 8). Silence past
 > M0 = agreement.
 
@@ -25,10 +27,18 @@ every number computed from ClickHouse rather than guessed by a model.
 
 ### The business case
 
-**Who feels it:** the yield/revenue manager at an ad platform who owns a revenue number and gets
-asked "why was yesterday down 12%?" at standup every morning. Secondarily the publisher monetization
-lead ("my fill rate fell — is it you or me?") and the account manager ("should this advertiser
-re-up?").
+**Who feels it:** the yield/revenue manager **at InMobi** who owns the marketplace revenue number and
+gets asked "why was yesterday down 12%?" at standup every morning. Secondarily InMobi's publisher
+ops lead ("which of our supply partners' fill rate broke?") and InMobi's demand desk ("which
+advertiser's spend fell away, and who can backfill that inventory?").
+
+> **Every persona is inside InMobi.** This is the platform's own marketplace view, not a tool we
+> hand to an advertiser or a publisher (D-018). The dataset settles it: `fill_rate` is a marketplace
+> metric, `revenue` is money the platform *earns* on impressions, `publisher_tier` is InMobi's own
+> classification of its supply, and `advertiser_id` is a 500-value slicing dimension — an advertiser
+> would only ever see their own row. Buy-side questions ("should I spend on this again?") are
+> **out of scope**; the platform-side version of that question is demand durability and backfill
+> capacity, below.
 
 **The workflow that is slow today:** an alert fires. A human opens a dashboard and starts slicing —
 by region, then by OS, then by app category, then by advertiser — comparing each slice to a mental
@@ -174,10 +184,19 @@ Written first; we build backwards from it. Judges see the demo, not the repo.
   submission
 - Local seeded ClickHouse as the demo fallback path
 
-**Second act, if M3 lands early:**
-- Campaign repeatability verdict — "should I spend on this again?" Realized eCPM/CTR vs. vertical
-  benchmark on like-for-like inventory, spend-response curve (saturation point), event dependence,
-  fatigue trend. Returns `repeatable | event-dependent | saturated | declining` with a spend ceiling.
+**Second act, if M3 lands early — demand durability and backfill (platform-side):**
+- **Concentration:** what share of a segment's revenue rests on one advertiser, i.e. our single
+  points of failure. Computed today in `classify`, not yet surfaced.
+- **Durability:** is a segment's revenue recurring or event-dependent? Revenue that only appeared
+  inside an exogenous-event window is not run-rate and must not be forecast as such.
+- **Backfill capacity:** when demand exits a segment, which *other* advertisers already bid on that
+  same inventory, at what eCPM, and with how much unused headroom? This is what turns a diagnosis
+  into a recovery plan — *"−$51k/day exposure; adv_0107 and adv_0455 bid the same inventory at
+  within 8% of the lost eCPM and are taking 61% of available volume."*
+
+> Reframed from an earlier "campaign repeatability / should I spend on this again?" draft, which was
+> a **buy-side** question we cannot answer and should not ask (D-018). Same machinery, aimed at the
+> yield manager's decision instead of the advertiser's.
 
 ### Out of scope (we will deliberately NOT build this)
 
@@ -439,6 +458,7 @@ Append-only. Newest at the bottom. One line per decision. Never edit or delete s
 | D-015 | 2026-08-01 | Stack is **TypeScript/Bun**, not Python. All lane contracts are `.ts` | Settled by what landed on `main` first. Re-litigating it costs more than either option is worth. | samarth (shipped), sam (conceded) |
 | D-016 | 2026-08-01 | **`ad_events_enriched` is the only query surface** for Lanes A/C/D. Nobody queries `ad_events` directly | One place where dimension enrichment can be wrong, instead of four. Makes every drill-down a plain GROUP BY. | samarth (shipped) |
 | D-017 | 2026-08-01 | **Localization must residualize, not just rank.** Contribution ranking (T-018) is necessary but not sufficient; add iterative deflation (T-040) before anything is reported as a cause | Measured on the real Jun 23–25 fill-rate incident: a plain ranked sweep returns **21 segments** outside band (EU −5.50pp, tier_1 −3.89pp, finance −3.76pp, banner −3.65pp…). Excluding the single true cause — `os_version = 'Android 15'`, fill rate 0.7837 → 0.4333, −35.04pp on 9.6% of traffic — every one of those 21 collapses to within **±0.24pp** (EU → −0.07pp, tier_1 → +0.01pp). They were dilution artifacts, not causes. Reporting them is exactly the "hallucinated segment" failure the rubric punishes, and no amount of better narration fixes it — it is an algorithm problem. | sam (proposed) |
+| D-018 | 2026-08-01 | **The product is InMobi's own marketplace view. Every persona is inside InMobi; buy-side questions are out of scope.** Supersedes the "campaign repeatability / should I spend again" second act, which is reframed to demand durability + backfill capacity. | The dataset is unambiguously the platform's: `fill_rate` is a marketplace metric an advertiser does not have, `revenue` is money *earned* on impressions (an advertiser's *cost*), `publisher_tier` is InMobi's own supply classification, and `advertiser_id` is a 500-value slicing dimension no advertiser could see. Volume settles it too — the median advertiser runs **116 impressions and 1.3 clicks a day**, and 355 of 500 are under 200 impressions/day, so per-advertiser detection would be pure noise. Decisively: we are scored against planted anomalies that are all marketplace-level (Android 15 fill collapse, global volume drop, finance eCPM); built buy-side we would miss every one. | sam (proposed) |
 
 > Rows D-005…D-012 are **proposed** and were added after the initial draft. Ratify or contest at M0
 > kickoff — change `(proposed)` to the ratifying handle, or open a BROADCAST entry arguing the other
@@ -460,7 +480,8 @@ Append-only. Newest at the bottom. One line per decision. Never edit or delete s
 | R-008 | 5-week window is too thin for reliable baselines | High | Medium — false alarms or missed detections | Trailing same-weekday up to 4 back; suppress alerting on the first 14 days; report σ so weak signals are visibly weak (D-012) | Lane A |
 | R-009 | Advertiser-sliced fill rate computed on empty `advertiser_id` | Medium | High — a plausible-looking, definitionally wrong number | § 7 fact #1; unfilled-demand analysis restricted to supply-side dimensions in code, not by convention | Lane A |
 | R-010 | ClickHouse Cloud credits exhausted, or unreachable mid-demo | Low | **Fatal** to the demo | Pause services when not actively querying (event handbook, $400/team ceiling); local seeded ClickHouse as the demo fallback from M1 | dev-2 |
-| R-011 | We imply ROAS/incrementality the data cannot support | Medium | High — same class as R-001 | Repeatability output states its own limits inline: efficiency and repeatability, not ROAS. No conversion events exist. | Lane A |
+| R-011 | We imply advertiser outcomes (ROAS, incrementality, LTV) the data cannot support | Medium | High — same class as R-001 | Out of scope entirely under D-018: we report marketplace yield, never buy-side performance. No conversion, install or `user_id` data exists, so any such claim is fabrication. | Lane A |
+| R-016 | Buy-side framing creeps back into the narration or the deck | Medium | Medium — a judge who reads the dataset will spot the mismatch immediately | D-018 fixes the lens; § 2 states every persona is inside InMobi. Any output phrased as advice to an advertiser is a bug. | Biz |
 | R-012 | LibreChat customization takes longer than expected | Medium | Medium — only frontend surface, no fallback UI | Start LibreChat wiring early (not blocked on M3); keep the § 8 contract stable so dev-4 can mock the backend response | dev-4 |
 | R-013 | Two lanes define "campaign" or "baseline" differently | Medium | Medium — inconsistent numbers across surfaces reads as untrustworthy | D-011 and D-012 fix both once, here; detectors import shared types rather than redefining | Lane A |
 | R-014 | Scope creep into a polished frontend | High | Medium — eats M3 | Explicitly out of scope (§ 5, D-003). No UI work beyond LibreChat. | all |
