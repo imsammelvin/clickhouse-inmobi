@@ -14,6 +14,7 @@
 import type { Ledger } from "../ledger";
 import { baselineDates, datesBetween, median, sqlDateList } from "../baseline";
 import { type Mask, NO_MASK } from "../types";
+import { planRollup, RAW_SOURCE, sourceLabel } from "../../clickhouse/rollup";
 import { withSpan } from "../../utils/telemetryUtils";
 
 export interface Factor {
@@ -36,6 +37,8 @@ export interface Decomposition {
   revenueDelta: number;
   residual: number;
   driver: Factor | null;
+  /** `rollup:<grain>:<dim>` or `raw` -- which surface answered. */
+  servedFrom: string;
 }
 
 interface FunnelRow {
@@ -78,15 +81,19 @@ const centre = (series: Totals[]): Totals => ({
  * Same bug, third stage. Totals stay summed *within* each day, so ratios remain sum/sum as the
  * glossary requires -- the median is only ever taken across days.
  */
-const funnelSql = (where: string, mask: Mask): string =>
+const funnelSql = (
+  where: string,
+  mask: Mask,
+  src: { from: string; expr: (e: string) => string },
+): string =>
   `
 SELECT
-  toString(event_date) AS d,
-  count()              AS reqs,
-  sum(is_filled)       AS fills,
-  sum(is_impression)   AS imps,
-  sum(revenue)         AS rev
-FROM ad_events_enriched
+  toString(event_date)     AS d,
+  ${src.expr("count()")}          AS reqs,
+  ${src.expr("sum(is_filled)")}     AS fills,
+  ${src.expr("sum(is_impression)")} AS imps,
+  ${src.expr("sum(revenue)")}       AS rev
+FROM ${src.from}
 WHERE (${mask.sql}) AND ${where}
 GROUP BY d
 ORDER BY d`.trim();
@@ -111,6 +118,7 @@ export async function decompose(
         "app.decompose.driver": result.driver?.name ?? "none",
         "app.decompose.revenue_delta": Number(result.revenueDelta.toFixed(2)),
         "app.decompose.factors": result.factors.length,
+        "app.decompose.served_from": result.servedFrom,
       });
       return result;
     },
@@ -125,8 +133,18 @@ async function decomposeInner(
 ): Promise<Decomposition> {
   const base = baselineDates(from, to);
 
-  const incSql = funnelSql(`event_date BETWEEN '${from}' AND '${to}'`, mask);
-  const baseSql = funnelSql(`event_date IN (${sqlDateList(base)})`, mask);
+  // Dimensionless (grouped only by day), so the plan's whole budget is whatever the mask already
+  // spent -- an unmasked call gets the cheapest carrier dimension for free (see planRollup).
+  const plan = planRollup({
+    dims: mask.dims ?? [],
+    grain: "daily",
+    expressions: ["count()", "sum(is_filled)", "sum(is_impression)", "sum(revenue)"],
+  });
+  const src = plan ?? RAW_SOURCE;
+  const servedFrom = sourceLabel(plan);
+
+  const incSql = funnelSql(`event_date BETWEEN '${from}' AND '${to}'`, mask, src);
+  const baseSql = funnelSql(`event_date IN (${sqlDateList(base)})`, mask, src);
 
   const incRows = await ledger.run<FunnelRow>(incSql);
   const basRows = await ledger.run<FunnelRow>(baseSql);
@@ -259,5 +277,6 @@ async function decomposeInner(
     revenueDelta,
     residual: revenueDelta - explained,
     driver,
+    servedFrom,
   };
 }
