@@ -1,10 +1,12 @@
 /**
  * Shared ClickHouse client factory. Connection settings live in constants/.
  */
+import type { Readable } from "node:stream";
 import {
   createClient,
   type ClickHouseClient,
   type ClickHouseSettings,
+  type InsertValues,
 } from "@clickhouse/client";
 import {
   DEFAULT_DATABASE,
@@ -12,6 +14,7 @@ import {
   REQUEST_TIMEOUT_MS,
 } from "../constants";
 import { DataFormat, EnvVar } from "../enums";
+import { withSpan } from "../observability/otel";
 
 function required(name: EnvVar): string {
   const value = process.env[name];
@@ -50,27 +53,68 @@ export function makeClient(): ClickHouseClient {
   });
 }
 
+/** First keyword of a query, e.g. "SELECT", "INSERT", "ALTER". */
+function operation(query: string): string {
+  return query.trim().split(/\s+/, 1)[0]!.toUpperCase();
+}
+
+/** db.* attributes shared by every span this client creates. */
+function dbAttributes(query: string): Record<string, string> {
+  return {
+    "db.system": "clickhouse",
+    "db.operation": operation(query),
+    "db.query.text": query.length > 500 ? `${query.slice(0, 500)}...` : query,
+    "db.collection.name": DATABASE,
+  };
+}
+
 /** Run a statement and discard the result. */
 export async function exec(
   client: ClickHouseClient,
   query: string,
   settings: ClickHouseSettings = {},
 ): Promise<void> {
-  await client.command({
-    query,
-    clickhouse_settings: { wait_end_of_query: 1, ...settings },
+  await withSpan("clickhouse.exec", dbAttributes(query), async () => {
+    await client.command({
+      query,
+      clickhouse_settings: { wait_end_of_query: 1, ...settings },
+    });
   });
 }
 
 /** Run a SELECT and return typed rows. */
-export async function select<T>(client: ClickHouseClient, query: string): Promise<T[]> {
-  const rs = await client.query({ query, format: DataFormat.JsonEachRow });
-  return (await rs.json()) as T[];
+export async function select<T>(
+  client: ClickHouseClient,
+  query: string,
+): Promise<T[]> {
+  return withSpan("clickhouse.select", dbAttributes(query), async () => {
+    const rs = await client.query({ query, format: DataFormat.JsonEachRow });
+    return (await rs.json()) as T[];
+  });
 }
 
 /** Run a SELECT expected to return exactly one row. */
-export async function selectOne<T>(client: ClickHouseClient, query: string): Promise<T> {
+export async function selectOne<T>(
+  client: ClickHouseClient,
+  query: string,
+): Promise<T> {
   const [row] = await select<T>(client, query);
   if (!row) throw new Error(`Query returned no rows:\n${query}`);
   return row;
+}
+
+/** Insert rows from a readable stream into `table`, traced as its own span. */
+export async function insert(
+  client: ClickHouseClient,
+  table: string,
+  values: InsertValues<Readable, unknown>,
+  format: DataFormat,
+): Promise<void> {
+  await withSpan(
+    "clickhouse.insert",
+    { ...dbAttributes(`INSERT INTO ${table}`), "db.collection.name": table },
+    async () => {
+      await client.insert({ table, values, format });
+    },
+  );
 }

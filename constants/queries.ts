@@ -144,6 +144,73 @@ export const revenueIdentity = `
                  * (sum(revenue) / sum(is_impression) * 1000) / 1000 AS rhs
     FROM ${Table.AdEvents}`;
 
+// ---------------------------------------------------------------------------
+// observability
+//
+// ClickStack writes the OTLP signals into otel_* tables in this same ClickHouse, so the pipeline
+// can be verified with plain SQL rather than by squinting at the UI.
+// ---------------------------------------------------------------------------
+
+/** Row count and freshness of each signal for one service. Zero rows anywhere = a broken pipeline. */
+export const signalCounts = (service: string): string => `
+  SELECT * FROM (
+    SELECT 'traces'  AS signal, toString(count()) AS rows, toString(max(Timestamp)) AS latest
+      FROM otel_traces  WHERE ServiceName = '${service}'
+     UNION ALL
+    SELECT 'logs',              toString(count()),         toString(max(Timestamp))
+      FROM otel_logs    WHERE ServiceName = '${service}'
+     UNION ALL
+    SELECT 'metrics.sum',       toString(count()),         toString(max(TimeUnix))
+      FROM otel_metrics_sum WHERE ServiceName = '${service}'
+     UNION ALL
+    SELECT 'metrics.histogram', toString(count()),         toString(max(TimeUnix))
+      FROM otel_metrics_histogram WHERE ServiceName = '${service}'
+  )
+   ORDER BY signal`;
+
+/**
+ * How many log records carry the trace they were emitted inside. This is the check that matters:
+ * logs without a TraceId still arrive, they are just no longer attached to the operation that
+ * produced them, which is the entire reason for running logs through OTel rather than stdout.
+ */
+export const logTraceCorrelation = (service: string): string => `
+  SELECT count()                            AS logs,
+         countIf(TraceId != '')             AS correlated,
+         uniqExactIf(TraceId, TraceId != '') AS traces
+    FROM otel_logs
+   WHERE ServiceName = '${service}'`;
+
+/**
+ * The span tree of the most recent trace, in start order. A flat list of roots here means context
+ * propagation is broken -- see the AsyncLocalStorage note in observability/otel.ts.
+ */
+export const latestTraceTree = (service: string): string => `
+  SELECT SpanName                        AS span,
+         if(ParentSpanId = '', 0, 1)     AS nested,
+         round(Duration / 1e6, 1)        AS ms
+    FROM otel_traces
+   WHERE ServiceName = '${service}'
+     AND TraceId = (
+           -- Prefer a multi-span trace: a single-span one (e.g. /health, which touches nothing)
+           -- would show the tree structure off badly even when propagation is fine.
+           SELECT TraceId FROM otel_traces
+            WHERE ServiceName = '${service}'
+            GROUP BY TraceId
+            ORDER BY count() > 1 DESC, max(Timestamp) DESC
+            LIMIT 1)
+   ORDER BY Timestamp`;
+
+/** Metric names this service has published, with their latest value. */
+export const publishedMetrics = (service: string): string => `
+  SELECT MetricName AS metric, toString(count()) AS points, toString(max(TimeUnix)) AS latest
+    FROM (
+      SELECT MetricName, TimeUnix FROM otel_metrics_sum       WHERE ServiceName = '${service}'
+      UNION ALL
+      SELECT MetricName, TimeUnix FROM otel_metrics_histogram WHERE ServiceName = '${service}'
+    )
+   GROUP BY metric
+   ORDER BY metric`;
+
 export const storageStats = (database: string): string => `
   SELECT table,
          sum(rows)                                        AS total_rows,

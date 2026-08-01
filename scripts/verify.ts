@@ -39,6 +39,14 @@ import {
   runScript,
   secondsSince,
 } from "../utils/common.utils";
+import {
+  initObservability,
+  lazyInstrument,
+  shutdownObservability,
+  withSpan,
+} from "../observability/otel";
+import { metrics } from "@opentelemetry/api";
+import { log } from "../observability/logger";
 
 // ---------------------------------------------------------------------------
 // assertions
@@ -46,9 +54,18 @@ import {
 
 let failures = 0;
 
+// Lazy: a counter created at module load binds to the no-op meter provider that exists before
+// initObservability() runs, and would export nothing. See lazyInstrument().
+const verifyChecks = lazyInstrument(() =>
+  metrics.getMeter("verify").createCounter("verify.checks", {
+    description: "Verification assertions, by outcome",
+  }),
+);
+
 function check(name: string, ok: boolean, detail: string): void {
   const status = ok ? CheckStatus.Pass : CheckStatus.Fail;
-  console.log(`  ${status}  ${name.padEnd(44)} ${detail}`);
+  verifyChecks().add(1, { "verify.outcome": ok ? "pass" : "fail" });
+  log.info(`  ${status}  ${name.padEnd(44)} ${detail}`);
   if (!ok) failures++;
 }
 
@@ -62,11 +79,18 @@ function checkClose(name: string, expected: number, actual: number): void {
   check(
     name,
     ok,
-    ok ? actual.toFixed(4) : `expected ${expected.toFixed(6)}, got ${actual.toFixed(6)}`,
+    ok
+      ? actual.toFixed(4)
+      : `expected ${expected.toFixed(6)}, got ${actual.toFixed(6)}`,
   );
 }
 
-function checkInRange(name: string, value: number, low: number, high: number): void {
+function checkInRange(
+  name: string,
+  value: number,
+  low: number,
+  high: number,
+): void {
   check(name, value > low && value < high, value.toFixed(4));
 }
 
@@ -75,10 +99,13 @@ function checkInRange(name: string, value: number, low: number, high: number): v
 // ---------------------------------------------------------------------------
 
 async function verifyDimensions(client: ClickHouseClient): Promise<void> {
-  console.log("== dimension tables ==");
+  log.info("== dimension tables ==");
 
   for (const { table, key, rows } of DIMENSION_EXPECTATIONS) {
-    const row = await selectOne<UniquenessRow>(client, Q.dimensionUniqueness(table, key));
+    const row = await selectOne<UniquenessRow>(
+      client,
+      Q.dimensionUniqueness(table, key),
+    );
     checkEqual(`${table} row count`, rows, row.n);
 
     // A duplicated key would make dictGet return an arbitrary one of the duplicates, silently
@@ -87,17 +114,22 @@ async function verifyDimensions(client: ClickHouseClient): Promise<void> {
     check(
       `${table} keys unique`,
       unique,
-      unique ? `${fmt(Number(row.distinct))} distinct` : `${row.n} rows, ${row.distinct} distinct`,
+      unique
+        ? `${fmt(Number(row.distinct))} distinct`
+        : `${row.n} rows, ${row.distinct} distinct`,
     );
   }
   console.log();
 }
 
 async function verifyTotals(client: ClickHouseClient): Promise<void> {
-  console.log("== fact totals: ClickHouse vs source Parquet ==");
+  log.info("== fact totals: ClickHouse vs source Parquet ==");
 
   const [source] = await duckdbJson<FunnelTotals>(Q.srcFunnelTotals(FACT_FILE));
-  const loaded = await selectOne<Record<keyof FunnelTotals, string>>(client, Q.funnelTotals);
+  const loaded = await selectOne<Record<keyof FunnelTotals, string>>(
+    client,
+    Q.funnelTotals,
+  );
 
   checkEqual("requests (count)", source!.rows, loaded.rows);
   checkEqual("fills", source!.fills, loaded.fills);
@@ -105,13 +137,21 @@ async function verifyTotals(client: ClickHouseClient): Promise<void> {
   checkEqual("clicks", source!.clicks, loaded.clicks);
   checkClose("revenue", Number(source!.revenue), Number(loaded.revenue));
   // DuckDB renders a fractional part; ClickHouse DateTime is second-granularity.
-  checkEqual("min event_time", source!.min_time.replace(/\.\d+$/, ""), loaded.min_time);
-  checkEqual("max event_time", source!.max_time.replace(/\.\d+$/, ""), loaded.max_time);
+  checkEqual(
+    "min event_time",
+    source!.min_time.replace(/\.\d+$/, ""),
+    loaded.min_time,
+  );
+  checkEqual(
+    "max event_time",
+    source!.max_time.replace(/\.\d+$/, ""),
+    loaded.max_time,
+  );
   console.log();
 }
 
 async function verifyPerDay(client: ClickHouseClient): Promise<void> {
-  console.log("== per-day reconciliation ==");
+  log.info("== per-day reconciliation ==");
 
   const source = await duckdbJson<DayAggregate>(Q.srcDailyTotals(FACT_FILE));
   const loaded = await select<DayAggregateRaw>(client, Q.dailyTotals);
@@ -124,18 +164,23 @@ async function verifyPerDay(client: ClickHouseClient): Promise<void> {
   for (const day of source) {
     const found = loadedByDay.get(day.d);
     if (!found || Number(found.rows) !== Number(day.rows)) badRows.push(day.d);
-    else if (!closeEnough(day.revenue, Number(found.revenue))) badRevenue.push(day.d);
+    else if (!closeEnough(day.revenue, Number(found.revenue)))
+      badRevenue.push(day.d);
   }
 
   check(
     "every day has matching row count",
     badRows.length === 0,
-    badRows.length === 0 ? `${source.length} days` : `mismatched: ${badRows.join(", ")}`,
+    badRows.length === 0
+      ? `${source.length} days`
+      : `mismatched: ${badRows.join(", ")}`,
   );
   check(
     "every day has matching revenue",
     badRevenue.length === 0,
-    badRevenue.length === 0 ? `${source.length} days` : `mismatched: ${badRevenue.join(", ")}`,
+    badRevenue.length === 0
+      ? `${source.length} days`
+      : `mismatched: ${badRevenue.join(", ")}`,
   );
 
   // Total rows must equal the sum of the per-day source counts. This catches a double-loaded
@@ -147,13 +192,17 @@ async function verifyPerDay(client: ClickHouseClient): Promise<void> {
 }
 
 async function verifyEnrichment(client: ClickHouseClient): Promise<void> {
-  console.log(`== ${View.AdEventsEnriched} (dictionary lookups) ==`);
+  log.info(`== ${View.AdEventsEnriched} (dictionary lookups) ==`);
 
   const gaps = await selectOne<EnrichmentGaps>(client, Q.enrichmentGaps);
 
   checkEqual("every event resolves an app", "0", gaps.no_app);
   checkEqual("every event resolves a geo/device", "0", gaps.no_geo);
-  checkEqual("every filled event resolves an advertiser", "0", gaps.no_adv_on_filled);
+  checkEqual(
+    "every filled event resolves an advertiser",
+    "0",
+    gaps.no_adv_on_filled,
+  );
   // Unfilled requests carry an empty advertiser_id by design (no ad was served), so these SHOULD
   // be unresolved. Asserting it keeps the two cases from being confused downstream.
   check(
@@ -165,19 +214,36 @@ async function verifyEnrichment(client: ClickHouseClient): Promise<void> {
 }
 
 async function verifyMetrics(client: ClickHouseClient): Promise<void> {
-  console.log("== glossary metrics ==");
+  log.info("== glossary metrics ==");
 
   const metrics = await selectOne<MetricSnapshot>(client, Q.glossaryMetrics);
   checkInRange("fill rate in (0,1)", metrics.fill_rate, 0, 1);
-  checkInRange("render rate in (0,1]", metrics.render_rate, 0, RATIO_UPPER_BOUND);
+  checkInRange(
+    "render rate in (0,1]",
+    metrics.render_rate,
+    0,
+    RATIO_UPPER_BOUND,
+  );
   checkInRange("CTR in (0,1)", metrics.ctr, 0, 1);
   check("eCPM > 0", metrics.ecpm > 0, metrics.ecpm.toFixed(4));
   check("RPR > 0", metrics.rpr > 0, metrics.rpr.toFixed(6));
 
   const funnel = await selectOne<FunnelIntegrity>(client, Q.funnelIntegrity);
-  checkEqual("no revenue without an impression", "0", funnel.revenue_without_impression);
-  checkEqual("no impression without a fill", "0", funnel.impression_without_fill);
-  checkEqual("no click without an impression", "0", funnel.click_without_impression);
+  checkEqual(
+    "no revenue without an impression",
+    "0",
+    funnel.revenue_without_impression,
+  );
+  checkEqual(
+    "no impression without a fill",
+    "0",
+    funnel.impression_without_fill,
+  );
+  checkEqual(
+    "no click without an impression",
+    "0",
+    funnel.click_without_impression,
+  );
 
   const identity = await selectOne<RevenueIdentity>(client, Q.revenueIdentity);
   checkClose("revenue identity holds", identity.lhs, identity.rhs);
@@ -185,10 +251,13 @@ async function verifyMetrics(client: ClickHouseClient): Promise<void> {
 }
 
 async function reportStorage(client: ClickHouseClient): Promise<void> {
-  console.log("== storage ==");
+  log.info("== storage ==");
 
-  for (const part of await select<PartStats>(client, Q.storageStats(DATABASE))) {
-    console.log(
+  for (const part of await select<PartStats>(
+    client,
+    Q.storageStats(DATABASE),
+  )) {
+    log.info(
       `  ${part.table.padEnd(14)} ${fmt(Number(part.total_rows)).padStart(10)} rows  ` +
         `${part.compressed.padStart(10)} on disk (${part.uncompressed} raw, ${part.ratio}x)  ` +
         `${part.parts} parts`,
@@ -202,28 +271,32 @@ async function reportStorage(client: ClickHouseClient): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
+  initObservability();
   const client = makeClient();
   const startedAt = performance.now();
 
   try {
-    const { version } = await selectOne<VersionRow>(client, Q.VERSION);
-    console.log(`ClickHouse ${version}, database "${DATABASE}"\n`);
+    await withSpan("verify.run", {}, async () => {
+      const { version } = await selectOne<VersionRow>(client, Q.VERSION);
+      log.info(`ClickHouse ${version}, database "${DATABASE}"\n`);
 
-    await verifyDimensions(client);
-    await verifyTotals(client);
-    await verifyPerDay(client);
-    await verifyEnrichment(client);
-    await verifyMetrics(client);
-    await reportStorage(client);
+      await verifyDimensions(client);
+      await verifyTotals(client);
+      await verifyPerDay(client);
+      await verifyEnrichment(client);
+      await verifyMetrics(client);
+      await reportStorage(client);
+    });
   } finally {
     await client.close();
+    await shutdownObservability();
   }
 
   if (failures > 0) {
     console.error(`${failures} check(s) FAILED in ${secondsSince(startedAt)}`);
     process.exit(1);
   }
-  console.log(`All checks passed in ${secondsSince(startedAt)}.`);
+  log.info(`All checks passed in ${secondsSince(startedAt)}.`);
 }
 
 if (import.meta.main) await runScript(main);

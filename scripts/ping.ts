@@ -7,19 +7,29 @@ import { DATABASE, makeClient, selectOne } from "../clickhouse/client";
 import { SERVER_INFO } from "../constants/queries";
 import type { ServerInfo } from "../interfaces";
 import { runScript } from "../utils/common.utils";
+import {
+  initObservability,
+  shutdownObservability,
+  withSpan,
+} from "../observability/otel";
+import { log } from "../observability/logger";
 
 async function main(): Promise<void> {
+  initObservability();
   const client = makeClient();
 
   try {
-    const info = await selectOne<ServerInfo>(client, SERVER_INFO);
+    await withSpan("ping.run", {}, async () => {
+      const info = await selectOne<ServerInfo>(client, SERVER_INFO);
 
-    console.log(`ClickHouse ${info.version}`);
-    console.log(`database    ${DATABASE}`);
-    console.log(`uptime      ${info.uptime}`);
-    console.log(`server time ${info.now}`);
+      log.info(`ClickHouse ${info.version}`);
+      log.info(`database    ${DATABASE}`);
+      log.info(`uptime      ${info.uptime}`);
+      log.info(`server time ${info.now}`);
+    });
   } finally {
     await client.close();
+    await shutdownObservability();
   }
 }
 
