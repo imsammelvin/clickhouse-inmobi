@@ -14,6 +14,7 @@
  * through `log.info` (which writes to stdout via console.log). For the same reason, do not set
  * OTEL_LOG_LEVEL when running over stdio: the OTel diagnostic logger writes to the console too.
  */
+import { context, propagation } from "@opentelemetry/api";
 import { handleRpc, type JsonRpcRequest } from "./protocol";
 import { Session } from "./trace";
 import {
@@ -177,7 +178,18 @@ function runHttp(port: number): void {
       }
 
       const { session, id } = sessionFor(req.headers.get("mcp-session-id"));
-      const response = await dispatch(session, body);
+
+      // The propagator and context manager are already wired up in initObservability() for exactly
+      // this -- but nothing extracted an inbound `traceparent` until now, so every mcp.tool.* span
+      // started a brand-new root trace instead of continuing the caller's (measured: a LibreChat
+      // agent trace and this server's investigation trace never shared a traceId, so following one
+      // from the other meant matching timestamps by hand). A client that sends no `traceparent`
+      // gets the same unset context back from `extract`, so this is a no-op for callers that don't.
+      const parentCtx = propagation.extract(context.active(), {
+        traceparent: req.headers.get("traceparent") ?? undefined,
+        tracestate: req.headers.get("tracestate") ?? undefined,
+      });
+      const response = await context.with(parentCtx, () => dispatch(session, body));
       const headers = { ...CORS, "Mcp-Session-Id": id };
 
       // A batch of pure notifications has nothing to answer with.
