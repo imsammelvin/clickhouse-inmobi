@@ -174,8 +174,10 @@ GROUP BY d
 ORDER BY d`.trim(),
   );
   const incidentDays = new Set(datesBetween(from, to));
-  const onDays = (want: boolean, pick: (x: { advs: string | number; reqs: string | number }) => number) =>
-    perDay.filter((x) => incidentDays.has(x.d) === want).map(pick);
+  const onDays = (
+    want: boolean,
+    pick: (x: { advs: string | number; reqs: string | number }) => number,
+  ) => perDay.filter((x) => incidentDays.has(x.d) === want).map(pick);
   const advsOf = (x: { advs: string | number }) => Number(x.advs);
   const reqsOf = (x: { reqs: string | number }) => Number(x.reqs);
 

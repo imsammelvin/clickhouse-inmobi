@@ -13,17 +13,17 @@ is a bug and it outranks a missed anomaly (R-001). Code lives in `backend/`.
 Fixed by `metrics_glossary.md`. Implemented in `backend/metrics.ts`. **All are sum/sum over the
 group — never an average of per-row or per-day ratios**, or rollups stop being correct.
 
-| Metric | Formula | Unit |
-|---|---|---|
-| Requests | `count()` | count |
-| Fills | `sum(is_filled)` | count |
-| Fill rate | `sum(is_filled) / count()` | ratio |
-| Impressions | `sum(is_impression)` | count |
-| Render rate | `sum(is_impression) / sum(is_filled)` | ratio |
-| CTR | `sum(is_click) / sum(is_impression)` | ratio |
-| Revenue | `sum(revenue)` | USD |
-| eCPM | `sum(revenue) / sum(is_impression) * 1000` | USD |
-| RPR | `sum(revenue) / count()` | USD |
+| Metric      | Formula                                    | Unit  |
+| ----------- | ------------------------------------------ | ----- |
+| Requests    | `count()`                                  | count |
+| Fills       | `sum(is_filled)`                           | count |
+| Fill rate   | `sum(is_filled) / count()`                 | ratio |
+| Impressions | `sum(is_impression)`                       | count |
+| Render rate | `sum(is_impression) / sum(is_filled)`      | ratio |
+| CTR         | `sum(is_click) / sum(is_impression)`       | ratio |
+| Revenue     | `sum(revenue)`                             | USD   |
+| eCPM        | `sum(revenue) / sum(is_impression) * 1000` | USD   |
+| RPR         | `sum(revenue) / count()`                   | USD   |
 
 **Validate — the whole funnel for one day:**
 
@@ -60,13 +60,13 @@ centre = median(baseline values)
 spread = max( MAD(baseline) x 1.4826 ,  |centre| x 0.005 )
 ```
 
-| Choice | Why |
-|---|---|
-| Same weekday | A flat average makes every weekend an anomaly. The glossary warns about this explicitly. |
-| **Median, not mean** | A prior planted incident sitting inside the baseline window otherwise manufactures a fake anomaly. Real case below. |
-| **MAD, not stddev** | Same reason — one contaminated point in a 3-point sample wrecks a standard deviation. |
-| **Spread floor at 0.5%** | Fill rate is 0.785 ± 0.0005 across the window, so raw stddev → 0 and every move divides out to tens of sigma. A −2.4% eCPM move reported as −19.3σ before this floor. |
-| Exclude the incident window | A multi-day incident would otherwise contaminate its own baseline and hide itself. |
+| Choice                      | Why                                                                                                                                                                   |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Same weekday                | A flat average makes every weekend an anomaly. The glossary warns about this explicitly.                                                                              |
+| **Median, not mean**        | A prior planted incident sitting inside the baseline window otherwise manufactures a fake anomaly. Real case below.                                                   |
+| **MAD, not stddev**         | Same reason — one contaminated point in a 3-point sample wrecks a standard deviation.                                                                                 |
+| **Spread floor at 0.5%**    | Fill rate is 0.785 ± 0.0005 across the window, so raw stddev → 0 and every move divides out to tens of sigma. A −2.4% eCPM move reported as −19.3σ before this floor. |
+| Exclude the incident window | A multi-day incident would otherwise contaminate its own baseline and hide itself.                                                                                    |
 
 **Validate — why the median matters.** Baseline for Sunday 2026-06-28:
 
@@ -98,7 +98,7 @@ anomalous = |delta_pct| >= 3.0  AND  |sigma| >= 2.5
 ```
 
 Absolutes are averaged per day before comparison; ratios are averaged across days (still sum/sum
-*within* each day). Comparing a 3-day incident total to a 1-day baseline would show a 200%
+_within_ each day). Comparing a 3-day incident total to a 1-day baseline would show a 200%
 "increase" that is pure arithmetic.
 
 **Why both gates.** Sigma alone on 2–4 points calls noise significant. Relative size alone flags
@@ -158,15 +158,15 @@ contribution = |delta_abs| x (share_pct / 100)     <- the ranking key
 ```
 
 **Ranking is by contribution, not by delta.** A −60pp move on 0.1% of traffic moves nothing. This is
-also why every reported segment carries its share: *"−35pp on 9.6% of traffic"* is a completely
-different fact from *"−35pp on 0.2%"*.
+also why every reported segment carries its share: _"−35pp on 9.6% of traffic"_ is a completely
+different fact from _"−35pp on 0.2%"_.
 
 **Absolute metrics are divided by their window's day count; ratios are not.** Ratios are
 self-normalising. Getting this wrong reported Jun 21 as −71% against a real −43.5%.
 
 ---
 
-## 6. Residualization — cause vs contamination *(the differentiator)*
+## 6. Residualization — cause vs contamination _(the differentiator)_
 
 ```
 causes = []
@@ -220,14 +220,14 @@ GROUP BY region;
 
 Four signals are queried on the cause segment, then matched in order (most specific first):
 
-| Order | Channel | Trigger | Owner |
-|---|---|---|---|
-| 1 | `demand_change` | advertisers bidding fell ≥10% | Sales / AM |
-| 2 | `supply_change` | requests the driver, or \|Δrequests\| ≥ 15% | Publisher ops |
-| 3 | `technical_break` | render rate fell ≥ 2pp | Engineering |
-| 4 | `technical_break` | fill rate is the driver **while** advertisers flat, render flat, eCPM flat | Engineering |
-| 5 | `demand_change` | eCPM the driver, or \|ΔeCPM\| ≥ 10%, advertisers flat | Sales / AM |
-| — | `not_localizable` | uniformity test fired | Platform / on-call |
+| Order | Channel           | Trigger                                                                    | Owner              |
+| ----- | ----------------- | -------------------------------------------------------------------------- | ------------------ |
+| 1     | `demand_change`   | advertisers bidding fell ≥10%                                              | Sales / AM         |
+| 2     | `supply_change`   | requests the driver, or \|Δrequests\| ≥ 15%                                | Publisher ops      |
+| 3     | `technical_break` | render rate fell ≥ 2pp                                                     | Engineering        |
+| 4     | `technical_break` | fill rate is the driver **while** advertisers flat, render flat, eCPM flat | Engineering        |
+| 5     | `demand_change`   | eCPM the driver, or \|ΔeCPM\| ≥ 10%, advertisers flat                      | Sales / AM         |
+| —     | `not_localizable` | uniformity test fired                                                      | Platform / on-call |
 
 Rule 4 is the interesting one: demand present, supply present, rendering fine, but the match stopped
 happening. That is a delivery fault, not a market event — and it is exactly the Android 15 case.
@@ -256,7 +256,7 @@ Stated plainly so nobody validates against a claim we haven't earned.
    honest test exists. Treat it as a magnitude hint; the size gate does the real work.
 3. **Detection only sweeps the blended metric.** The finance eCPM incident (−34.8% on 7% of
    impressions) moves blended eCPM just −2.4% and is **missed entirely** by the 3% gate. `/scan`
-   must sweep *segments*, not just totals, or small-but-real segment anomalies are invisible. **This
+   must sweep _segments_, not just totals, or small-but-real segment anomalies are invisible. **This
    is the most serious open gap.**
 4. **Greedy deflation assumes one dominant cause per pass.** Genuinely independent co-occurring
    causes need the loop to converge; it runs to 4 iterations but this is untested.

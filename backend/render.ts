@@ -8,6 +8,7 @@
  * the same `Investigation`, and the same grounding check applies to its output.
  */
 import type { Investigation } from "./types";
+import { withSyncSpan } from "../utils/telemetryUtils";
 
 const LABELS: Record<string, string> = {
   demand_change: "Demand change. Owner: Sales / account management.",
@@ -36,6 +37,18 @@ function wrap(s: string, indent: number, width = 92): string {
 
 /** The diagnosis itself — the text whose every numeral must be grounded. */
 export function renderNarrative(inv: Investigation): string {
+  return withSyncSpan(
+    "render.narrative",
+    { "app.channel": inv.primaryChannel, "app.findings": inv.findings.length },
+    (span) => {
+      const text = renderNarrativeInner(inv);
+      span.setAttribute("app.narrative.length", text.length);
+      return text;
+    },
+  );
+}
+
+function renderNarrativeInner(inv: Investigation): string {
   const L: string[] = [];
   L.push(inv.headline, "");
 
@@ -67,7 +80,9 @@ export function renderNarrative(inv: Investigation): string {
   // anything until the reader knows *what* moved -- and a ruled-out list is only worth what a
   // judge can check.
   for (const r of normal) {
-    L.push(r.segment ? `  x ${r.segment.dimension} = '${r.segment.value}' ${r.note}` : `  x ${r.note}`);
+    L.push(
+      r.segment ? `  x ${r.segment.dimension} = '${r.segment.value}' ${r.note}` : `  x ${r.note}`,
+    );
   }
   if (contam.length) {
     L.push(`  x ${contam.length} segment(s) cleared as contamination:`);
@@ -81,6 +96,18 @@ export function renderNarrative(inv: Investigation): string {
 
 /** Narrative plus the operational footer. The footer is not subject to grounding. */
 export function renderFull(inv: Investigation): string {
+  return withSyncSpan(
+    "render.full",
+    { "app.channel": inv.primaryChannel, "app.evidence": inv.evidence.length },
+    (span) => {
+      const text = renderFullInner(inv);
+      span.setAttribute("app.report.length", text.length);
+      return text;
+    },
+  );
+}
+
+function renderFullInner(inv: Investigation): string {
   const L = [renderNarrative(inv), "", "PLAN"];
   for (const s of inv.planSteps) {
     L.push(

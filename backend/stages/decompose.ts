@@ -170,9 +170,7 @@ async function decomposeInner(
   const incSeries = incidentDays
     .map((d) => incByDate.get(d))
     .filter((t): t is Totals => t !== undefined);
-  const baseSeries = incidentDays
-    .map(matchedBaseline)
-    .filter((t): t is Totals => t !== null);
+  const baseSeries = incidentDays.map(matchedBaseline).filter((t): t is Totals => t !== null);
 
   if (incSeries.length === 0 || baseSeries.length === 0) {
     throw new Error("decompose: no weekday-matched baseline for this window");

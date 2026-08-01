@@ -87,6 +87,7 @@ that is handled, but it is the part most likely to be wrong, and it is worth a t
 **Commit:** branch `dev/sam/biz-specs`
 
 ### 2026-08-01 18:20 — samarth — four relevance fixes in backend/ (Lane A files)
+
 **What changed:** `backend/stages/decompose.ts`, `backend/stages/classify.ts`,
 `backend/orchestrate.ts` on branch `dev/samarth/relevance-fixes` (`4e8a318`). All four defects were
 the same shape — arithmetic correct, sentence wrong — which grounding cannot catch by design.

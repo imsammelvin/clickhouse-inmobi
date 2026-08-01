@@ -261,6 +261,46 @@ export const trySpan = async <T>(
   return runSpan(name, attributes, kind, fn);
 };
 
+/**
+ * `withSpan` for a function that is not async.
+ *
+ * `withSpan` and `trySpan` both `await fn()` and hand back a Promise, so wrapping a synchronous
+ * function in them makes it async and forces every caller to `await` — which, for the pure maths in
+ * `backend/baseline.ts`, would mean rewriting the call sites of `mean`, `median` and friends
+ * throughout the stages. This is the same span with a synchronous callback instead, so a sync
+ * function stays sync.
+ *
+ * Use it for a computation STEP, not for a one-line helper. A span costs meaningfully more than a
+ * function call, so wrapping something like `fmt(n)` — called hundreds of times per render — buys a
+ * flood of spans that hide the work worth looking at. Wrapping `trendAwareBaseline` is useful;
+ * wrapping the `Math.abs` beside it is not.
+ */
+export const withSyncSpan = <T>(
+  name: string,
+  attributes: Attributes,
+  fn: (span: Span) => T,
+  kind: SpanKind = SpanKind.INTERNAL,
+): T => {
+  const startedAt = performance.now();
+
+  return trace.getTracer(INSTRUMENTATION_SCOPE).startActiveSpan(name, { kind }, (span): T => {
+    span.setAttributes(attributes);
+    try {
+      const value = fn(span);
+      span.setAttribute("app.duration_ms", Math.round(performance.now() - startedAt));
+      return value;
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      span.recordException(err);
+      span.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
+      span.setAttribute("app.duration_ms", Math.round(performance.now() - startedAt));
+      throw err;
+    } finally {
+      span.end();
+    }
+  });
+};
+
 // ---------------------------------------------------------------------------
 // metrics
 // ---------------------------------------------------------------------------

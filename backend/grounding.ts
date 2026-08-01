@@ -13,6 +13,7 @@
  * figure that appears nowhere in the ledger fails no matter how plausible it looks.
  */
 import type { Evidence } from "./types";
+import { withSyncSpan } from "../utils/telemetryUtils";
 
 export interface Ungrounded {
   text: string;
@@ -77,6 +78,25 @@ function matchesAtPrecision(printed: number, printedText: string, actual: number
 }
 
 export function checkGrounding(narrative: string, evidence: Evidence[]): GroundingResult {
+  return withSyncSpan(
+    "grounding.check",
+    { "app.evidence.count": evidence.length, "app.narrative.length": narrative.length },
+    (span) => {
+      const result = checkGroundingInner(narrative, evidence);
+      // The single most heavily-weighted judging criterion ("one fabricated figure costs more than
+      // a missed anomaly"), so its result belongs on the trace, not only in the gate's stdout.
+      span.setAttributes({
+        "app.grounding.total": result.total,
+        "app.grounding.grounded": result.grounded,
+        "app.grounding.ungrounded": result.ungrounded.length,
+        "app.grounding.ok": result.ok,
+      });
+      return result;
+    },
+  );
+}
+
+function checkGroundingInner(narrative: string, evidence: Evidence[]): GroundingResult {
   const cleaned = narrative
     .replace(TRACE_RE, " ")
     .replace(DATE_RE, " ")

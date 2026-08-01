@@ -20,9 +20,9 @@ relevant when we wire the narrator in. Both read from the one `Investigation` ob
 already emits, so they cannot drift from §1 or from each other — which is exactly why deferring
 them costs nothing.
 
-| | Who reads it | When |
-| --- | --- | --- |
-| **§1 Plain** | Revenue manager, demo, deck | **Now** |
+|                 | Who reads it                     | When                            |
+| --------------- | -------------------------------- | ------------------------------- |
+| **§1 Plain**    | Revenue manager, demo, deck      | **Now**                         |
 | **§2 Receipts** | Judges, anyone auditing a figure | When the narrator lands (T-019) |
 
 > ⚠ **What we actually print today is neither.** `backend/render.ts` emits something in between —

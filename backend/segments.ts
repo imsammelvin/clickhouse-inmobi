@@ -18,7 +18,7 @@
 import type { Ledger } from "./ledger";
 import { DATASET_END, DATASET_START } from "./baseline";
 import { DIMENSION_PAIRS, METRICS, dimensionsFor, metricExpr } from "./metrics";
-import { withSpan } from "../utils/telemetryUtils";
+import { withSpan, withSyncSpan } from "../utils/telemetryUtils";
 
 /** A segment must carry at least this many requests on a day before it can fire. */
 export const SEGMENT_MIN_REQUESTS = 150;
@@ -199,6 +199,15 @@ async function scanSegmentsInner(
  * same alert-fatigue failure the ruled-out list exists to prevent, arriving by a different route.
  */
 export function groupIntoIncidents(firings: SegmentFiring[]): SegmentIncident[] {
+  return withSyncSpan("segments.group", { "app.firings": firings.length }, (span) => {
+    const incidents = groupIntoIncidentsInner(firings);
+    // The collapse ratio is the alert-fatigue number: 4 consecutive daily alarms becoming 1.
+    span.setAttribute("app.incidents", incidents.length);
+    return incidents;
+  });
+}
+
+function groupIntoIncidentsInner(firings: SegmentFiring[]): SegmentIncident[] {
   const bySegment = new Map<string, SegmentFiring[]>();
   for (const f of firings) {
     const key = `${f.metric}|${f.dimension}|${f.value}`;
@@ -277,6 +286,14 @@ export interface IncidentWindow {
  * stops the digest becoming another muted alert channel.
  */
 export function clusterWindows(incidents: SegmentIncident[]): IncidentWindow[] {
+  return withSyncSpan("segments.cluster", { "app.incidents": incidents.length }, (span) => {
+    const windows = clusterWindowsInner(incidents);
+    span.setAttribute("app.windows", windows.length);
+    return windows;
+  });
+}
+
+function clusterWindowsInner(incidents: SegmentIncident[]): IncidentWindow[] {
   const byMetric = new Map<string, SegmentIncident[]>();
   for (const i of incidents) {
     (byMetric.get(i.metric) ?? byMetric.set(i.metric, []).get(i.metric)!).push(i);
