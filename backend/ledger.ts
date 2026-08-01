@@ -5,7 +5,7 @@
  * hands back rows. Nothing else in `backend/` should import the ClickHouse client directly — that
  * is what makes "every number is reproducible" a property of the code rather than a promise.
  */
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { ClickHouseClient } from "@clickhouse/client";
 import { makeClient, select } from "../clickhouse/client";
 import type { Evidence, PlanStep } from "./types";
@@ -20,8 +20,21 @@ export class Ledger {
   private stageStart = 0;
   private stageQueries = 0;
 
-  constructor(client?: ClickHouseClient) {
+  /**
+   * Tag stamped into every query as a SQL comment, so `system.query_log` rows can be attributed
+   * back to the run and stage that issued them. This is what lets the benchmark harness report
+   * rows/bytes/memory *per stage* instead of one opaque total — and it costs nothing at runtime.
+   */
+  readonly runId: string;
+
+  constructor(client?: ClickHouseClient, runId?: string) {
     this.client = client ?? makeClient();
+    this.runId = runId ?? randomUUID().slice(0, 8);
+  }
+
+  /** Current stage name, for callers that want to label something with it. */
+  currentStage(): string {
+    return this.stage;
   }
 
   beginStage(name: string): void {
@@ -43,8 +56,11 @@ export class Ledger {
   /** Run a SELECT. This is the only place SQL reaches the server. */
   async run<T>(sql: string): Promise<T[]> {
     this.queryCount++;
+    // Prepended, not appended: ClickHouse keeps the comment in `system.query_log.query`, and a
+    // leading tag survives any trailing truncation of long sweep queries.
+    const tagged = `/* bench run=${this.runId} stage=${this.stage} */\n${sql}`;
     try {
-      return await select<T>(this.client, sql);
+      return await select<T>(this.client, tagged);
     } catch (err) {
       // Surface the SQL. A failing query with no text is unusable at 3am.
       throw new Error(

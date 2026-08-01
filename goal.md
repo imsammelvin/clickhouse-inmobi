@@ -171,11 +171,13 @@ Written first; we build backwards from it. Judges see the demo, not the repo.
   concentration risk. "What changed?" before "what's different?"
 
 **Performance and scale — the primary axis (D-019):**
-- **Rollup-backed queries so cost is independent of event volume.** Today every investigation
-  full-scans the fact table: 9.00M rows, 77.77 MiB, 216 MiB peak, ~1.2s per sweep. An
-  `AggregatingMergeTree` at `(hour × dimension × value)` grain is ~59k rows for this window — the
-  rollup grows with *cardinality × time*, not with events, so the same query costs the same at 9M
-  events or 9T. **This is the petabyte answer and it is T-013.**
+- **Rollup-backed queries so cost is independent of event volume.** Measured per stage by
+  `backend/benchmark.ts` (T-042), not asserted. Partition pruning already works — a 3-day
+  investigation touches only its 12 relevant days — but **the same 12 days get re-scanned by every
+  stage**: 6 queries × ~3.27M rows = **17.20M rows / 204 MiB / 284 MiB peak** for one
+  investigation. An `AggregatingMergeTree` at `(hour × dimension × value)` grain is ~59k rows for
+  the whole window, and it grows with *cardinality × time* rather than with events — so the same
+  query costs the same at 9M events or 9T. **This is the petabyte answer and it is T-013.**
 - **Measured latency budget** end to end, per stage, published in the README.
 - **Bounded LLM cost** — one narration call per investigation, evidence struct only, token count
   measured and reported. The LLM must never scale with data volume.
@@ -427,8 +429,9 @@ should be mid-refactor when it lands, and `main` must be runnable at all times.
 How we know we won, in measurable terms. Mapped to the published judging criteria.
 
 - [ ] **Query cost is independent of event volume.** After T-013, an investigation reads rollup rows,
-      not raw events. Baseline to beat: **9.00M rows / 77.71 MiB / 216 MiB peak / ~1.2s per sweep**
-      today. *(D-019 — the primary axis)*
+      not raw events. Measured baseline to beat (`pitch/bench-baseline.json`): **17.20M rows /
+      204.49 MiB / 284 MiB peak / 1,162ms server time** for the flagship 3-day investigation.
+      *(D-019 — the primary axis)*
 - [ ] **p95 end-to-end investigation < 3s** with per-stage latency published in the README.
 - [ ] **Exactly one LLM call per investigation**, taking the evidence struct only, with token count
       measured and reported. LLM cost must not scale with data volume.
@@ -480,7 +483,7 @@ Append-only. Newest at the bottom. One line per decision. Never edit or delete s
 | D-017 | 2026-08-01 | **Localization must residualize, not just rank.** Contribution ranking (T-018) is necessary but not sufficient; add iterative deflation (T-040) before anything is reported as a cause | Measured on the real Jun 23–25 fill-rate incident: a plain ranked sweep returns **21 segments** outside band (EU −5.50pp, tier_1 −3.89pp, finance −3.76pp, banner −3.65pp…). Excluding the single true cause — `os_version = 'Android 15'`, fill rate 0.7837 → 0.4333, −35.04pp on 9.6% of traffic — every one of those 21 collapses to within **±0.24pp** (EU → −0.07pp, tier_1 → +0.01pp). They were dilution artifacts, not causes. Reporting them is exactly the "hallucinated segment" failure the rubric punishes, and no amount of better narration fixes it — it is an algorithm problem. | sam (proposed) |
 | D-018 | 2026-08-01 | **The product is InMobi's own marketplace view. Every persona is inside InMobi; buy-side questions are out of scope.** Supersedes the "campaign repeatability / should I spend again" second act, which is reframed to demand durability + backfill capacity. | The dataset is unambiguously the platform's: `fill_rate` is a marketplace metric an advertiser does not have, `revenue` is money *earned* on impressions (an advertiser's *cost*), `publisher_tier` is InMobi's own supply classification, and `advertiser_id` is a 500-value slicing dimension no advertiser could see. Volume settles it too — the median advertiser runs **116 impressions and 1.3 clicks a day**, and 355 of 500 are under 200 impressions/day, so per-advertiser detection would be pure noise. Decisively: we are scored against planted anomalies that are all marketplace-level (Android 15 fill collapse, global volume drop, finance eCPM); built buy-side we would miss every one. | sam (proposed) |
 
-| D-019 | 2026-08-01 | **Attribute using the given dataset only, and keep detection minimal.** No event calendars, holiday tables, contextual/affinity modelling or any external join. The primary axis of this hackathon is **latency, scalability and bounded LLM cost**, not a cleverer detector. Supersedes D-009 and drops the exogenous-event channel. | Tested before cutting, so this is a measurement not a preference: vertical↔category affinity does not exist in the data (matched eCPM 2.4654 vs mismatched 2.4721; CTR 0.01084 vs 0.01089), and there is no event structure to find (largest hourly deviations in entertainment apps are 1.6× on 49–85 requests at random hours — Poisson noise). Any calendar we authored would attribute synthetic anomalies to invented causes, which the private answer key would contradict, and one fabricated figure costs more than a missed anomaly. Meanwhile every investigation currently full-scans 9.00M rows / 77.71 MiB, which is the thing that actually will not survive scale. | user (directed), sam (recorded) |
+| D-019 | 2026-08-01 | **Attribute using the given dataset only, and keep detection minimal.** No event calendars, holiday tables, contextual/affinity modelling or any external join. The primary axis of this hackathon is **latency, scalability and bounded LLM cost**, not a cleverer detector. Supersedes D-009 and drops the exogenous-event channel. | Tested before cutting, so this is a measurement not a preference: vertical↔category affinity does not exist in the data (matched eCPM 2.4654 vs mismatched 2.4721; CTR 0.01084 vs 0.01089), and there is no event structure to find (largest hourly deviations in entertainment apps are 1.6× on 49–85 requests at random hours — Poisson noise). Any calendar we authored would attribute synthetic anomalies to invented causes, which the private answer key would contradict, and one fabricated figure costs more than a missed anomaly. Meanwhile the flagship investigation reads 17.20M rows / 204.49 MiB across 6 queries (measured, `pitch/bench-baseline.json`) because every stage re-scans the same 12 days — that is the thing that actually will not survive scale. | user (directed), sam (recorded) |
 
 > Rows D-005…D-012 are **proposed** and were added after the initial draft. Ratify or contest at M0
 > kickoff — change `(proposed)` to the ratifying handle, or open a BROADCAST entry arguing the other
