@@ -14,14 +14,25 @@
  * ClickHouse Cloud to apply it there instead -- see .env.example.
  */
 import { readFileSync } from "node:fs";
-import { makeTelemetryClient } from "../clickhouse/client";
+import type { Span } from "@opentelemetry/api";
+import { exec, makeTelemetryClient } from "../clickhouse/client";
 import { CLICKSTACK_SCHEMA_FILE, CLICKSTACK_URL } from "../constants";
 import { runScript } from "../utils/common.utils";
 import { splitStatements, statementLabel } from "../utils/sql.utils";
-import { log } from "../utils/telemetryUtils";
+import { initObservability, log, shutdownObservability, withSpan } from "../utils/telemetryUtils";
 
 const main = async (): Promise<void> => {
+  initObservability();
+  try {
+    await withSpan("otel.schema", { "db.url": CLICKSTACK_URL }, (span) => apply(span));
+  } finally {
+    await shutdownObservability();
+  }
+};
+
+const apply = async (span: Span): Promise<void> => {
   const statements = splitStatements(readFileSync(CLICKSTACK_SCHEMA_FILE, "utf8"));
+  span.setAttribute("db.statements", statements.length);
 
   const client = makeTelemetryClient();
 
@@ -31,10 +42,10 @@ const main = async (): Promise<void> => {
     for (const [index, statement] of statements.entries()) {
       const tag = `[${String(index + 1).padStart(2, " ")}/${statements.length}]`;
       process.stdout.write(`${tag} ${statementLabel(statement)} ... `);
-      await client.command({
-        query: statement,
-        clickhouse_settings: { wait_end_of_query: 1 },
-      });
+      // `exec` rather than `client.command` directly: identical settings, and it opens the
+      // `clickhouse.exec` span so a statement that hangs is visible as a span, not just a stalled
+      // line of console output.
+      await exec(client, statement);
       log.info("ok");
     }
 

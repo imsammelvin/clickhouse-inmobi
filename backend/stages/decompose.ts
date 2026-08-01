@@ -14,6 +14,7 @@
 import type { Ledger } from "../ledger";
 import { baselineDates, datesBetween, median, sqlDateList } from "../baseline";
 import { type Mask, NO_MASK } from "../types";
+import { withSpan } from "../../utils/telemetryUtils";
 
 export interface Factor {
   name: "requests" | "fill_rate" | "render_rate" | "ecpm";
@@ -95,6 +96,32 @@ export async function decompose(
   from: string,
   to: string,
   mask: Mask = NO_MASK,
+): Promise<Decomposition> {
+  return withSpan(
+    "stage.decompose",
+    {
+      "app.stage": "decompose",
+      "app.window.from": from,
+      "app.window.to": to,
+      "app.mask": mask.description,
+    },
+    async (span) => {
+      const result = await decomposeInner(ledger, from, to, mask);
+      span.setAttributes({
+        "app.decompose.driver": result.driver?.name ?? "none",
+        "app.decompose.revenue_delta": Number(result.revenueDelta.toFixed(2)),
+        "app.decompose.factors": result.factors.length,
+      });
+      return result;
+    },
+  );
+}
+
+async function decomposeInner(
+  ledger: Ledger,
+  from: string,
+  to: string,
+  mask: Mask,
 ): Promise<Decomposition> {
   const base = baselineDates(from, to);
 

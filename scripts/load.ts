@@ -131,6 +131,17 @@ const loadDimensions = async (client: ClickHouseClient): Promise<void> => {
 // ---------------------------------------------------------------------------
 
 const extractChunks = async (options: LoadOptions): Promise<DayChunk[]> => {
+  return withSpan("load.extract", { "load.skip_extract": options.skipExtract }, async (span) => {
+    const chunks = await extractChunksInner(options);
+    span.setAttributes({
+      "load.chunks": chunks.length,
+      "load.rows": chunks.reduce((sum, chunk) => sum + chunk.rows, 0),
+    });
+    return chunks;
+  });
+};
+
+const extractChunksInner = async (options: LoadOptions): Promise<DayChunk[]> => {
   if (!existsSync(FACT_FILE)) throw new Error(`Missing source file: ${FACT_FILE}`);
 
   if (options.skipExtract) {
@@ -245,6 +256,14 @@ const loadDay = async (client: ClickHouseClient, chunk: DayChunk): Promise<void>
 };
 
 const loadFacts = async (client: ClickHouseClient, options: LoadOptions): Promise<void> => {
+  return withSpan(
+    "load.facts",
+    { "load.force": options.force, "load.only": options.only?.join(",") ?? "(all)" },
+    () => loadFactsInner(client, options),
+  );
+};
+
+const loadFactsInner = async (client: ClickHouseClient, options: LoadOptions): Promise<void> => {
   await assertDuckdb();
 
   let chunks = await extractChunks(options);

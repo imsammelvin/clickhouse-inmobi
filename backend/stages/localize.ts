@@ -10,6 +10,7 @@ import type { Ledger } from "../ledger";
 import { DIMENSION_PAIRS, METRICS, dimensionsFor, metricExpr } from "../metrics";
 import { baselineDates, datesBetween, sqlDateList } from "../baseline";
 import { type Mask, NO_MASK } from "../types";
+import { withSpan } from "../../utils/telemetryUtils";
 
 export interface Candidate {
   dimension: string;
@@ -60,6 +61,32 @@ export async function localize(
   from: string,
   to: string,
   mask: Mask = NO_MASK,
+): Promise<Candidate[]> {
+  return withSpan(
+    "stage.localize",
+    {
+      "app.stage": "localize",
+      "app.metric": metric,
+      "app.window.from": from,
+      "app.window.to": to,
+      "app.mask": mask.description,
+    },
+    async (span) => {
+      const candidates = await localizeInner(ledger, metric, from, to, mask);
+      // The candidate count is the thing that moves when a sweep is widened (app_id, pairwise
+      // cuts), and it is the input to every downstream claim about "how much was checked".
+      span.setAttribute("app.localize.candidates", candidates.length);
+      return candidates;
+    },
+  );
+}
+
+async function localizeInner(
+  ledger: Ledger,
+  metric: string,
+  from: string,
+  to: string,
+  mask: Mask,
 ): Promise<Candidate[]> {
   const def = METRICS[metric]!;
   const expr = metricExpr(def);

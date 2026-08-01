@@ -22,6 +22,7 @@ import {
   type Segment,
   segmentPredicate,
 } from "./types";
+import { withSpan } from "../utils/telemetryUtils";
 
 export interface InvestigateOptions {
   metric: string;
@@ -49,7 +50,36 @@ function segmentMask(segment: Segment): Mask {
   };
 }
 
+/**
+ * Root span for one investigation. Every stage span, and every `ledger.run` underneath them, nests
+ * inside this one — so a trace in ClickStack is the investigation, top to bottom, in the fixed
+ * order D-002 requires. The headline verdict is stamped on the way out.
+ */
 export async function investigate(opts: InvestigateOptions): Promise<Investigation> {
+  return withSpan(
+    "investigation",
+    {
+      "app.metric": opts.metric,
+      "app.window.from": opts.from,
+      "app.window.to": opts.to,
+      "app.segment": opts.segment ? `${opts.segment.dimension}='${opts.segment.value}'` : "none",
+      "app.auto_scoped": opts.autoScoped ?? false,
+    },
+    async (span) => {
+      const inv = await investigateInner(opts);
+      span.setAttributes({
+        "app.trace_id": inv.traceId,
+        "app.channel": inv.primaryChannel,
+        "app.findings": inv.findings.length,
+        "app.ruled_out": inv.ruledOut.length,
+        "app.evidence": inv.evidence.length,
+      });
+      return inv;
+    },
+  );
+}
+
+async function investigateInner(opts: InvestigateOptions): Promise<Investigation> {
   const { metric, from, to } = opts;
   const ledger = opts.ledger ?? new Ledger();
   const traceId = randomUUID();

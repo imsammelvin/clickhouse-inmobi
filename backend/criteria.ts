@@ -18,7 +18,7 @@ import { investigate } from "./orchestrate";
 import { renderNarrative } from "./render";
 import { checkGrounding } from "./grounding";
 import { KNOWN_INCIDENTS, scanAll } from "./scan";
-import { log } from "../utils/telemetryUtils";
+import { initObservability, log, shutdownObservability, withSpan } from "../utils/telemetryUtils";
 
 /**
  * Max rows any single stage may pull back to the client.
@@ -65,6 +65,17 @@ interface Outcome {
   pass: boolean;
   detail: string[];
 }
+
+/**
+ * Wrap one criterion in a span carrying its verdict. The pass/fail lands on the span rather than
+ * only in stdout, so a run of the gate is queryable after the terminal it ran in is gone.
+ */
+const asCriterion = (id: number, fn: () => Promise<Outcome>): Promise<Outcome> =>
+  withSpan(`criterion.${id}`, { "criteria.id": id }, async (span) => {
+    const outcome = await fn();
+    span.setAttributes({ "criteria.pass": outcome.pass, "criteria.name": outcome.name });
+    return outcome;
+  });
 
 async function criterion1(): Promise<Outcome> {
   const detail: string[] = [];
@@ -245,13 +256,31 @@ async function criterion3(): Promise<Outcome> {
 }
 
 async function main(): Promise<void> {
+  initObservability();
+  let failed = 0;
+  try {
+    failed = await withSpan("criteria.gate", {}, async (span) => {
+      const n = await run();
+      span.setAttribute("criteria.failed", n);
+      return n;
+    });
+  } finally {
+    // Must complete BEFORE the exit below. `process.exit` does not run `finally` blocks, so a
+    // failing gate — the run you most want a trace of — would otherwise export nothing.
+    await shutdownObservability();
+  }
+  if (failed > 0) process.exit(1);
+}
+
+/** Returns the number of failed criteria; the caller owns the exit code. */
+async function run(): Promise<number> {
   log.info("\nJUDGING CRITERIA GATE\n" + "=".repeat(72));
 
   const outcomes = [
-    await criterion1(),
-    await criterion1b(),
-    await criterion2(),
-    await criterion3(),
+    await asCriterion(1, criterion1),
+    await asCriterion(4, criterion1b),
+    await asCriterion(2, criterion2),
+    await asCriterion(3, criterion3),
   ];
 
   for (const o of outcomes) {
@@ -269,7 +298,7 @@ async function main(): Promise<void> {
   log.info("\n" + "=".repeat(72));
   if (failed.length === 0) {
     log.info("All criteria pass.\n", { "criteria.failed": 0, "criteria.total": outcomes.length });
-    return;
+    return 0;
   }
   log.error(`${failed.length} criterion/criteria FAILED:`, {
     "criteria.failed": failed.length,
@@ -278,7 +307,7 @@ async function main(): Promise<void> {
   });
   for (const f of failed) log.error(`  - ${f.name}`);
   log.info("");
-  process.exit(1);
+  return failed.length;
 }
 
 if (import.meta.main) {

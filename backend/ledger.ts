@@ -8,6 +8,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { ClickHouseClient } from "@clickhouse/client";
 import { makeClient, select } from "../clickhouse/client";
+import { withSpan } from "../utils/telemetryUtils";
 import type { Evidence, PlanStep } from "./types";
 
 export class Ledger {
@@ -54,24 +55,45 @@ export class Ledger {
     });
   }
 
-  /** Run a SELECT. This is the only place SQL reaches the server. */
+  /**
+   * Run a SELECT. This is the only place SQL reaches the server.
+   *
+   * Traced here rather than only in `clickhouse.select` underneath, because this is the layer that
+   * knows the *stage* and the *run id*. The child span carries the SQL; this one carries what the
+   * query was for, which is what makes a trace readable as an investigation rather than a list of
+   * SELECTs. The same tag goes into the SQL comment for `system.query_log`, so the ClickStack trace
+   * and the benchmark's server-side cost table join on the same two keys.
+   */
   async run<T>(sql: string): Promise<T[]> {
     this.queryCount++;
     // Prepended, not appended: ClickHouse keeps the comment in `system.query_log.query`, and a
     // leading tag survives any trailing truncation of long sweep queries.
     const tagged = `/* bench run=${this.runId} stage=${this.stage} */\n${sql}`;
-    try {
-      const rows = await select<T>(this.client, tagged);
-      // Recorded for criterion 3: if a stage pulls back thousands of rows, the analysis has
-      // migrated out of ClickHouse and into the client, which is exactly what judges look for.
-      this.rowsReturned.push(rows.length);
-      return rows;
-    } catch (err) {
-      // Surface the SQL. A failing query with no text is unusable at 3am.
-      throw new Error(
-        `Query failed in stage "${this.stage}":\n${sql}\n\n${(err as Error).message}`,
-      );
-    }
+    const seq = this.queryCount;
+
+    return withSpan(
+      `ledger.run.${this.stage}`,
+      {
+        "app.run_id": this.runId,
+        "app.stage": this.stage,
+        "app.query.seq": seq,
+      },
+      async (span) => {
+        try {
+          const rows = await select<T>(this.client, tagged);
+          // Recorded for criterion 3: if a stage pulls back thousands of rows, the analysis has
+          // migrated out of ClickHouse and into the client, which is exactly what judges look for.
+          this.rowsReturned.push(rows.length);
+          span.setAttribute("app.query.rows_returned", rows.length);
+          return rows;
+        } catch (err) {
+          // Surface the SQL. A failing query with no text is unusable at 3am.
+          throw new Error(
+            `Query failed in stage "${this.stage}":\n${sql}\n\n${(err as Error).message}`,
+          );
+        }
+      },
+    );
   }
 
   /**
@@ -110,6 +132,15 @@ export class Ledger {
   }
 
   async close(): Promise<void> {
-    await this.client.close();
+    await withSpan(
+      "ledger.close",
+      {
+        "app.run_id": this.runId,
+        "app.queries_total": this.queryCount,
+      },
+      async () => {
+        await this.client.close();
+      },
+    );
   }
 }

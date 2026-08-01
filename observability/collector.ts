@@ -29,23 +29,40 @@ import {
   OTEL_INGESTION_TOKEN,
 } from "../constants";
 import { runScript } from "../utils/common.utils";
-import { log } from "../utils/telemetryUtils";
+import { initObservability, log, shutdownObservability, withSpan } from "../utils/telemetryUtils";
 
+/** Each `docker` invocation is a child process; spanned so a slow pull is attributable. */
 const run = async (args: string[]): Promise<string> => {
-  const proc = Bun.spawn(["docker", ...args], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const [stdout, stderr, code] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
-  if (code !== 0) throw new Error(`docker ${args[0]} failed:\n${stderr || stdout}`);
-  return stdout.trim();
+  return withSpan(
+    `docker.${args[0]}`,
+    { "process.command": "docker", "process.command_args": args.join(" ") },
+    async (span) => {
+      const proc = Bun.spawn(["docker", ...args], {
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const [stdout, stderr, code] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ]);
+      span.setAttribute("process.exit_code", code);
+      if (code !== 0) throw new Error(`docker ${args[0]} failed:\n${stderr || stdout}`);
+      return stdout.trim();
+    },
+  );
 };
 
 const main = async (): Promise<void> => {
+  initObservability();
+  try {
+    await withSpan("otel.collector.start", { "db.url": CLICKSTACK_URL }, () => start());
+  } finally {
+    await shutdownObservability();
+  }
+};
+
+const start = async (): Promise<void> => {
   if (CLICKSTACK_URL.includes("localhost")) {
     // Pointing the collector at the all-in-one container's own ClickHouse would be a loop: that
     // container already runs a collector on 4317/4318.
