@@ -63,7 +63,12 @@ export function renderNarrative(inv: Investigation): string {
   const normal = inv.ruledOut.filter((r) => r.status !== "cleared_as_contamination");
 
   L.push("RULED OUT");
-  for (const r of normal) L.push(`  x ${r.note}`);
+  // Name the segment when there is one. "moved +13.0% but only 1.4 sigma" is not evidence of
+  // anything until the reader knows *what* moved -- and a ruled-out list is only worth what a
+  // judge can check.
+  for (const r of normal) {
+    L.push(r.segment ? `  x ${r.segment.dimension} = '${r.segment.value}' ${r.note}` : `  x ${r.note}`);
+  }
   if (contam.length) {
     L.push(`  x ${contam.length} segment(s) cleared as contamination:`);
     for (const r of contam.slice(0, 6)) {
