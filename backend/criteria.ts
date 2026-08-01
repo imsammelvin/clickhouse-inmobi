@@ -46,6 +46,13 @@ const MAX_ROWS_TO_CLIENT = 5000;
  */
 const MAX_UNTRIAGED_FIRINGS = 3;
 
+/**
+ * Most the seasonality decoy may attribute to any cause before it counts as crying wolf.
+ * The platform genuinely is normal that day; a few dollars of segment noise is tolerable, a
+ * headline finding is not.
+ */
+const DECOY_MAX_ATTRIBUTED_USD = 5;
+
 const SCENARIOS = [
   { metric: "fill_rate", from: "2026-06-23", to: "2026-06-25" },
   { metric: "requests", from: "2026-06-21", to: "2026-06-21" },
@@ -138,6 +145,12 @@ async function criterion1b(): Promise<Outcome> {
   }
 
   // The decoy has to survive the same path: a day where nothing happened must not become a finding.
+  //
+  // The first version of this assertion was `!headline.includes(...) === false || channel === ...`,
+  // which collapses to "does the headline contain that string" and can never fail. It printed OK
+  // beside `-> demand_change`. That is the same vacuous-gate mistake as `pass: found.length > 0`,
+  // committed while fixing it. Asserting on the substance now: the platform verdict must be stated
+  // AND nothing material may be attributed.
   const ledger = new Ledger();
   try {
     const inv = await investigate({
@@ -146,12 +159,14 @@ async function criterion1b(): Promise<Outcome> {
       to: "2026-06-28",
       ledger,
     });
-    const quiet =
-      !inv.headline.toLowerCase().includes("platform requests was normal") === false ||
-      inv.primaryChannel === "no_anomaly";
+    const saysPlatformNormal = /platform requests was normal/i.test(inv.headline);
+    const worstUsd = Math.max(0, ...inv.findings.map((f) => Math.abs(f.revenueImpactUsd ?? 0)));
+    const quiet = saysPlatformNormal && worstUsd <= DECOY_MAX_ATTRIBUTED_USD;
     if (!quiet) pass = false;
     detail.push(
-      `  ${quiet ? "OK  " : "FAIL"}  ${"E weekend decoy stays quiet".padEnd(28)} -> ${inv.primaryChannel}`,
+      `  ${quiet ? "OK  " : "FAIL"}  ${"E weekend decoy stays quiet".padEnd(28)} -> ` +
+        `${inv.primaryChannel}, platform-normal stated=${saysPlatformNormal}, ` +
+        `worst attributed $${worstUsd.toFixed(2)} (max $${DECOY_MAX_ATTRIBUTED_USD})`,
     );
   } finally {
     await ledger.close();

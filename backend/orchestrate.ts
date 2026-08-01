@@ -133,8 +133,20 @@ export async function investigate(opts: InvestigateOptions): Promise<Investigati
 
   // ---- Stage 1: decompose --------------------------------------------------------------
   ledger.beginStage("decompose");
-  const activeScope: Mask = scopedTo ? segmentMask(scopedTo) : NO_MASK;
-  const dec = await decompose(ledger, from, to, activeScope);
+  // The scope is a DETECTION aid only. Localization runs platform-wide.
+  //
+  // Scoping the sweep too meant a refinement could never lose to its parent. For incident C the
+  // segment sweep scopes to `finance|interstitial`, and localize then swept inside that scope where
+  // `app_category='finance'` is constant and invisible as a candidate — so `ad_format='interstitial'`
+  // became the headline. Measured: finance moves -34.5% on 7.19% of traffic and stays at -33.7%
+  // with interstitial removed, while interstitial moves -7.1% and falls to -4.7% with finance
+  // removed. Finance is the cause; interstitial is largely its shadow, and we named the shadow.
+  //
+  // Sweeping platform-wide puts parent and refinement in the same candidate list, ranked on the
+  // same platform-relative contribution, so the deflation loop resolves which is which — exactly
+  // as it already does for incidents A and B. Pricing follows the same rule: a scoped decompose
+  // priced C at the intersection only, understating it roughly fourfold.
+  const dec = await decompose(ledger, from, to);
   ledger.endStage(
     dec.driver
       ? `${dec.driver.name} carries ${fmtUsd(dec.driver.revenueEffect)}/day of ${fmtUsd(dec.revenueDelta)}/day.`
@@ -156,17 +168,18 @@ export async function investigate(opts: InvestigateOptions): Promise<Investigati
 
   // ---- Stage 2: localize ---------------------------------------------------------------
   ledger.beginStage("localize");
-  const candidates = await localize(ledger, sweepMetric, from, to, activeScope);
+  const candidates = await localize(ledger, sweepMetric, from, to);
   // Count only candidates that clear the same gate residualize uses. Counting everything past a
   // 1pp wobble inflated this to 818 once app_id was swept, most of them small-sample noise no
   // serious tool would surface — quoting that as "what a naive tool reports" would overstate our
   // own result.
-  const raw = candidates.filter(qualifies);
+  const platformDelta = platformDet.deltaPp ?? platformDet.deltaPct;
+  const raw = candidates.filter((c) => qualifies(c, platformDelta));
   ledger.endStage(`${raw.length} segment(s) outside band on a raw ranked sweep.`);
 
   // ---- Stage 3: residualize ------------------------------------------------------------
   ledger.beginStage("residualize");
-  const res = await residualize(ledger, sweepMetric, from, to, candidates);
+  const res = await residualize(ledger, sweepMetric, from, to, candidates, 4, platformDelta);
   ledger.endStage(
     res.uniform
       ? "uniform across all dimensions — no localizable cause"
@@ -182,7 +195,21 @@ export async function investigate(opts: InvestigateOptions): Promise<Investigati
   // ---- Stage 5: price ------------------------------------------------------------------
   ledger.beginStage("price");
   const dayCount = Math.max(1, Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000) + 1);
-  const revPerDay = dec.revenueDelta;
+
+  // Price the CAUSE, not the platform.
+  //
+  // Using the platform-wide revenue delta charged incident C -$49.47/day, because its window
+  // (Jun 19-22) contains Jun 21 — the global volume collapse. Finance was being billed for an
+  // unrelated incident. Pricing the cause segment attributes only what that segment actually lost,
+  // which is also what makes dollar figures comparable across findings and safe to rank on.
+  const causeForPricing = res.causes[0];
+  const priced = causeForPricing
+    ? await decompose(ledger, from, to, {
+        sql: segmentPredicate(causeForPricing.dimension, causeForPricing.value),
+        description: `${causeForPricing.dimension}='${causeForPricing.value}'`,
+      })
+    : dec;
+  const revPerDay = priced.revenueDelta;
   ledger.record({
     label: "price.revenue_impact_per_day",
     value: Number(revPerDay.toFixed(2)),

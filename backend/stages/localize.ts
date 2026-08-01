@@ -74,6 +74,7 @@ export async function localize(
     ([a, b]) => `('${a}|${b}', concat(${a}, '|', ${b}))`,
   );
   const pairs = [...single, ...paired].join(", ");
+  const perDay = def.kind === "absolute";
 
   // Volume floor, applied in SQL rather than after the fact. app_id alone is 2,000 values and the
   // pairs add several hundred more, so without this the client would receive thousands of rows
@@ -86,24 +87,35 @@ export async function localize(
 SELECT
   dim,
   val,
-  ${conditional(expr, "is_base")} AS base_v,
-  ${conditional(expr, "is_inc")}  AS inc_v,
-  countIf(is_inc)                 AS inc_reqs,
+  arrayReduce('median', base_days) AS base_v,
+  inc_v,
+  inc_reqs,
   (SELECT count() FROM ad_events_enriched
     WHERE event_date BETWEEN '${from}' AND '${to}') AS total_reqs
 FROM (
-  SELECT *,
-         event_date BETWEEN '${from}' AND '${to}' AS is_inc,
-         event_date IN (${sqlDateList(base)})     AS is_base,
-         arrayJoin([${pairs}]) AS kv,
-         kv.1 AS dim,
-         kv.2 AS val
-  FROM ad_events_enriched
-  WHERE (${mask.sql})
-    AND (event_date BETWEEN '${from}' AND '${to}' OR event_date IN (${sqlDateList(base)}))
+  SELECT dim, val,
+         groupArrayIf(day_v, is_base)                       AS base_days,
+         ${perDay ? "sumIf(day_v, is_inc) / countIf(is_inc)" : "avgIf(day_v, is_inc)"} AS inc_v,
+         sumIf(day_reqs, is_inc)                            AS inc_reqs
+  FROM (
+    SELECT dim, val, d,
+           ${expr}  AS day_v,
+           count()  AS day_reqs,
+           d BETWEEN toDate('${from}') AND toDate('${to}') AS is_inc,
+           d IN (${sqlDateList(base)})                      AS is_base
+    FROM (
+      SELECT *, event_date AS d,
+             arrayJoin([${pairs}]) AS kv, kv.1 AS dim, kv.2 AS val
+      FROM ad_events_enriched
+      WHERE (${mask.sql})
+        AND (event_date BETWEEN '${from}' AND '${to}' OR event_date IN (${sqlDateList(base)}))
+    )
+    GROUP BY dim, val, d
+  )
+  GROUP BY dim, val
+  HAVING length(base_days) > 0 AND inc_reqs >= ${minRequests}
 )
-GROUP BY dim, val
-HAVING base_v IS NOT NULL AND inc_v IS NOT NULL AND inc_reqs >= ${minRequests}
+WHERE base_v IS NOT NULL AND inc_v IS NOT NULL
 ORDER BY dim, val`.trim();
 
   const rows = await ledger.run<SweepRow>(sql);
@@ -112,14 +124,18 @@ ORDER BY dim, val`.trim();
   // 1-day incident bakes in a -75% before anything real is measured. Ratios are self-normalising
   // and must NOT be divided. Getting this wrong reported Jun 21 as -71% when the platform moved
   // -43.5%; the uniformity test still fired, which is exactly how a silent bias survives review.
-  const incDays = Math.max(1, datesBetween(from, to).length);
-  const baseDays = Math.max(1, base.length);
-  const perDay = def.kind === "absolute";
 
   return rows
     .map((r) => {
-      const baseValue = Number(r.base_v ?? 0) / (perDay ? baseDays : 1);
-      const incValue = Number(r.inc_v ?? 0) / (perDay ? incDays : 1);
+      // Both sides are already per-day and the baseline is a MEDIAN across its days.
+      //
+      // Summing the baseline window and dividing gave a mean, so a prior incident inside that
+      // window poisoned it: Sunday Jun 28's baseline contains Jun 21 (the global collapse), which
+      // dragged the mean down far enough that publisher_tier='tier_2' read as +22.9% on a
+      // completely normal day and the seasonality decoy became a $39.51/day "finding". detect was
+      // fixed for exactly this months-equivalent-ago; localize was not.
+      const baseValue = Number(r.base_v ?? 0);
+      const incValue = Number(r.inc_v ?? 0);
       const deltaAbs = incValue - baseValue;
       const total = Number(r.total_reqs) || 1;
       const sharePct = (Number(r.inc_reqs) / total) * 100;

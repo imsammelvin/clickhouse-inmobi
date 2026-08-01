@@ -10,7 +10,7 @@ import type { Ledger } from "../ledger";
 import { baselineDates, sqlDateList } from "../baseline";
 import type { Candidate } from "./localize";
 import type { Decomposition } from "./decompose";
-import type { Channel } from "../types";
+import { type Channel, segmentPredicate } from "../types";
 
 export interface Classification {
   channel: Channel;
@@ -84,7 +84,10 @@ export async function classify(
   }
 
   const base = baselineDates(from, to);
-  const seg = `${cause.dimension} = '${cause.value.replace(/'/g, "\\'")}'`;
+  // Via the shared builder: a pair dimension has to be split back into two columns, and the
+  // hand-rolled version here emitted `region|os_version = 'EU|iOS 17.5'`. Third place this bug
+  // appeared, which is the argument for there being exactly one function that knows the rule.
+  const seg = segmentPredicate(cause.dimension, cause.value);
 
   const sql = `
 SELECT

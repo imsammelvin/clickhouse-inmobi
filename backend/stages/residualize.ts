@@ -46,11 +46,21 @@ const magnitude = (c: Candidate): number =>
 const bandFor = (c: Candidate): number =>
   c.deltaPp !== null ? RESIDUAL_BAND_PP : RESIDUAL_BAND_PCT;
 
-export function qualifies(c: Candidate): boolean {
+/**
+ * A cause must move differently from the platform, not merely move.
+ *
+ * On 2026-06-28 the platform was up 6.0% — an ordinary Sunday. `publisher_tier='tier_2'` was up
+ * 6.4%, i.e. it did exactly what everything else did, and was still reported as the driver of a
+ * $39.51/day "finding" on the seasonality decoy. A segment that tracks the platform is the
+ * platform; it explains nothing. Excess over the platform move is what makes a segment a cause,
+ * and measuring it that way is also what lets the decoy stay quiet without a special case.
+ */
+export function qualifies(c: Candidate, platformDelta = 0): boolean {
   if (c.sharePct < CAUSE_MIN_SHARE_PCT) return false;
-  return c.deltaPp !== null
-    ? Math.abs(c.deltaPp) >= CAUSE_MIN_PP
-    : Math.abs(c.deltaPct) >= CAUSE_MIN_PCT;
+  if (c.deltaPp !== null) {
+    return Math.abs(c.deltaPp - platformDelta) >= CAUSE_MIN_PP;
+  }
+  return Math.abs(c.deltaPct - platformDelta) >= CAUSE_MIN_PCT;
 }
 
 /**
@@ -103,6 +113,8 @@ export async function residualize(
   to: string,
   initial: Candidate[],
   maxIterations = 4,
+  /** The platform-level move for the same metric and window; segments are judged against it. */
+  platformDelta = 0,
 ): Promise<ResidualizeResult> {
   const uniformity = isUniform(initial);
   if (uniformity.uniform) {
@@ -152,7 +164,7 @@ export async function residualize(
   let iterations = 0;
 
   while (iterations < maxIterations) {
-    const top = current.filter(qualifies)[0];
+    const top = current.filter((c) => qualifies(c, platformDelta))[0];
     if (!top) break;
 
     causes.push(top);
@@ -174,7 +186,7 @@ export async function residualize(
       if (before === top) continue;
       const key = `${before.dimension}|${before.value}`;
       const now = afterByKey.get(key);
-      if (!now || !qualifies(before)) continue;
+      if (!now || !qualifies(before, platformDelta)) continue;
       const residual = now.deltaPp !== null ? Math.abs(now.deltaPp) : Math.abs(now.deltaPct);
       if (residual <= bandFor(now)) {
         contamination.push({
@@ -195,7 +207,7 @@ export async function residualize(
     });
 
     current = after;
-    if (!after.some(qualifies)) break;
+    if (!after.some((c) => qualifies(c, platformDelta))) break;
   }
 
   const causeKeys = new Set(causes.map((c) => `${c.dimension}|${c.value}`));
