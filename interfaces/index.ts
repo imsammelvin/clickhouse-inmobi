@@ -153,3 +153,92 @@ export interface EnrichmentGaps {
   no_adv_on_filled: string;
   no_adv_on_unfilled: string;
 }
+
+// ---------------------------------------------------------------------------
+// application (main.ts)
+// ---------------------------------------------------------------------------
+
+/** Parsed CLI options for main.ts. */
+export interface AppOptions {
+  /** Keep running passes instead of exiting after one. */
+  loop: boolean;
+  /** Seconds to wait between passes in loop mode. */
+  interval: number;
+  /** Number of passes to run. `Infinity` in unbounded loop mode. */
+  iterations: number;
+}
+
+/** One named statement in the workload main.ts runs under observability. */
+export interface WorkloadQuery {
+  /** Stable label -- becomes the `app.query.name` attribute on spans, metrics and logs. */
+  name: string;
+  sql: string;
+}
+
+// ---------------------------------------------------------------------------
+// http api (api/server.ts)
+// ---------------------------------------------------------------------------
+
+/** GET /ping -- ClickHouse round-trip plus the trace id that recorded it. */
+export interface PingResponse {
+  status: "ok" | "error";
+  /** Round-trip time to ClickHouse and back, in milliseconds. */
+  latencyMs: number;
+  clickhouse?: ServerInfo;
+  database: string;
+  /** Look this up in ClickStack to see the trace this request produced. */
+  traceId: string;
+  error?: string;
+}
+
+/** GET /ad-events/count -- row count of the fact table. */
+export interface CountResponse {
+  status: "ok" | "error";
+  table: string;
+  /** Rows currently in the table. Safe as a JS number: 9M is far below 2^53. */
+  count: number;
+  latencyMs: number;
+  traceId: string;
+  error?: string;
+}
+
+/** GET /health -- liveness only, no dependencies touched. */
+export interface HealthResponse {
+  status: "ok";
+  service: string;
+  version: string;
+  environment: string;
+  uptimeSeconds: number;
+}
+
+// ---------------------------------------------------------------------------
+// observability
+// ---------------------------------------------------------------------------
+
+/** One signal's row count in ClickStack, used by observability/verify.ts. */
+export interface SignalCount {
+  signal: string;
+  rows: string;
+  latest: string;
+}
+
+/** How many log records carry the trace they were emitted inside. */
+export interface LogCorrelation {
+  logs: string;
+  correlated: string;
+  traces: string;
+}
+
+/** One span of the most recent trace. `nested` is 0 for a root span, 1 for a child. */
+export interface TraceSpanRow {
+  span: string;
+  nested: number;
+  ms: number;
+}
+
+/** One metric this service has published to ClickStack. */
+export interface PublishedMetric {
+  metric: string;
+  points: string;
+  latest: string;
+}

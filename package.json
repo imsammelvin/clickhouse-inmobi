@@ -4,13 +4,23 @@
   "type": "module",
   "private": true,
   "scripts": {
+    "start": "bun run main.ts",
+    "dev": "bun --watch main.ts",
+    "serve": "OTEL_SERVICE_NAME=clickhouse-inmobi-api bun run api/server.ts",
+    "serve:dev": "OTEL_SERVICE_NAME=clickhouse-inmobi-api bun --watch api/server.ts",
+    "otel:collector": "bun run observability/collector.ts",
+    "otel:collector:stop": "docker rm -f clickstack-collector",
+    "otel:collector:logs": "docker logs -f clickstack-collector",
+    "otel:schema": "bun run observability/schema.ts",
+    "otel:verify": "bun run observability/verify.ts",
     "ch:ping": "bun run scripts/ping.ts",
     "ch:schema": "bun run scripts/schema.ts",
     "ch:load": "bun run scripts/load.ts",
     "ch:verify": "bun run scripts/verify.ts",
     "ch:setup": "bun run ch:schema && bun run ch:load && bun run ch:verify",
-    "langfuse:trace": "bun run backend/langfuse/trace-stub.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build": "bun build api/server.ts --outdir dist --target=node",
+    "langfuse:trace": "bun run backend/langfuse/trace-stub.ts"
   },
   "devDependencies": {
     "@types/bun": "latest"
@@ -20,6 +30,17 @@
   },
   "dependencies": {
     "@clickhouse/client": "^1.23.1",
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/api-logs": "^0.221.0",
+    "@opentelemetry/context-async-hooks": "^2.10.0",
+    "@opentelemetry/exporter-logs-otlp-http": "^0.221.0",
+    "@opentelemetry/exporter-metrics-otlp-http": "^0.221.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.221.0",
+    "@opentelemetry/resources": "^2.10.0",
+    "@opentelemetry/sdk-logs": "^0.221.0",
+    "@opentelemetry/sdk-metrics": "^2.10.0",
+    "@opentelemetry/sdk-trace-base": "^2.10.0",
+    "@opentelemetry/semantic-conventions": "^1.43.0",
     "@anthropic-ai/sdk": "^0.32.0",
     "@langfuse/tracing": "^5.10.0",
     "@langfuse/otel": "^5.10.0",

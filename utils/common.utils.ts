@@ -2,7 +2,12 @@
  * Functions shared across scripts/. Values live in constants/, shapes in interfaces/.
  */
 import { join } from "node:path";
-import { DATA_DIR, FLOAT_TOLERANCE, REPO_ROOT, retryBackoffMs } from "../constants";
+import {
+  DATA_DIR,
+  FLOAT_TOLERANCE,
+  REPO_ROOT,
+  retryBackoffMs,
+} from "../constants";
 import { srcParquetFileMeta } from "../constants/queries";
 import type { SourceFile } from "../enums";
 import type { ParquetFileMeta } from "../interfaces";
@@ -14,13 +19,15 @@ import type { ParquetFileMeta } from "../interfaces";
 export const sourcePath = (file: SourceFile): string => join(DATA_DIR, file);
 
 /** Path relative to the repo root, for readable log lines. */
-export const relPath = (path: string): string => path.replace(`${REPO_ROOT}/`, "");
+export const relPath = (path: string): string =>
+  path.replace(`${REPO_ROOT}/`, "");
 
 // ---------------------------------------------------------------------------
 // formatting
 // ---------------------------------------------------------------------------
 
-export const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+export const sleep = (ms: number): Promise<void> =>
+  new Promise((r) => setTimeout(r, ms));
 
 /** 9000000 -> "9,000,000" */
 export const fmt = (n: number): string => n.toLocaleString("en-US");
@@ -29,11 +36,15 @@ export const fmt = (n: number): string => n.toLocaleString("en-US");
 export const elapsed = (t0: number): number => (performance.now() - t0) / 1000;
 
 /** Seconds since a performance.now() mark, as "6.4s". */
-export const secondsSince = (t0: number): string => `${elapsed(t0).toFixed(1)}s`;
+export const secondsSince = (t0: number): string =>
+  `${elapsed(t0).toFixed(1)}s`;
 
 /** Relative float comparison -- see FLOAT_TOLERANCE for why exact equality is the wrong test. */
-export const closeEnough = (a: number, b: number, tolerance = FLOAT_TOLERANCE): boolean =>
-  Math.abs(a - b) <= Math.abs(a) * tolerance;
+export const closeEnough = (
+  a: number,
+  b: number,
+  tolerance = FLOAT_TOLERANCE,
+): boolean => Math.abs(a - b) <= Math.abs(a) * tolerance;
 
 // ---------------------------------------------------------------------------
 // control flow
@@ -43,11 +54,11 @@ export const closeEnough = (a: number, b: number, tolerance = FLOAT_TOLERANCE): 
  * Retry with exponential backoff. Ingest runs over the public internet against a cloud service;
  * a transient 503 or socket reset should cost a few seconds, not the whole load.
  */
-export async function withRetry<T>(
+export const withRetry = async <T>(
   what: string,
   attempts: number,
   fn: () => Promise<T>,
-): Promise<T> {
+): Promise<T> => {
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= attempts; attempt++) {
@@ -58,21 +69,23 @@ export async function withRetry<T>(
       if (attempt === attempts) break;
 
       const backoff = retryBackoffMs(attempt);
-      console.warn(`  ! ${what} failed (attempt ${attempt}/${attempts}): ${asMessage(error)}`);
+      console.warn(
+        `  ! ${what} failed (attempt ${attempt}/${attempts}): ${asMessage(error)}`,
+      );
       console.warn(`    retrying in ${backoff}ms`);
       await sleep(backoff);
     }
   }
 
   throw lastError;
-}
+};
 
 /** Run `fn` over `items` with at most `limit` in flight. Rejects on the first failure. */
-export async function pool<T, R>(
+export const pool = async <T, R>(
   items: T[],
   limit: number,
   fn: (item: T) => Promise<R>,
-): Promise<R[]> {
+): Promise<R[]> => {
   const results = new Array<R>(items.length);
   let cursor = 0;
 
@@ -84,9 +97,11 @@ export async function pool<T, R>(
     }
   };
 
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, worker),
+  );
   return results;
-}
+};
 
 export const asMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
@@ -100,8 +115,11 @@ export const asMessage = (error: unknown): string =>
 // ---------------------------------------------------------------------------
 
 /** Run SQL through the duckdb CLI and return raw stdout. */
-export async function duckdb(sql: string): Promise<string> {
-  const proc = Bun.spawn(["duckdb", "-json", "-c", sql], { stdout: "pipe", stderr: "pipe" });
+export const duckdb = async (sql: string): Promise<string> => {
+  const proc = Bun.spawn(["duckdb", "-json", "-c", sql], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
 
   const [stdout, stderr, code] = await Promise.all([
     new Response(proc.stdout).text(),
@@ -109,20 +127,21 @@ export async function duckdb(sql: string): Promise<string> {
     proc.exited,
   ]);
 
-  if (code !== 0) throw new Error(`duckdb failed (exit ${code}):\n${stderr || stdout}`);
+  if (code !== 0)
+    throw new Error(`duckdb failed (exit ${code}):\n${stderr || stdout}`);
   return stdout;
-}
+};
 
 /** Run SQL through the duckdb CLI and parse the JSON result. */
-export async function duckdbJson<T>(sql: string): Promise<T[]> {
+export const duckdbJson = async <T>(sql: string): Promise<T[]> => {
   const out = await duckdb(sql);
   return (out.trim() ? JSON.parse(out) : []) as T[];
-}
+};
 
 export const parquetFileMeta = (glob: string): Promise<ParquetFileMeta[]> =>
   duckdbJson<ParquetFileMeta>(srcParquetFileMeta(glob));
 
-export async function assertDuckdb(): Promise<void> {
+export const assertDuckdb = async (): Promise<void> => {
   try {
     await duckdb("SELECT 1");
   } catch {
@@ -131,14 +150,15 @@ export async function assertDuckdb(): Promise<void> {
         "  macOS: brew install duckdb   |   else: https://duckdb.org/docs/installation/",
     );
   }
-}
+};
 
 // ---------------------------------------------------------------------------
 // cli
 // ---------------------------------------------------------------------------
 
 /** True if `flag` is present in argv. */
-export const hasFlag = (argv: string[], flag: string): boolean => argv.includes(flag);
+export const hasFlag = (argv: string[], flag: string): boolean =>
+  argv.includes(flag);
 
 /** Value of `--flag=value`, or undefined. */
 export const flagValue = (argv: string[], flag: string): string | undefined =>
@@ -157,11 +177,11 @@ export const flagList = (argv: string[], flag: string): string[] | null => {
 };
 
 /** Run a script's main(), printing a clean error instead of a stack trace on failure. */
-export async function runScript(main: () => Promise<void>): Promise<void> {
+export const runScript = async (main: () => Promise<void>): Promise<void> => {
   try {
     await main();
   } catch (error) {
     console.error(`\n${asMessage(error)}`);
     process.exit(1);
   }
-}
+};

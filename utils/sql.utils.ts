@@ -17,7 +17,7 @@ const stripComments = (statement: string): string =>
  * Split a SQL file into statements. A naive `split(";")` would break on a `;` inside a comment or
  * a quoted string, so track both states while scanning.
  */
-export function splitStatements(sql: string): string[] {
+export const splitStatements = (sql: string): string[] => {
   const statements: string[] = [];
   let buffer = "";
   let inLineComment = false;
@@ -53,5 +53,7 @@ export function splitStatements(sql: string): string[] {
   }
   statements.push(buffer);
 
-  return statements.map(stripComments).filter((statement) => statement.length > 0);
-}
+  return statements
+    .map(stripComments)
+    .filter((statement) => statement.length > 0);
+};
