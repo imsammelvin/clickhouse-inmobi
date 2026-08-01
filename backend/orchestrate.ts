@@ -75,9 +75,18 @@ export async function investigate(opts: InvestigateOptions): Promise<Investigati
       : "no dominant factor",
   );
 
-  // Sweep the driving factor, not the headline metric — that is the point of decomposing first.
+  // Sweep the driving factor ONLY when the question was about revenue.
+  //
+  // Decomposing the revenue identity to find which factor moved is exactly right for revenue. It is
+  // wrong for every other metric: asked about CTR, this previously swept fill_rate instead and
+  // answered "ctr moved -8.7%, driven by os_version='Android 15' (-35.12pp)" — where -35.12pp is a
+  // FILL RATE delta. Every number was real and the sentence was still misleading, because it
+  // answered a question nobody asked. CTR is not even a factor of the revenue identity; the
+  // glossary is explicit that it is a sibling quality signal, not a revenue driver.
   const sweepMetric =
-    det.anomalous && dec.driver && METRICS[dec.driver.name] ? dec.driver.name : metric;
+    metric === "revenue" && det.anomalous && dec.driver && METRICS[dec.driver.name]
+      ? dec.driver.name
+      : metric;
 
   // ---- Stage 2: localize ---------------------------------------------------------------
   ledger.beginStage("localize");

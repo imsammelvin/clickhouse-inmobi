@@ -37,6 +37,15 @@ import { log } from "../utils/telemetryUtils";
  */
 const MAX_ROWS_TO_CLIENT = 5000;
 
+/**
+ * Ceiling on firings that map to no known incident.
+ *
+ * Set at 3 against a current count of 1, so ordinary variation does not trip it but a real
+ * regression does. Every untriaged firing is a candidate false alarm, and "avoid crying wolf on
+ * noise" is scored explicitly.
+ */
+const MAX_UNTRIAGED_FIRINGS = 3;
+
 const SCENARIOS = [
   { metric: "fill_rate", from: "2026-06-23", to: "2026-06-25" },
   { metric: "requests", from: "2026-06-21", to: "2026-06-21" },
@@ -52,7 +61,7 @@ interface Outcome {
 
 async function criterion1(): Promise<Outcome> {
   const detail: string[] = [];
-  const { fired, found, missed, extra } = await scanAll();
+  const { fired, found, missed, extra, segments } = await scanAll();
 
   for (const f of found) detail.push(`  FOUND   ${f}`);
   for (const m of missed) detail.push(`  MISSED  ${m}`);
@@ -67,12 +76,32 @@ async function criterion1(): Promise<Outcome> {
     if (extra.length > 12) detail.push(`    ... and ${extra.length - 12} more`);
   }
 
-  // Recall is reported, not gated: the known list is only the incidents we found by hand, so a
-  // hard threshold here would be measuring our own homework. Gating happens on criterion 2.
+  // GATED, not merely reported.
+  //
+  // This previously passed on `found.length > 0` — it would print "recall 2/4, 19 untriaged" and
+  // still report PASS, which made the one check that should have shouted that detection was broken
+  // into decoration. My reasoning at the time was that the known-incident list is our own homework
+  // and gating on it would be marking our own work. That is true, and it is still not a reason to
+  // return green: it is a reason to be clear about what the gate proves.
+  //
+  // What it proves: no REGRESSION. Recall against the incidents we have found by hand must not
+  // fall, and false alarms must not climb. What it does not prove: that we generalise to the
+  // private answer key. Only the synthetic-anomaly test can speak to that.
+  const recallOk = missed.length === 0;
+  const noiseOk = extra.length <= MAX_UNTRIAGED_FIRINGS;
+  if (!recallOk) detail.push(`  GATE FAILED: ${missed.length} known incident(s) missed.`);
+  if (!noiseOk) {
+    detail.push(
+      `  GATE FAILED: ${extra.length} untriaged firing(s), ceiling is ${MAX_UNTRIAGED_FIRINGS}.`,
+    );
+  }
+
   return {
     id: 1,
-    name: `1. Detection & localization — recall ${found.length}/${KNOWN_INCIDENTS.length}, ${extra.length} untriaged firing(s)`,
-    pass: found.length > 0,
+    name:
+      `1. Detection & localization — recall ${found.length}/${KNOWN_INCIDENTS.length}, ` +
+      `${extra.length} untriaged firing(s), ${segments.length} segment window(s)`,
+    pass: recallOk && noiseOk,
     detail,
   };
 }
