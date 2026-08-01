@@ -23,8 +23,15 @@ import { withSpan, withSyncSpan } from "../utils/telemetryUtils";
 /** A segment must carry at least this many requests on a day before it can fire. */
 export const SEGMENT_MIN_REQUESTS = 150;
 
-/** Baseline observations required, same rule as the blended path. */
-const MIN_BASELINE_POINTS = 2;
+/**
+ * Baseline observations required, same rule as the blended path.
+ *
+ * Exported (samarth, Crosses-lane: loges) so the rollup-backed sweep in `mcp/sweep.ts` reads this
+ * value rather than restating it. A detection threshold that exists in two places is one that will
+ * eventually differ in two places, and the symptom would be two sweeps disagreeing about whether an
+ * incident happened.
+ */
+export const MIN_BASELINE_POINTS = 2;
 
 /**
  * Segment gates are far stricter than the blended ones, and they have to be.
