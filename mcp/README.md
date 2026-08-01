@@ -180,10 +180,18 @@ What it does say, all derived:
 | `daysRunning`, `lostSoFarUsd`, `recoverableUsdPerDay` | How long it actually ran and what that cost. Duration is a fact about the incident, not about the window asked about — investigating one day of a three-day break still reports three. |
 | `priority`, `priorityBasis` | `act_now` if still bleeding, `post_mortem` if recovered, `none` if nothing is broken. From facts already established, not a tuned threshold. |
 | `owner` | Engineering / Sales / Publisher ops / Platform on-call / nobody |
-| `whereToLook` | Which **stage of the funnel**, never which system. "Requests arrived, buyers were bidding and prices held, so the failure is between request and fill for this segment." |
+| `whereToLook` | Which **stage of the funnel**, never which system — and derived per metric from [`mcp/domain.ts`](domain.ts), not written into the channel. A fill-rate break reads "the step from a request arriving to an ad being sold is failing"; a render-rate break correctly reads "from an ad being sold to the ad displaying"; eCPM reads "the price per impression fell". An undescribed metric says so instead of guessing. |
 | `doNotChase` | The residualization payoff as an instruction: slices that look broken and are clean. Empty on a clean day — listing them there would imply there was something to chase. |
 | `nextQuestion` | A follow-up this system can actually run, so the loop stays inside the evidence. |
 | `boundary` | The disclaimer, in the payload rather than only in a comment, so the narrator cannot overclaim past it. |
+
+**Portability.** Everything mechanical in the action block is domain-free: whether something is still
+happening, how long it ran, what it cost, who owns it, what not to chase are properties of a time series
+and a residualization, not of advertising. The vocabulary is the only domain-specific part and it lives
+in one file, `mcp/domain.ts` — a funnel declared as ordered stages, which metric measures each step,
+which metrics are prices and which are volumes. Another domain swaps those declarations and keeps the
+rest. The honest limit: the cause *channels* and the revenue identity live in `backend/` and are
+marketplace concepts, so this makes the advice domain-driven without pretending the engine is.
 
 Recovery is judged **per day against that day's own weekday**, in the direction the incident moved,
 against the detector's own 3% gate — so "recovered" means exactly "would no longer fire". Three

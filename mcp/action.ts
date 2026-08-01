@@ -30,6 +30,7 @@ import type { Channel, Investigation, Segment } from "../backend/types";
 import { baselineDates, median, MIN_BASELINE_DAYS } from "../backend/baseline";
 import { MIN_ABS_PCT } from "../backend/stages/detect";
 import { DATASET_END, DATASET_START, MAX_ROWS, measure } from "./query";
+import { SIDES, locateMetric, locateUnknownMetric } from "./domain";
 
 /** Who picks it up. Mirrors the owner strings `classify` assigns, which are not exported. */
 const OWNER: Record<Channel, string> = {
@@ -57,13 +58,14 @@ function whereToLook(
 ): { lines: string[]; nextQuestion: string | null } {
   const seg = segment ? `${segment.dimension} = '${segment.value}'` : "the platform";
   const dim = segment?.dimension ?? null;
+  /** Where in the funnel this metric sits — derived from mcp/domain.ts, never from the channel. */
+  const located = locateMetric(metric, seg) ?? locateUnknownMetric(metric, seg);
 
   switch (channel) {
     case "technical_break":
       return {
         lines: [
-          `The failure is between request and fill for ${seg}: requests arrived, buyers were bidding ` +
-            `and prices held, so supply and demand were both present and the match did not happen.`,
+          located,
           `Whatever changed is specific to ${seg} — every other value of ${dim ?? "that dimension"} ` +
             `stayed normal over the same days, so it is not a platform-wide fault.`,
         ],
@@ -74,20 +76,18 @@ function whereToLook(
     case "demand_change":
       return {
         lines: [
-          `Buy side for ${seg}: the shortfall is in what advertisers were willing to pay or how many ` +
-            `were bidding there, not in traffic arriving or ads rendering.`,
-          `Requests and render rate held, so there is nothing to fix in delivery — this is a ` +
-            `commercial change in that segment.`,
+          located,
+          `The shortfall is on ${SIDES.demand} — not in traffic arriving or in delivery, both of which ` +
+            `held. There is nothing to fix in the pipeline; this is a commercial change in ${seg}.`,
         ],
         nextQuestion: `break ecpm down by advertiser_vertical for ${seg} over the same window`,
       };
     case "supply_change":
       return {
         lines: [
-          `Sell side for ${seg}: request volume is what moved. The funnel below it — fill, render, ` +
-            `price — behaved normally, so inventory changed rather than performance.`,
-          `Check whether that change was expected: a publisher pausing, an integration changing, or ` +
-            `traffic shifting to another slice.`,
+          located,
+          `The movement is on ${SIDES.supply}; everything downstream of it behaved normally, so ` +
+            `inventory changed rather than performance. Check whether that change was expected.`,
         ],
         nextQuestion: dim ? `rank ${dim} by requests over the same window to see who moved` : null,
       };
