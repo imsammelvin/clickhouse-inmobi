@@ -118,7 +118,11 @@ function effectFactor(metric: string): string {
   for (const p of PLANTED) {
     if (p.metric !== metric) continue;
     const window = `day_idx BETWEEN ${p.fromDay} AND ${p.toDay}`;
-    const scope = p.segment ? ` AND ${rowDimension(p.segment.dimension)} = ${lit(p.segment.value)}` : "";
+    // Conditions are ANDed, so two of them place the effect at an intersection — a slice whose share
+    // is the product of theirs, invisible in either dimension alone.
+    const scope = (p.conditions ?? [])
+      .map((c) => ` AND ${rowDimension(c.dimension)} = ${lit(c.value)}`)
+      .join("");
     clauses.push(`${window}${scope}, ${p.factor}`);
   }
   return clauses.length ? `multiIf(${clauses.join(", ")}, 1.0)` : "1.0";

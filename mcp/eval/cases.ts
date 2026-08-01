@@ -121,7 +121,9 @@ export const CASES: EvalCase[] = [
       daysRunning: 3,
       priority: "post_mortem",
       ownerContains: "Engineering",
-      whereToLookContains: "between request and fill",
+      // Locates the break at the right funnel step for THIS metric, derived from mcp/domain.ts
+      // rather than hardcoded per channel — a render-rate break used to get this same sentence.
+      whereToLookContains: "from a request arriving to an ad being sold",
     },
   },
   {

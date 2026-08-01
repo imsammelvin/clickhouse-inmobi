@@ -471,3 +471,28 @@ are `hyperdx_sessions`, `otel_metrics_exponential_histogram`, `otel_metrics_gaug
 `otel_metrics_summary` — 0 rows each. They are part of HyperDX's own fixed schema and it queries them by
 name, so dropping them would break the next signal type that arrives. They occupy 0 bytes, so there is
 nothing to reclaim. Your call, not mine.
+**Harness hardened so this cannot recur:** default volume now matches production, `verify.ts` refuses
+to score when dimensions are blank, and `spec.ts` documents the blind zone with the two false reports
+that taught me it. My lesson, plainly: **a test harness sized below production measures its own noise**,
+and I should have run the scale sensitivity before writing a defect report, not after.
+### 2026-08-02 00:15 — loges — Lane D: LibreChat session hygiene is inflating first-call token cost
+
+**One real trace showed a 26,088-token first call for a 7-word question.** Pulled the raw `input`
+via the Langfuse API (not just the UI list preview, which only shows the first message of a
+multi-turn array and looks stale/misleading by itself). The system message carried a ~1,900-word
+"Conversation Summary/Checkpoint" that was leftover context from a **different, unrelated
+conversation** (an earlier Android-15 investigation, another teammate's session) — the thread had
+been continued by a different person rather than started fresh.
+
+**Good news underneath it:** DeepSeek prompt caching is genuinely working — the *next* two calls in
+that same session reused ~84-89% of input tokens from cache (at ~50x cheaper than a cache miss), so
+steady-state turns are already cheap. The fixed cost is specifically the one uncached first call per
+session, not a resend-everything-every-turn problem.
+
+**Ask, not a blocker:** during testing, please start a fresh LibreChat conversation per person/session
+rather than continuing someone else's thread — it's the difference between a clean cold-start and one
+carrying an irrelevant multi-KB checkpoint at full price. Not a code bug on your end, just a testing
+habit worth adopting before the freeze. Full numbers in `pitch/llm-cost-optimization.md` §3.
+
+**Commits:** none (docs only) — `pitch/llm-cost-optimization.md` updated, not yet pushed (loges' own
+rule: only loges pushes their own commits).

@@ -216,10 +216,18 @@ What it does say, all derived:
 | `daysRunning`, `lostSoFarUsd`, `recoverableUsdPerDay` | How long it actually ran and what that cost. Duration is a fact about the incident, not about the window asked about — investigating one day of a three-day break still reports three. |
 | `priority`, `priorityBasis` | `act_now` if still bleeding, `post_mortem` if recovered, `none` if nothing is broken. From facts already established, not a tuned threshold. |
 | `owner` | Engineering / Sales / Publisher ops / Platform on-call / nobody |
-| `whereToLook` | Which **stage of the funnel**, never which system. "Requests arrived, buyers were bidding and prices held, so the failure is between request and fill for this segment." |
+| `whereToLook` | Which **stage of the funnel**, never which system — and derived per metric from [`mcp/domain.ts`](domain.ts), not written into the channel. A fill-rate break reads "the step from a request arriving to an ad being sold is failing"; a render-rate break correctly reads "from an ad being sold to the ad displaying"; eCPM reads "the price per impression fell". An undescribed metric says so instead of guessing. |
 | `doNotChase` | The residualization payoff as an instruction: slices that look broken and are clean. Empty on a clean day — listing them there would imply there was something to chase. |
 | `nextQuestion` | A follow-up this system can actually run, so the loop stays inside the evidence. |
 | `boundary` | The disclaimer, in the payload rather than only in a comment, so the narrator cannot overclaim past it. |
+
+**Portability.** Everything mechanical in the action block is domain-free: whether something is still
+happening, how long it ran, what it cost, who owns it, what not to chase are properties of a time series
+and a residualization, not of advertising. The vocabulary is the only domain-specific part and it lives
+in one file, `mcp/domain.ts` — a funnel declared as ordered stages, which metric measures each step,
+which metrics are prices and which are volumes. Another domain swaps those declarations and keeps the
+rest. The honest limit: the cause *channels* and the revenue identity live in `backend/` and are
+marketplace concepts, so this makes the advice domain-driven without pretending the engine is.
 
 Recovery is judged **per day against that day's own weekday**, in the direction the incident moved,
 against the detector's own 3% gate — so "recovered" means exactly "would no longer fire". Three
@@ -312,6 +320,45 @@ Notes for whoever wires it:
 - Tool failures come back as `isError: true` with a readable message, deliberately not as JSON-RPC
   errors — the model should read the message and fix its argument, which it cannot do if the client
   swallows the error.
+
+## Generalisation: `bun run synth:build` / `synth:verify` / `synth:destroy`
+
+`mcp:eval` scores against incidents we found by reading the training data, so it measures agreement
+with our own homework. This scores against a dataset built from a declared answer key — 11.5M rows in
+its own database, different dimension values, different baselines, September/October dates, same
+columns only. `CLICKHOUSE_DATABASE` retargets the whole engine, so the code under test is the shipping
+code. Deterministic from a seed; `default` is untouchable by construction.
+
+**Ten planted deviations, currently 0 gated failures.** Four exist specifically to exercise branches
+this project's own notes record as never having run:
+
+| | Planted | Engine |
+| --- | --- | --- |
+| P1 | fill collapse on one OS | localized, `technical_break` |
+| P2 | eCPM drop on one category | localized, `demand_change` |
+| P3 | **uniform** platform collapse | `not_localizable`, named no segment |
+| P4 | CTR **up** 65% | named no segment |
+| P5 | render-rate break | localized — a funnel stage June 2026 never breaks |
+| P6a/b | **two co-occurring causes**, same metric and window | **both named** — greedy deflation converges |
+| P7 | cause at a **pair intersection** only | found — the problem statement's own shape |
+| P8 | still live on the **last day loaded** | `act_now` / `ongoing` — never fires on training data |
+| P9 | 1.7% of traffic, −25% | **suppressed** — T-046 materiality, on data it wasn't tuned against |
+
+Plus four quiet days that must stay quiet, and a weekend dip the same-weekday baseline must absorb.
+
+**Two properties worth knowing, both learned the hard way and both documented in `spec.ts`:**
+
+- **Below production volume the harness measures its own noise.** At 40k events/day segment sampling
+  noise manufactured a "cause" inside a genuinely uniform collapse and inside a metric that had merely
+  risen — two fabrication defects that do not exist, which I reported before checking scale. Default is
+  now 260k, matching the real dataset; `--events-per-day` explores sensitivity deliberately.
+- **The first 14 days of any slice are undetectable.** Detection needs two prior same-weekday
+  observations, so nothing before day 14 is findable by construction. This applies to the real Day-2
+  slice too: an incident in its first fortnight is invisible to us.
+
+Clean-day failures are graded by severity: naming a cause where nothing was planted gates; saying the
+platform moved without naming anyone is reported as a false alarm, because on this dataset the likely
+culprit is the +1.1%/week growth I built in rather than the detector.
 
 ## Accuracy: `bun run mcp:eval`
 
