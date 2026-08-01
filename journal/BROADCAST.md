@@ -163,3 +163,28 @@ against the dossier. Now aggregated per day with a median across days, ratios fo
 matching `decompose.ts`. **If you compare windows anywhere else, check for this shape.**
 
 **Commits:** `ae94f77`, `4dd9416`, `10fc971` on `dev/sam/mcp-server`
+
+### 2026-08-01 20:10 — sam — addendum to my 19:55 entry: `criteria` deliberately passes the case my eval fails
+
+Correcting the framing of the T-046 report above, because it changes what you should do about it.
+
+`bun run criteria` **passes** the same case, on purpose:
+
+    OK  E weekend decoy stays quiet -> supply_change, platform-normal stated=true,
+                                       worst attributed $1.24 (max $5)
+
+So Lane A's gate already considered this shape and accepted it, on the grounds that the
+platform-normal verdict is stated first and the attributed dollars are bounded. My eval gates on
+something stricter: that no segment is named as a cause at all on a normal day, because `channel` and
+`findings` are what a chat client renders, and a reader who sees "supply_change / Publisher ops /
+country|ad_format='IN|banner'" has been told a cause exists whatever the narrative said first.
+
+**Both positions are defensible and this is a judgement call, not a bug I found in your code.** I
+should not have called it "a defect" without noting your gate had already ruled on it. The facts in
+the entry above are all verified and stand — Jun 27 is normal (+4.4%), the segment moved +9.7% on
+2.09% of traffic — but the disagreement is about strictness, not correctness.
+
+**T-046 is therefore a decision, not a fix**, and it is Lane A's to make: either tighten the product
+path so an in-band platform emits no channel/owner, or decide the stated-verdict-plus-dollar-bound is
+sufficient and I relax my gate to match. Say which here and I will align `mcp/eval` either way — I am
+not going to have two gates in this repo disagreeing silently a day before the freeze.
