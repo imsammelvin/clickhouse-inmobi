@@ -194,6 +194,32 @@ export function buildScope(filters: unknown, metric: MetricDef): Scope {
   const clean: Record<string, string> = {};
 
   for (const [dim, value] of entries) {
+    /**
+     * Pair dimensions are real causes, so they have to be filterable.
+     *
+     * The sweep emits synthetic composite cuts — `region|device_model` with values like
+     * `NORTH|Orbit` — and residualize can name one as the cause. `assertDimension` rejects that
+     * name, so every downstream filter on it threw "Unknown dimension" and took the whole
+     * investigation down with it. The training data never produced a pair cause, so the crash was
+     * invisible until a dataset where one won. Split into its two real columns, exactly as
+     * `segmentPredicate` in backend/types.ts does for the sweep itself.
+     */
+    if (dim.includes("|")) {
+      const [dimA, dimB] = dim.split("|");
+      assertDimension(dimA, metric);
+      assertDimension(dimB, metric);
+      if (typeof value !== "string" || !value.includes("|")) {
+        throw new QueryError(
+          `Filter \`${dim}\` is a pair dimension, so its value must be "a|b" — got ${JSON.stringify(value)}.`,
+        );
+      }
+      const [valA, valB] = value.split("|");
+      parts.push(`${dimA} = ${lit(valA ?? "")} AND ${dimB} = ${lit(valB ?? "")}`);
+      described.push(`${dimA}='${valA}', ${dimB}='${valB}'`);
+      clean[dim] = value;
+      continue;
+    }
+
     assertDimension(dim, metric);
 
     if (Array.isArray(value)) {

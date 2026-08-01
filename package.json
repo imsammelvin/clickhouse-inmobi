@@ -19,6 +19,7 @@
     "ch:verify": "bun run scripts/verify.ts",
     "ch:setup": "bun run ch:schema && bun run ch:load && bun run ch:verify",
     "synth:build": "bun run mcp/synth/generate.ts",
+    "synth:destroy": "bun run mcp/synth/destroy.ts",
     "synth:verify": "CLICKHOUSE_DATABASE=rca_synth bun run mcp/synth/verify.ts",
     "diagnose": "OTEL_SERVICE_NAME=clickhouse-inmobi-diagnose bun run mcp/diagnose.ts",
     "mcp:stdio": "OTEL_SERVICE_NAME=clickhouse-inmobi-mcp bun run mcp/server.ts --transport stdio",

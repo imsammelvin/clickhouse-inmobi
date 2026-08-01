@@ -316,3 +316,67 @@ tuned against several known incidents already, and I do not have enough confiden
 change it without risking a regression elsewhere. `investigate()` on the exact hand-verified window
 (Jun 19-22) already gets this right today (confirmed: `mcp:eval` C-finance-ecpm passes 100%). Flagging
 for whoever has time before the freeze to confirm whether the European-interstitial pattern is real.
+
+### 2026-08-01 22:40 — sam — synthetic dataset built; the engine fabricates a cause on an unseen uniform collapse
+
+**What exists:** `mcp/synth/` — a 1.48M-row dataset in its own database `rca_synth` with five deviations
+planted from a declarative spec, plus a scorer. `CLICKHOUSE_DATABASE` retargets the whole engine, so
+what runs is the shipping code. `bun run synth:build` / `synth:verify` / `synth:destroy`. `default` is
+untouchable by construction (two independent guards, both tested).
+
+**Why it matters:** `KNOWN_INCIDENTS` measures agreement with our own homework — we found those
+incidents with the same intuitions we then encoded. Here the deviations are declared before the data
+exists, and precision becomes measurable for the first time: anything firing that is not in the spec
+is a false positive definitionally, not "untriaged".
+
+---
+
+**GOOD NEWS FIRST.** On a dataset the engine has never seen, with different values and baselines:
+
+    P1  fill collapse on os_version='iOS 18.4'   -> FOUND, localized, technical_break, -$7.80/day
+    P2  eCPM drop on app_category='banking'      -> FOUND, localized, demand_change
+    quiet days (4 of them)                        -> all no_anomaly, nothing invented
+
+Localization and channel are both right on both. That is real evidence of generalisation.
+
+---
+
+**FINDING 1 — loges, this is the important one. A uniform collapse gets a fabricated cause.**
+
+P3 plants a platform-wide request collapse to 55% for one day, applied to every row equally — no
+segment is responsible, by construction. Incident B (Jun 21) is the same shape and correctly returns
+`not_localizable`. On this dataset:
+
+    investigate(requests, 2026-09-30) -> demand_change, cause region|device_model='SOUTH|Zeal'
+
+**It named a segment that is not responsible, on the case our headline claim is built on.** "It can
+return zero causes" holds for Jun 21 and does not generalise. This is the failure the rubric punishes
+hardest, and on the unseen dataset it is the one most likely to be tested.
+
+**FINDING 2 — a metric moving UP is diagnosed as a break.** P4 raises CTR on `region='ISLANDS'` by
+65%. Result: `technical_break`, cause `country|ad_format='FF|video'`. Nothing is broken; CTR improved.
+
+**FINDING 3 — `render_rate` is never swept.** `DEFAULT_METRICS` in `backend/scan.ts` is revenue,
+requests, fill_rate, ecpm, ctr. P5 breaks render rate on `ad_format='rewarded'` (verified in the data
+at 0.6498 against 0.94 elsewhere) and the sweep cannot see it, so the unattended path misses a whole
+funnel stage. One-word fix, your file.
+
+**FINDING 4 — precision is worse than anything we could previously measure.** One run reported 50
+windows of which 29 matched nothing planted, mostly `ctr` moves of 15-50% on small segments. At 5 sigma
+over ~10^5 tests, chance predicts under one. The spread floor (`MIN_COEFF_VARIATION` 0.5%) is
+calibrated for a metric as stable as fill rate and badly understates the noise in a low-count ratio
+like CTR, so sigma is inflated and the gate stops binding. Two consecutive identical runs also reported
+50 and then 9 windows — that instability is its own bug.
+
+**FINDING 5 — samarth, a Day-2 landmine in the load path.** After inserting fresh dimension rows,
+`dictGet` returned `''` for every row until the dictionaries actually loaded on the serving replica.
+Every dimension becomes blank, the sweep sees one valueless dimension, and the engine confidently
+answers **`not_localizable` for everything** — no error, no empty result, a trace that looks clean.
+I lost an hour to it believing the engine had failed. `SYSTEM RELOAD DICTIONARY` at load time is not
+sufficient on its own; **`ch:verify` should assert that a sample `dictGet` returns a non-empty value
+before declaring the load good.**
+
+**Mine, already fixed:** a pair-dimension cause (`region|device_model`) threw "Unknown dimension" in my
+filter validation and took the whole investigation down. Training data never produced a pair cause.
+
+**Commit:** on `dev/sam/mcp-confidentiality`

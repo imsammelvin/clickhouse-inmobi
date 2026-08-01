@@ -20,11 +20,9 @@
  * reproduced by anyone. All generation happens server-side from `numbers()`: no rows cross the wire.
  */
 import { readFileSync } from "node:fs";
-import { createClient } from "@clickhouse/client";
 import { splitStatements } from "../../utils/sql.utils";
 import { DIMS, PLANTED, SHAPE, dateOf } from "./spec";
-
-const DEFAULT_DB = "rca_synth";
+import { resolveTargetDatabase, scratchClient, serverClient } from "./target";
 
 const flag = (name: string): boolean => process.argv.includes(`--${name}`);
 const arg = (name: string): string | undefined => {
@@ -34,26 +32,6 @@ const arg = (name: string): string | undefined => {
 const say = (s = ""): void => {
   process.stderr.write(`${s}\n`);
 };
-
-/**
- * Refuse anything that could be a real database.
- *
- * Two independent conditions, because one typo should not be able to drop the dataset the whole
- * project depends on: the name must not be `default`, and it must contain "synth". A slip in an env
- * var then fails loudly instead of rebuilding production as test data.
- */
-function assertScratchDatabase(db: string): string {
-  if (!/^[a-z][a-z0-9_]{2,40}$/.test(db)) {
-    throw new Error(`Refusing database "${db}": expected lowercase letters, digits and underscores.`);
-  }
-  if (db === "default" || !db.includes("synth")) {
-    throw new Error(
-      `Refusing to build into "${db}". This script only ever writes to a scratch database whose name ` +
-        `contains "synth" — the real dataset lives in "default" and must never be a target.`,
-    );
-  }
-  return db;
-}
 
 // -------------------------------------------------------------------------------------------------
 // SQL fragment helpers. Every dimension value is recomputed from the same expression that built the
@@ -231,7 +209,7 @@ FROM (
 }
 
 async function main(): Promise<void> {
-  const db = assertScratchDatabase(arg("db") ?? process.env.CLICKHOUSE_DATABASE ?? DEFAULT_DB);
+  const db = resolveTargetDatabase();
   const dryRun = flag("dry-run");
   const reset = flag("reset");
 
@@ -259,12 +237,7 @@ async function main(): Promise<void> {
   }
 
   // A client bound to the server, not to a database: the first statements create the database itself.
-  const admin = createClient({
-    url: process.env.CLICKHOUSE_URL!,
-    username: process.env.CLICKHOUSE_USER!,
-    password: process.env.CLICKHOUSE_PASSWORD ?? "",
-    request_timeout: 600_000,
-  });
+  const admin = serverClient();
   try {
     for (const sql of statements) {
       say(`[synth] ${sql}`);
@@ -274,13 +247,7 @@ async function main(): Promise<void> {
     await admin.close();
   }
 
-  const client = createClient({
-    url: process.env.CLICKHOUSE_URL!,
-    username: process.env.CLICKHOUSE_USER!,
-    password: process.env.CLICKHOUSE_PASSWORD ?? "",
-    database: db,
-    request_timeout: 600_000,
-  });
+  const client = scratchClient(db);
 
   try {
     say(`[synth] applying ${schema.length} schema statement(s)`);
@@ -314,7 +281,8 @@ async function main(): Promise<void> {
     say(`[synth] ${JSON.stringify(row)}`);
     say(``);
     say(`[synth] done. Point the engine at it:`);
-    say(`          CLICKHOUSE_DATABASE=${db} bun run synth:verify`);
+    say(`          bun run synth:verify        # score found vs planted`);
+    say(`          bun run synth:destroy       # remove it again`);
   } finally {
     await client.close();
   }
