@@ -34,7 +34,13 @@ export const SHAPE = {
   /** Fixed, so a rebuild produces byte-identical data. Change it to get a different world. */
   seed: 20260802,
   from: "2026-09-01",
-  days: 35,
+  /**
+   * Six weeks, not five. Ten planted deviations plus the pre-day-14 blind zone left almost no
+   * unplanted days, and three "quiet day" assertions were silently sitting inside planted windows —
+   * the harness marking its own collisions as engine false alarms. The extra week buys room for real
+   * quiet days and a deeper baseline.
+   */
+  days: 42,
   /**
    * Before weekend, growth and planted effects are applied.
    *
@@ -65,6 +71,11 @@ export const SHAPE = {
 /** Which metric a planted deviation is expected to surface on. */
 export type PlantedMetric = "fill_rate" | "ecpm" | "ctr" | "requests" | "render_rate";
 
+export interface Condition {
+  dimension: keyof typeof DIMS;
+  value: string;
+}
+
 export interface Planted {
   id: string;
   /** What we did to the data, in one line. */
@@ -72,8 +83,15 @@ export interface Planted {
   /** Inclusive day offsets from SHAPE.from. */
   fromDay: number;
   toDay: number;
-  /** null = platform-wide, applied to every row on those days. */
-  segment: { dimension: keyof typeof DIMS; value: string } | null;
+  /**
+   * The rows the effect applies to. `null` = every row (platform-wide).
+   *
+   * A LIST, not a single dimension, so an effect can live at the intersection of two — which is the
+   * problem statement's own example ("Device X in Region North") and the shape a single-dimension
+   * sweep cannot see. With two conditions the slice is the product of their shares, so it is small:
+   * that makes it a test of the pair cuts and of the materiality floor at the same time.
+   */
+  conditions: Condition[] | null;
   metric: PlantedMetric;
   /** Multiplier applied to the underlying probability or value. */
   factor: number;
@@ -83,8 +101,24 @@ export interface Planted {
     detected: boolean;
     /** Expected cause channel, or null when we are not asserting one. */
     channel: string | null;
-    /** Must `investigate` name this exact segment? false for platform-wide/uniform. */
+    /** Must `investigate` name a segment? false for platform-wide, uniform, or suppressed. */
     localizes: boolean;
+    /**
+     * Any of these names is an acceptable answer. For an intersection cause the engine may name the
+     * pair cut or either half, and all three are defensible — the pair is tightest, a half is
+     * incomplete but not wrong.
+     */
+    acceptable?: Condition[];
+    /**
+     * Several causes were planted in this window on the same metric. It is enough to name one; how
+     * many of them appear is measured and reported rather than gated, because greedy deflation is
+     * documented as assuming a single dominant cause per pass.
+     */
+    oneOf?: boolean;
+    /** Runs to the last day of the dataset, so the action must read `ongoing`, not `recovered`. */
+    ongoing?: boolean;
+    /** Below the materiality floor: real in the data, and correctly not worth reporting. */
+    suppressed?: boolean;
     /** Notes for a human reading a failure. */
     why: string;
   };
@@ -110,7 +144,7 @@ export const PLANTED: Planted[] = [
     what: "fill rate on os_version='iOS 18.4' cut to 45% of normal for 3 days",
     fromDay: 15,
     toDay: 17,
-    segment: { dimension: "os_version", value: "iOS 18.4" },
+    conditions: [{ dimension: "os_version", value: "iOS 18.4" }],
     metric: "fill_rate",
     factor: 0.45,
     expect: {
@@ -127,16 +161,14 @@ export const PLANTED: Planted[] = [
     what: "eCPM on app_category='banking' cut to 60% of normal for 4 days",
     fromDay: 23,
     toDay: 26,
-    segment: { dimension: "app_category", value: "banking" },
+    conditions: [{ dimension: "app_category", value: "banking" }],
     metric: "ecpm",
     factor: 0.6,
     expect: {
       detected: true,
       channel: null,
       localizes: true,
-      why:
-        "Price fell while volume and fill held. Channel is not asserted: the training data shows this " +
-        "shape landing on demand_change, and that assignment is Lane A's open question (T-046 family).",
+      why: "Price fell while volume and fill held. Channel not asserted — that is Lane A's open question.",
     },
   },
   {
@@ -144,7 +176,7 @@ export const PLANTED: Planted[] = [
     what: "platform-wide request volume cut to 55% for a single day",
     fromDay: 29,
     toDay: 29,
-    segment: null,
+    conditions: null,
     metric: "requests",
     factor: 0.55,
     expect: {
@@ -161,26 +193,22 @@ export const PLANTED: Planted[] = [
     what: "CTR on region='ISLANDS' raised to 165% of normal for 2 days",
     fromDay: 19,
     toDay: 20,
-    segment: { dimension: "region", value: "ISLANDS" },
+    conditions: [{ dimension: "region", value: "ISLANDS" }],
     metric: "ctr",
     factor: 1.65,
     expect: {
       detected: true,
       channel: null,
-      // A trap. The move is real and the sweep should see it, but a metric going UP is not an
-      // incident to escalate, and the digest must rank it below every genuine loss.
       localizes: false,
-      why:
-        "A rise, not a loss. It may appear in the sweep, but it must not be escalated as an incident " +
-        "or presented as something to fix.",
+      why: "A rise, not a loss. It must not be escalated as an incident or presented as something to fix.",
     },
   },
   {
     id: "P5-render-break-format",
     what: "render rate on ad_format='rewarded' cut to 70% of normal for 2 days",
-    fromDay: 32,
-    toDay: 33,
-    segment: { dimension: "ad_format", value: "rewarded" },
+    fromDay: 21,
+    toDay: 22,
+    conditions: [{ dimension: "ad_format", value: "rewarded" }],
     metric: "render_rate",
     factor: 0.7,
     expect: {
@@ -188,8 +216,122 @@ export const PLANTED: Planted[] = [
       channel: null,
       localizes: true,
       why:
-        "Ads were bought and then failed to display. Tests a funnel stage the training data never " +
-        "exercises — nothing in June 2026 breaks render rate, so this branch has never run on real data.",
+        "Ads were bought and then failed to display — a funnel stage nothing in June 2026 breaks, so " +
+        "this branch has never run on real data.",
+    },
+  },
+
+  // ---- the branches this project's own notes say have never executed --------------------------
+
+  {
+    id: "P6a-two-causes-country",
+    what: "fill rate on country='CC' cut to 50% for 2 days, SIMULTANEOUSLY with P6b",
+    fromDay: 27,
+    toDay: 28,
+    conditions: [{ dimension: "country", value: "CC" }],
+    metric: "fill_rate",
+    factor: 0.5,
+    expect: {
+      detected: true,
+      channel: null,
+      localizes: true,
+      oneOf: true,
+      acceptable: [
+        { dimension: "country", value: "CC" },
+        { dimension: "device_model", value: "Nova 9" },
+      ],
+      why:
+        "Two independent causes on the same metric in the same window, on dimensions that barely " +
+        "overlap. The journal flags this as the part of residualization most likely to be wrong: " +
+        "greedy deflation assumes ONE dominant cause per pass, and nothing in the training data has " +
+        "two at once. Naming one is a pass; naming both is the real target.",
+    },
+  },
+  {
+    id: "P6b-two-causes-device",
+    what: "fill rate on device_model='Nova 9' cut to 55% for 2 days, SIMULTANEOUSLY with P6a",
+    fromDay: 27,
+    toDay: 28,
+    conditions: [{ dimension: "device_model", value: "Nova 9" }],
+    metric: "fill_rate",
+    factor: 0.55,
+    expect: {
+      detected: true,
+      channel: null,
+      localizes: true,
+      oneOf: true,
+      acceptable: [
+        { dimension: "country", value: "CC" },
+        { dimension: "device_model", value: "Nova 9" },
+      ],
+      why: "The other half of the co-occurring pair. See P6a.",
+    },
+  },
+  {
+    id: "P7-pair-only-cause",
+    what: "eCPM cut to 50% only where country='DD' AND ad_format='video', for 2 days",
+    fromDay: 30,
+    toDay: 31,
+    conditions: [
+      { dimension: "country", value: "DD" },
+      { dimension: "ad_format", value: "video" },
+    ],
+    metric: "ecpm",
+    factor: 0.5,
+    expect: {
+      detected: true,
+      channel: null,
+      localizes: true,
+      acceptable: [
+        { dimension: "country", value: "DD" },
+        { dimension: "ad_format", value: "video" },
+      ],
+      why:
+        "The problem statement's own example shape — a break at the intersection of two attributes, " +
+        "diluted in either one alone (DD moves a fifth as much, video a twelfth). This is what the " +
+        "pairwise cuts exist for; a single-dimension sweep can only see a shadow of it.",
+    },
+  },
+  {
+    id: "P8-still-ongoing",
+    what: "fill rate on publisher_tier='tier_a' cut to 60% from day 40 to the END of the data",
+    fromDay: 40,
+    toDay: 41,
+    conditions: [{ dimension: "publisher_tier", value: "tier_a" }],
+    metric: "fill_rate",
+    factor: 0.6,
+    expect: {
+      detected: true,
+      channel: null,
+      localizes: true,
+      ongoing: true,
+      why:
+        "Runs to the last day loaded, so there is no evidence it stopped. Every incident in the " +
+        "training data recovers, so `act_now` has never fired on real data — and on the unseen slice a " +
+        "live incident is the single most consequential thing to get right.",
+    },
+  },
+  {
+    id: "P9-immaterial-slice",
+    what: "fill rate cut to 75% where country='LL' AND ad_format='rewarded' (1.7% of traffic), 1 day",
+    fromDay: 18,
+    toDay: 18,
+    conditions: [
+      { dimension: "country", value: "LL" },
+      { dimension: "ad_format", value: "rewarded" },
+    ],
+    metric: "fill_rate",
+    factor: 0.75,
+    expect: {
+      detected: true,
+      channel: null,
+      localizes: false,
+      suppressed: true,
+      why:
+        "Real in the data and correctly not worth anyone's morning: 1.7% of traffic moving -25% is " +
+        "0.42 platform points, under the 0.5 floor and the 5%-of-traffic floor. This is T-046's " +
+        "materiality gate, shipped days ago and never tested on data it was not tuned against. " +
+        "Reporting this as an incident is the false-alarm failure; ignoring a real one is the opposite.",
     },
   },
 ];
@@ -199,7 +341,7 @@ export const PLANTED: Planted[] = [
  *
  * All chosen at day 14 or later, for the same reason the deviations are: see BLIND_ZONE_DAYS.
  */
-export const CLEAN_DAYS: number[] = [14, 21, 28, 34];
+export const CLEAN_DAYS: number[] = [14, 32, 35, 38];
 
 /**
  * The first two weeks of any dataset are undetectable, and that is a property of the method rather

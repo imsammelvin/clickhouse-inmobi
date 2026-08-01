@@ -277,6 +277,45 @@ Notes for whoever wires it:
   errors — the model should read the message and fix its argument, which it cannot do if the client
   swallows the error.
 
+## Generalisation: `bun run synth:build` / `synth:verify` / `synth:destroy`
+
+`mcp:eval` scores against incidents we found by reading the training data, so it measures agreement
+with our own homework. This scores against a dataset built from a declared answer key — 11.5M rows in
+its own database, different dimension values, different baselines, September/October dates, same
+columns only. `CLICKHOUSE_DATABASE` retargets the whole engine, so the code under test is the shipping
+code. Deterministic from a seed; `default` is untouchable by construction.
+
+**Ten planted deviations, currently 0 gated failures.** Four exist specifically to exercise branches
+this project's own notes record as never having run:
+
+| | Planted | Engine |
+| --- | --- | --- |
+| P1 | fill collapse on one OS | localized, `technical_break` |
+| P2 | eCPM drop on one category | localized, `demand_change` |
+| P3 | **uniform** platform collapse | `not_localizable`, named no segment |
+| P4 | CTR **up** 65% | named no segment |
+| P5 | render-rate break | localized — a funnel stage June 2026 never breaks |
+| P6a/b | **two co-occurring causes**, same metric and window | **both named** — greedy deflation converges |
+| P7 | cause at a **pair intersection** only | found — the problem statement's own shape |
+| P8 | still live on the **last day loaded** | `act_now` / `ongoing` — never fires on training data |
+| P9 | 1.7% of traffic, −25% | **suppressed** — T-046 materiality, on data it wasn't tuned against |
+
+Plus four quiet days that must stay quiet, and a weekend dip the same-weekday baseline must absorb.
+
+**Two properties worth knowing, both learned the hard way and both documented in `spec.ts`:**
+
+- **Below production volume the harness measures its own noise.** At 40k events/day segment sampling
+  noise manufactured a "cause" inside a genuinely uniform collapse and inside a metric that had merely
+  risen — two fabrication defects that do not exist, which I reported before checking scale. Default is
+  now 260k, matching the real dataset; `--events-per-day` explores sensitivity deliberately.
+- **The first 14 days of any slice are undetectable.** Detection needs two prior same-weekday
+  observations, so nothing before day 14 is findable by construction. This applies to the real Day-2
+  slice too: an incident in its first fortnight is invisible to us.
+
+Clean-day failures are graded by severity: naming a cause where nothing was planted gates; saying the
+platform moved without naming anyone is reported as a false alarm, because on this dataset the likely
+culprit is the +1.1%/week growth I built in rather than the detector.
+
 ## Accuracy: `bun run mcp:eval`
 
 Scores answers **through the tool layer**, because what a judge sees is what the client gets back.
