@@ -266,28 +266,66 @@ export async function ensureRollupReady(
   if (lastHealth) return lastHealth;
 
   try {
+    // EVERY dim key must account for the whole fact table, not just one of them.
+    //
+    // This checked `dim = 'ad_format'` alone. Each key is an independent slice of the same events, so
+    // one of them summing correctly says nothing about the others when they were not written
+    // together — and they are not: `bun run ch:rollup` backfills a day at a time, so an interrupted
+    // backfill, or a fan-out that gained a dimension after some days were already built, leaves one
+    // key short while `ad_format` still ties out. The planner would then serve that key happily and
+    // return a number that is low by whatever is missing. Silent, and it reads as a quiet segment.
+    //
+    // min/max over the per-key totals catches any key that disagrees, and the key COUNT catches one
+    // that is absent entirely — which a sum over present keys cannot see. Cost is a grouped scan of
+    // ~150k daily rows, which is metadata next to the queries it guards.
     const [row] = await run<Record<string, unknown>>(
-      `SELECT (SELECT count() FROM ad_events)                                            AS fact_events,
-              (SELECT sum(events) FROM ${ROLLUP_TABLES.daily} WHERE dim = 'ad_format')   AS rollup_events,
-              (SELECT count() FROM ${ROLLUP_TABLES.daily})                               AS daily_rows,
-              (SELECT count() FROM ${ROLLUP_TABLES.hourly})                              AS hourly_rows`,
+      `WITH per_key AS (
+         SELECT dim, sum(events) AS total FROM ${ROLLUP_TABLES.daily} GROUP BY dim
+       )
+       SELECT (SELECT count() FROM ad_events)                     AS fact_events,
+              (SELECT count() FROM per_key)                       AS key_count,
+              (SELECT min(total) FROM per_key)                    AS min_key_events,
+              (SELECT max(total) FROM per_key)                    AS max_key_events,
+              (SELECT sum(events) FROM ${ROLLUP_TABLES.hourly} WHERE dim = 'ad_format') AS hourly_events,
+              (SELECT count() FROM ${ROLLUP_TABLES.daily})        AS daily_rows,
+              (SELECT count() FROM ${ROLLUP_TABLES.hourly})       AS hourly_rows`,
     );
 
     const factEvents = Number(row?.fact_events ?? 0);
-    const rollupEvents = Number(row?.rollup_events ?? 0);
+    const keyCount = Number(row?.key_count ?? 0);
+    const minKeyEvents = Number(row?.min_key_events ?? 0);
+    const maxKeyEvents = Number(row?.max_key_events ?? 0);
+    const hourlyEvents = Number(row?.hourly_events ?? 0);
+    const expectedKeys = ROLLUP_DIM_KEYS.length;
+
     const health: RollupHealth = {
-      ready: factEvents > 0 && factEvents === rollupEvents,
+      ready:
+        factEvents > 0 &&
+        keyCount === expectedKeys &&
+        minKeyEvents === factEvents &&
+        maxKeyEvents === factEvents &&
+        hourlyEvents === factEvents,
       factEvents,
-      rollupEvents,
+      rollupEvents: minKeyEvents,
       dailyRows: Number(row?.daily_rows ?? 0),
       hourlyRows: Number(row?.hourly_rows ?? 0),
     };
     if (!health.ready) {
       health.reason =
-        rollupEvents === 0
+        minKeyEvents === 0 && maxKeyEvents === 0
           ? `rollup is empty (fact table has ${factEvents} events) — run: bun run ch:rollup`
-          : `rollup accounts for ${rollupEvents} events, fact table has ${factEvents} — ` +
-            `re-run: bun run ch:rollup`;
+          : keyCount !== expectedKeys
+            ? `rollup has ${keyCount} dimension key(s), expected ${expectedKeys} — a cut is missing ` +
+              `entirely. Re-run: bun run ch:rollup`
+            : minKeyEvents !== maxKeyEvents
+              ? `rollup dimension keys disagree: one accounts for ${minKeyEvents} events, another for ` +
+                `${maxKeyEvents}, fact table has ${factEvents} — a partial backfill. ` +
+                `Re-run: bun run ch:rollup`
+              : hourlyEvents !== factEvents
+                ? `hourly rollup accounts for ${hourlyEvents} events, fact table has ${factEvents} — ` +
+                  `re-run: bun run ch:rollup`
+                : `rollup accounts for ${minKeyEvents} events, fact table has ${factEvents} — ` +
+                  `re-run: bun run ch:rollup`;
     }
     ready = health.ready;
     lastHealth = health;

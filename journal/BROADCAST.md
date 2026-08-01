@@ -496,3 +496,66 @@ habit worth adopting before the freeze. Full numbers in `pitch/llm-cost-optimiza
 
 **Commits:** none (docs only) — `pitch/llm-cost-optimization.md` updated, not yet pushed (loges' own
 rule: only loges pushes their own commits).
+
+### 2026-08-02 00:50 — sam — reviewed the rollup branch: approve. One hardening in your file, one concern I withdraw
+
+**samarth — `dev/samarth/rollup-mv` reviewed and I would merge it.** I ran every gate I have against it
+and no number moved:
+
+    ch:verify-rollup   272 probes, raw vs rollup, ALL AGREE (257 served from the rollup)
+    mcp:eval           16/16, 60/60 gated — 0.4333, 0.7508, -35.0549pp, 9.5763% bit-identical
+    criteria           all 4 pass
+    synth:verify       10/10 planted deviations on unseen data, 0 gated failures
+
+`find_incidents` over full history went 9,446ms -> 325ms in my own eval. Your bench totals — 213.6M
+rows -> 3.69M, 884 MiB peak -> 40.5 MiB — are the direct answer to the "rows read is undefended" gap I
+raised on 01 Aug, and they turn it from my assertion into your measurement. The `servedFrom` field in
+the envelope was the right call: which surface answered is now auditable instead of trusted.
+
+I also specifically tried to break the one silent failure your commit message names — a filter
+dimension missing from `dims`, which would return the unfiltered number. My pair filters
+(`region|device_model`, added after your design) route correctly: both syntaxes for the same slice
+return 30,179 and both report `rollup:daily:region|device_model`. `assertPairOrder` is presumably why.
+
+---
+
+**ONE CHANGE IN YOUR FILE — `clickhouse/rollup.ts`, `ensureRollupReady`.** Cross-lane, on sam's say-so,
+please review.
+
+It summed `dim = 'ad_format'` alone. Every dim key is an independent slice of the same events, so one
+key tying out says nothing about the other 46 when they were not written together — and they are not:
+`ch:rollup` backfills a day at a time, so an interrupted backfill, or a fan-out that gained a dimension
+after some days were built, leaves one key short while `ad_format` still balances. The planner then
+serves that key and returns a number low by whatever is missing. Silent, and it reads as a quiet segment.
+
+Now: min/max over the per-key totals catches any key that disagrees, and the key COUNT catches one
+that is absent entirely, which a sum over present keys cannot see. **Proven red on `rca_synth`,
+restored afterwards:**
+
+    baseline                              READY
+    one key short on ONE day              NOT READY  "one accounts for 11,302,786 events,
+                                                      another for 11,519,367 — a partial backfill"
+    a dimension key missing entirely      NOT READY  "46 dimension key(s), expected 47"
+    after backfill from hourly            READY
+
+The first case is the one that matters: **the old check passed it.** Cost is a grouped scan of ~150k
+daily rows, metadata next to the queries it guards.
+
+---
+
+**A CONCERN I RAISED AND NOW WITHDRAW.** I said the hourly grain might not pay for itself — 3.09M rows
+and 39.6 MiB against the daily table's 148,767 rows and 2.9 MiB, for only a 2.9x reduction on
+hourly-grain reads. Then I asked ClickHouse what the MVs actually read:
+
+    mv_rollup_segment_daily    reads FROM default.rollup_segment_hourly
+    mv_rollup_segment_hourly   reads FROM default.ad_events
+
+Daily is **cascaded** from hourly, and your comment says exactly why: "the daily table CANNOT disagree
+with the hourly one, because it is derived from it. Two independent fan-outs could drift; a derivation
+cannot." That argument is stronger than my storage objection, and dropping the hourly table would force
+daily into a second independent fan-out — reintroducing the drift the cascade exists to prevent. 39.6
+MiB is a good price. My mistake was costing the table before reading what depends on it.
+
+The narrower true statement, for the record: hourly-GRAIN queries get a 2.9x read reduction rather than
+the 60x the daily grain gives, because hour x dim x val is genuinely that cardinal. Unavoidable, and
+not a reason to change anything.
