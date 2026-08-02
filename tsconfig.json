@@ -1,4 +1,12 @@
 {
+  // Vendored LibreChat is upstream's code, with upstream's own tsconfig, its own dependencies and its
+  // own test globals. With no `exclude` here, tsc walked all 3,792 files of it and `bun run typecheck`
+  // reported 92,588 errors -- every one of them from that directory, none from ours. That is not a
+  // signal anyone can act on, and it takes out the first gate of both `verify` and `sanity`.
+  //
+  // We do not build it and we do not modify it; it is run as an app. Type-checking someone else's
+  // project as a side effect of checking ours was never the intent.
+  "exclude": ["node_modules", "dist", "frontend/LibreChat"],
   "compilerOptions": {
     // Environment setup & latest features
     "lib": ["ESNext"],
