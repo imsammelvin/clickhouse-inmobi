@@ -709,10 +709,10 @@ let libreChatUrl = "";
  * The chat is a cross-origin iframe, so nothing here can reach into its input. LibreChat reads
  * `prompt` and `submit` from its own URL, which is the supported way in.
  *
- * `submit=true` is a deliberate reversal. The first version only pre-filled, on the reasoning that
- * auto-sending spends a real 5-20s investigation on a click — but pressing "Ask in chat" IS the
- * request, and making someone confirm it twice is friction rather than safety. The click is the
- * consent; the question is visible in the box either way if they want to stop and read it.
+ * It pre-fills and stops there. `submit=true` is supported and was tried, and it reads badly: the tab
+ * changes and an answer is already generating before the reader has seen the question, so the moment
+ * of arriving somewhere new is spent watching something they did not visibly ask for. Landing with the
+ * question sitting in the box, ready to send, is calmer and costs one keystroke.
  */
 function askInChat(question) {
   if (!libreChatUrl) return;
@@ -721,7 +721,6 @@ function askInChat(question) {
      Going straight to the destination route skips the redirect and the parameter survives. */
   const url = new URL("/c/new", libreChatUrl);
   url.searchParams.set("prompt", question);
-  url.searchParams.set("submit", "true");
   const frame = $("#chat-frame");
   if (frame) frame.src = url.toString();
   activateView("chat");
