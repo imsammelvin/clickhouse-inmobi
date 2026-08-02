@@ -118,12 +118,17 @@ nav .tabs {
   gap: 4px;
   overflow-x: auto;
 }
-/* `display: flex` below beats the browser's own `[hidden] { display: none }`, so a hidden nav button
-   kept rendering. Anything marked hidden must actually be hidden — restore Rollup vs Raw by removing
-   the attribute in index.html, not by weakening this. */
-nav button[hidden] {
-  display: none;
+/* `hidden` must always win.
+ *
+ * The browser's own rule is `[hidden] { display: none }`, which any element or id selector setting a
+ * display outranks. That bit twice: a nav button hidden in the markup kept rendering because
+ * `nav button { display: flex }` beat it, and then the alerts badge showed a literal "0" because
+ * `#alerts-badge { display: inline-block }` did the same. Fixing each site individually just waits
+ * for the third one, so this is global and deliberate. */
+[hidden] {
+  display: none !important;
 }
+
 nav button {
   display: flex;
   align-items: center;
@@ -537,3 +542,22 @@ td.rise { color: var(--good); font-variant-numeric: tabular-nums; }
 .alert-verdict { font-size: 13px; color: var(--text); margin-top: 10px; font-weight: 600; }
 .alert-because { font-size: 13px; color: var(--muted); margin-top: 4px; line-height: 1.55; }
 .alert-cleared { font-size: 12px; color: var(--muted); margin-top: 6px; }
+
+/* Alert card detail. Ordered by what a reader needs first: verdict, then size, then why, then
+   whether it is still going, then what was ruled out. */
+.alert-tags { display: flex; gap: 6px; align-items: center; flex: none; }
+.alert-tags em { font-style: normal; font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .04em; padding: 2px 7px; border-radius: 9px; }
+em.pri { background: var(--border); color: var(--muted); }
+em.pri.act_now { background: var(--bad); color: #fff; }
+em.new { background: var(--accent); color: #0b0b0c; }
+.alert-verdict.live { color: var(--bad); }
+.alert-facts { display: flex; flex-wrap: wrap; gap: 6px 8px; margin-top: 8px; }
+.alert-facts span { font-size: 11px; color: var(--muted); background: var(--panel-solid);
+  border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; }
+.alert-facts b { color: var(--text); font-variant-numeric: tabular-nums; }
+.alert-status { font-size: 12px; color: var(--muted); margin-top: 8px; line-height: 1.5; }
+.alert-status b { color: var(--text); }
+.alert-next { font-size: 12px; color: var(--muted); margin-top: 8px; }
+.alert-next code { background: var(--panel-solid); border: 1px solid var(--border);
+  border-radius: 5px; padding: 2px 6px; font-size: 11px; }

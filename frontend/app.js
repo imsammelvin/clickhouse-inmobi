@@ -740,31 +740,66 @@ function renderAlerts() {
   }
 
   const seenAt = localStorage.getItem(ALERTS_SEEN_KEY) ?? "";
-  /* Cards rather than a table row. The numbers alone ("fill_rate -45%") only restate what fired;
-     what a reader needs first is what broke and who owns it, which the cron already worked out. */
+  /* Cards rather than table rows. The numbers alone ("fill_rate -45%") only restate what fired; a
+     reader needs the verdict, whether it is still happening, and what was ruled out before any of the
+     figures mean anything. Everything below already exists in the investigation — none of it is
+     recomputed here, and none of it is invented. */
   el.innerHTML = alertItems
     .map((n) => {
       const fresh = n.at > seenAt;
       const dir = n.pct < 0 ? "drop" : "rise";
       const d = n.diagnosis;
-      const money =
-        d && d.impactUsdPerDay !== null
-          ? `${d.impactUsdPerDay < 0 ? "-" : ""}$${Math.abs(d.impactUsdPerDay).toFixed(2)}/day`
-          : null;
+      const usd = (v) => `${v < 0 ? "-" : ""}$${Math.abs(v).toFixed(2)}`;
+      const live = d && d.status === "ongoing";
+
+      const facts = [];
+      if (d && d.sharePct !== null)
+        facts.push(`<span><b>${d.sharePct.toFixed(1)}%</b> of traffic</span>`);
+      if (d && d.deltaPp !== null)
+        facts.push(`<span><b>${d.deltaPp >= 0 ? "+" : ""}${d.deltaPp.toFixed(1)}</b> points</span>`);
+      if (d && d.sigma !== null)
+        facts.push(`<span><b>${Math.abs(d.sigma).toFixed(0)}σ</b> from normal</span>`);
+      if (d && d.impactUsdPerDay !== null)
+        facts.push(`<span><b>${usd(d.impactUsdPerDay)}</b>/day</span>`);
+      if (d && d.daysRunning !== null)
+        facts.push(`<span>ran <b>${d.daysRunning}</b> day${d.daysRunning === 1 ? "" : "s"}</span>`);
+      if (d && d.lostSoFarUsd !== null)
+        facts.push(`<span><b>${usd(d.lostSoFarUsd)}</b> total</span>`);
+
       return (
         `<div class="card alert${fresh ? " fresh" : ""}">` +
         `<div class="alert-top">` +
         `<span class="alert-what"><b>${esc(n.metric)}</b> ${dir === "drop" ? "fell" : "rose"} ` +
         `<span class="${dir}">${Math.abs(n.pct).toFixed(0)}%</span> on <b>${esc(n.where)}</b></span>` +
-        `${fresh ? '<em class="new">new</em>' : ""}` +
-        `</div>` +
+        `<span class="alert-tags">` +
+        (d ? `<em class="pri ${esc(d.priority)}">${esc(d.priority.replace(/_/g, " "))}</em>` : "") +
+        (fresh ? '<em class="new">new</em>' : "") +
+        `</span></div>` +
+
         `<div class="alert-meta">${esc(n.day)} &middot; ~${Number(n.requestsPerDay).toLocaleString()} requests/day` +
-        `${money ? ` &middot; <b>${esc(money)}</b>` : ""} &middot; caught ${esc(new Date(n.at).toLocaleString())}</div>` +
+        ` &middot; caught ${esc(new Date(n.at).toLocaleString())}</div>` +
+
         (d
-          ? `<div class="alert-verdict"><b>${esc(d.channelLabel ?? d.channel)}</b>${d.owner ? ` — ${esc(d.owner)}` : ""}</div>` +
+          ? `<div class="alert-verdict ${live ? "live" : ""}">` +
+              `${live ? "🔴" : "🟠"} <b>${esc(d.channelLabel ?? d.channel)}</b> — ${esc(d.owner)}</div>` +
+
+            (facts.length ? `<div class="alert-facts">${facts.join("")}</div>` : "") +
+
             `<div class="alert-because">${esc(d.because)}</div>` +
+
+            `<div class="alert-status"><b>${live ? "Still happening." : "Recovered."}</b> ` +
+              `${esc(d.statusDetail)}</div>` +
+
             (d.clearedCount > 0
-              ? `<div class="alert-cleared">✅ ${d.clearedCount} other slice(s) looked implicated and were checked and cleared.</div>`
+              ? `<div class="alert-cleared">✅ <b>${d.clearedCount}</b> other slice(s) looked implicated and were checked and cleared` +
+                (d.clearedExamples && d.clearedExamples.length
+                  ? ` — ${d.clearedExamples.map(esc).join(", ")}${d.clearedCount > d.clearedExamples.length ? ", and more" : ""}`
+                  : "") +
+                `. They only moved because the real cause sits inside them.</div>`
+              : "") +
+
+            (d.nextQuestion
+              ? `<div class="alert-next">Next: <code>${esc(d.nextQuestion)}</code></div>`
               : "")
           : `<div class="alert-because">Detected by the sweep; the full investigation did not complete, so no cause is stated here. Ask in chat: "why did ${esc(n.metric)} drop on ${esc(n.day)}?"</div>`) +
         `</div>`

@@ -107,7 +107,23 @@ export interface Diagnosis {
   impactUsdPerDay: number | null;
   /** How many slices looked implicated and were cleared — the differentiator, in one number. */
   clearedCount: number;
+  /** Three of them by name. A count is a claim; names are evidence. */
+  clearedExamples: string[];
   status: string;
+  /** Whether it is still happening — the fact that decides what anyone does next. */
+  statusDetail: string;
+  priority: string;
+  daysRunning: number | null;
+  lostSoFarUsd: number | null;
+  /** How much of the platform this slice carries, so a percentage move has a size. */
+  sharePct: number | null;
+  /** Percentage points for a ratio, percent otherwise — the move in its natural unit. */
+  deltaPp: number | null;
+  sigma: number | null;
+  /** A question this system can answer, so the alert leads somewhere. */
+  nextQuestion: string | null;
+  /** The engine's own sentence, already grounded. */
+  headline: string;
 }
 
 export interface Notification {
@@ -135,14 +151,29 @@ async function diagnose(metric: string, from: string, to: string): Promise<Diagn
   try {
     const inv = await investigate({ metric, from, to, ledger });
     const action = await recommendAction(ledger, inv);
+    const cleared = inv.ruledOut.filter((r) => r.status === "cleared_as_contamination");
+    const finding = inv.findings.find((f) => f.segment) ?? inv.findings[0];
     return {
       channel: inv.primaryChannel,
       owner: action.owner,
       because: action.whereToLook[0] ?? inv.headline,
       impactUsdPerDay:
         inv.findings.find((f) => f.revenueImpactUsd !== null)?.revenueImpactUsd ?? null,
-      clearedCount: inv.ruledOut.filter((r) => r.status === "cleared_as_contamination").length,
+      clearedCount: cleared.length,
+      clearedExamples: cleared
+        .slice(0, 3)
+        .map((r) => (r.segment ? `${r.segment.dimension} = '${r.segment.value}'` : ""))
+        .filter(Boolean),
       status: action.status,
+      statusDetail: action.statusDetail,
+      priority: action.priority,
+      daysRunning: action.daysRunning,
+      lostSoFarUsd: action.lostSoFarUsd,
+      sharePct: finding?.segmentSharePct ?? null,
+      deltaPp: finding?.deltaPp ?? finding?.deltaPct ?? null,
+      sigma: finding?.significanceSigma ?? null,
+      nextQuestion: action.nextQuestion,
+      headline: inv.headline,
     };
   } catch {
     return undefined;
