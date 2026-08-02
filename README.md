@@ -145,14 +145,21 @@ All three, and none of them decoratively.
   per tool call, per SQL statement, with the statement (`db.query.text`) and the row count on the
   span. A slow answer is followed down to the query that made it slow. This is also what makes
   criterion 3 satisfiable: the trace proving the system generated a diagnosis is a by-product of
-  doing the work.
+  doing the work. Spans land in the `otel_traces` table of the same ClickHouse Cloud service used for
+  the data itself; collector config is committed at `backend/observability/collector.ts`. The
+  dashboard's own System Health tab is a live query against that table (`/api/system-health`), so the
+  p50/p95-per-stage view a judge sees in the hosted demo is a real search, not a screenshot.
 - **Langfuse** — LLM cost and token attribution, plus the dashboard's own "Recent Prompts" view reads
   Langfuse's public API server-side to show the last few real prompts, their cost, and a plain-English
   breakdown of what was checked for each one. The narration call carries `gen_ai.*` attributes so it
-  lands as a generation with model and token counts rather than an anonymous span.
+  lands as a generation with model and token counts rather than an anonymous span. A real trace is
+  exported as JSON at [`pitch/langfuse-evidence/`](pitch/langfuse-evidence/) for judges without project
+  access.
 - **LibreChat** — the chat client, talking to the MCP server over streamable HTTP. Identity flows
   through as `{{LIBRECHAT_USER_ID}}` / `{{LIBRECHAT_USER_EMAIL}}` headers, so a watch belongs to a
-  person. The Alerts tab deep-links into a pre-filled chat for follow-ups.
+  person. The Alerts tab deep-links into a pre-filled chat for follow-ups. Config committed at
+  [`frontend/LibreChat/librechat.yaml`](frontend/LibreChat/librechat.yaml) (keys are environment
+  variable references, nothing literal to redact).
 
 ### LLM provider
 
