@@ -58,17 +58,18 @@ function setHtmlPreservingFocus(el, html) {
 const views = ["chat", "anomalies", "alerts", "rollup", "llm", "health"];
 const loaded = new Set();
 
+function activateView(v) {
+  document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b.dataset.view === v));
+  views.forEach((name) => $("#view-" + name).classList.toggle("active", name === v));
+  if (v === "alerts") renderAlerts();
+  if (!loaded.has(v)) {
+    loaded.add(v);
+    loadView(v);
+  }
+}
+
 document.querySelectorAll("nav button").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    const v = btn.dataset.view;
-    document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b === btn));
-    views.forEach((name) => $("#view-" + name).classList.toggle("active", name === v));
-    if (v === "alerts") renderAlerts();
-    if (!loaded.has(v)) {
-      loaded.add(v);
-      loadView(v);
-    }
-  });
+  btn.addEventListener("click", () => activateView(btn.dataset.view));
 });
 
 function loadView(v) {
@@ -763,6 +764,8 @@ function renderAlerts() {
   renderAlertsBadge();
 }
 
+let alertsFirstLoad = true;
+
 async function loadAlerts() {
   try {
     const data = await getJson("/api/watch");
@@ -770,6 +773,18 @@ async function loadAlerts() {
   } catch {
     alertItems = [];
   }
+
+  /* Open on Alerts when something is waiting, otherwise leave Chat as it was.
+     ONLY on the first load. Switching tabs on a later poll would yank someone out of a chat mid
+     sentence because a cron fired — an alert earns the badge, it does not earn the screen. */
+  if (alertsFirstLoad) {
+    alertsFirstLoad = false;
+    if (unseenCount() > 0) {
+      activateView("alerts");
+      return; // activateView renders and marks read
+    }
+  }
+
   if ($("#view-alerts")?.classList.contains("active")) renderAlerts();
   else renderAlertsBadge();
 }
