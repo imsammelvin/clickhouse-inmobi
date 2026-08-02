@@ -23,6 +23,9 @@
 import { Ledger } from "../../engine/ledger";
 import { investigate } from "../../engine/orchestrate";
 import { checkGrounding } from "../../engine/grounding";
+import { renderNarrative } from "../../engine/render";
+import { recommendAction } from "../action";
+import { investigatePayload } from "../tools";
 import { INSTRUCTIONS } from "../protocol";
 import type { Investigation } from "../../engine/types";
 import { SpanKind, type Span } from "@opentelemetry/api";
@@ -180,25 +183,28 @@ async function narrate(system: string, user: string): Promise<Narration> {
 
 /**
  * What the narrator is given: the contract as its system prompt, and the investigation as the only
- * source of numbers. Deliberately the same struct the MCP tool returns, so this tests the real payload
- * rather than a hand-tuned summary of it.
+ * source of numbers.
+ *
+ * Built by `investigatePayload`, the exact function the MCP tool uses, rather than assembled here.
+ * This used to be a hand-rolled subset and it had drifted: it sent the first 8 ruled-out segments
+ * with no total, where the server sends 15 plus `ruledOutCount`. The model, given a truncated list
+ * and no count, filled the gap — "178 other slices ... were cleared" against a true figure of 840.
+ *
+ * A gate that scores a payload the server never sends measures nothing. Sharing the function is what
+ * keeps this honest; scoring the real thing is the entire point of the file.
  */
-function userMessage(ask: string, inv: Investigation): string {
+function userMessage(
+  ask: string,
+  inv: Investigation,
+  narrative: string,
+  grounding: ReturnType<typeof checkGrounding>,
+  action: unknown,
+): string {
   return [
     ask,
     "",
     "Tool result (investigate):",
-    JSON.stringify(
-      {
-        request: inv.request,
-        channel: inv.primaryChannel,
-        headline: inv.headline,
-        findings: inv.findings,
-        ruledOut: inv.ruledOut.slice(0, 8),
-      },
-      null,
-      1,
-    ),
+    JSON.stringify(investigatePayload(inv, narrative, grounding, action), null, 1),
   ].join("\n");
 }
 
@@ -243,15 +249,21 @@ async function runNarrate(span: Span): Promise<number> {
     // the cases apart. A wrapper span here would only add a level.
     const ledger = new Ledger();
     let inv: Investigation;
+    let payloadArgs: [string, ReturnType<typeof checkGrounding>, unknown];
     try {
       inv = await investigate({ ...c.scenario, ledger });
+      // Built inside the ledger's lifetime because `recommendAction` queries — the same order the
+      // tool handler uses, so the narrator sees the same `action` block a chat client would.
+      const action = await recommendAction(ledger, inv);
+      const narrative = renderNarrative(inv);
+      payloadArgs = [narrative, checkGrounding(narrative, inv.evidence), action];
     } finally {
       await ledger.close();
     }
 
     let out: Narration;
     try {
-      out = await narrate(INSTRUCTIONS, userMessage(c.ask, inv));
+      out = await narrate(INSTRUCTIONS, userMessage(c.ask, inv, ...payloadArgs));
     } catch (error) {
       failures++;
       say(`FAIL  ${c.id.padEnd(20)} ${(error as Error).message}`);
