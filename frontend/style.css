@@ -531,3 +531,7 @@ tr.sev-rise td:first-child {
 .range button.ghost { background: transparent; border-color: var(--border); color: var(--muted); }
 .range button.ghost:hover { color: var(--text); border-color: var(--muted); }
 #a-range-note { font-size: 12px; color: var(--muted); }
+
+/* A new item since you last collapsed the panel — the reason it re-opened. */
+#away li.fresh { color: var(--text); }
+#away li.fresh em { color: var(--bad); font-style: normal; font-weight: 600; }
