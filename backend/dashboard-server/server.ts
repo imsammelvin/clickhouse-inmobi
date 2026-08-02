@@ -297,6 +297,7 @@ const API_ROUTES = new Set([
   "/api/rollup-comparison",
   "/api/llm-cost",
   "/api/system-health",
+  "/api/watch",
   "/api/config",
 ]);
 
