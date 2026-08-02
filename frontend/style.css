@@ -1,6 +1,9 @@
 /* Mission Control — visual styling. Split from index.html for readability; no build step needed. */
 
 :root {
+  /* Native controls -- the date picker and its calendar icon, scrollbars -- follow the theme.
+     Without this they render light-on-light and the date inputs look broken on the dark surface. */
+  color-scheme: dark;
   --bg: #05060a;
   --bg-2: #0c0f18;
   --panel: rgba(22, 26, 38, 0.72);
@@ -16,6 +19,7 @@
   --shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
 }
 :root[data-theme="light"] {
+  color-scheme: light;
   --bg: #eef1f7;
   --bg-2: #e3e7f0;
   --panel: rgba(255, 255, 255, 0.75);
@@ -251,21 +255,23 @@ code {
 }
 
 /* ---------------- stat cards ---------------- */
-/* Sticky, not just top-of-content -- these summary numbers stay pinned right below the tab bar as
-   the table beneath scrolls, instead of scrolling away with it. Same reasoning as the top nav: the
-   summary is what you want visible while you're scanning a long table, not just on first paint. */
+/**
+ * Deliberately NOT sticky, reversing an earlier decision.
+ *
+ * These summary numbers used to be `position: sticky; top: 0` so they stayed pinned while a long
+ * table scrolled underneath. That reads well until a view puts a control row above them: on
+ * Anomalies the cards slid up over the date-range inputs and buried them mid-interaction.
+ *
+ * Pinning a summary is a nicety; covering a filter the user is reaching for is a bug, so the nicety
+ * loses. The alternative -- stacking two sticky rows -- means keeping their heights in sync by hand,
+ * and that breaks the moment either one wraps to a second line.
+ */
 .stat-grid {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   gap: 12px;
   margin-bottom: 18px;
-  position: sticky;
-  top: 0;
-  z-index: 5;
-  padding-top: 12px;
-  margin-top: -12px;
-  background: linear-gradient(var(--bg-2), var(--bg-2) 85%, transparent);
 }
 .stat {
   background: var(--panel);
@@ -417,6 +423,73 @@ tr.sev-rise td:first-child {
 }
 
 /* ---------------- filter bar ---------------- */
+/**
+ * The date range picker on Anomalies. Same visual language as `.filters` below it, because they are
+ * the same kind of thing -- controls that narrow what the table shows -- and two different-looking
+ * filter bars on one page reads as two unrelated features.
+ */
+.range {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 22px;
+}
+.range label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.range input[type="date"] {
+  background: var(--panel-solid);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 9px;
+  padding: 8px 12px;
+  font-size: 12.5px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+.range input[type="date"]:focus {
+  border-color: var(--accent);
+}
+.range button {
+  border: 1px solid transparent;
+  border-radius: 9px;
+  padding: 8px 16px;
+  font-size: 12.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  color: white;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  transition: filter 0.15s ease;
+}
+.range button:hover {
+  filter: brightness(1.1);
+}
+.range button.ghost {
+  background: var(--panel-solid);
+  border-color: var(--border);
+  color: var(--muted);
+}
+.range button.ghost:hover {
+  color: var(--text);
+  border-color: var(--accent);
+  filter: none;
+}
+/* Pushed to the far end so the controls group together and the note reads as output, not input. */
+#a-range-note {
+  color: var(--muted);
+  font-size: 12px;
+  margin-left: auto;
+  text-align: right;
+}
+
 .filters {
   display: flex;
   flex-wrap: wrap;
