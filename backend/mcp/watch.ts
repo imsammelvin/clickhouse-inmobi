@@ -81,7 +81,12 @@ export function addWatch(w: Omit<Watch, "id" | "createdAt" | "watermark">): Watc
   );
   if (existing) return existing;
 
-  const watch: Watch = { ...w, id: randomUUID().slice(0, 8), createdAt: new Date().toISOString(), watermark: null };
+  const watch: Watch = {
+    ...w,
+    id: randomUUID().slice(0, 8),
+    createdAt: new Date().toISOString(),
+    watermark: null,
+  };
   watches.push(watch);
   save(watches);
   return watch;
@@ -215,7 +220,9 @@ export async function runOnce(opts: { only?: string } = {}): Promise<Notificatio
         `SELECT toString(event_date) AS d, ${metricExpr(def)} AS v
          FROM ad_events_enriched GROUP BY event_date ORDER BY event_date`,
       );
-      const growth = estimateWeeklyGrowth(new Map(series.map((r): [string, number] => [r.d, Number(r.v ?? 0)])));
+      const growth = estimateWeeklyGrowth(
+        new Map(series.map((r): [string, number] => [r.d, Number(r.v ?? 0)])),
+      );
       /**
        * Match PER SEGMENT, not per clustered window.
        *
@@ -232,7 +239,10 @@ export async function runOnce(opts: { only?: string } = {}): Promise<Notificatio
 
       for (const w of watches.filter((x) => x.metric === metric)) {
         const fresh = incidents
-          .filter((inc) => w.dimension === null || (inc.dimension === w.dimension && inc.value === w.value))
+          .filter(
+            (inc) =>
+              w.dimension === null || (inc.dimension === w.dimension && inc.value === w.value),
+          )
           .filter((inc) => !w.watermark || inc.to > w.watermark) // already told them
           // Sorted because the watermark below is the last element, and `groupIntoIncidents` does
           // not promise an order. Getting this wrong sets the watermark to an early day and re-reports
@@ -355,10 +365,19 @@ if (import.meta.main) {
     for (const n of found) {
       const to = n.watch.userEmail ?? "";
       const body = renderNotification(n);
-      const where = n.watch.dimension ? `${n.watch.dimension} = '${n.watch.value}'` : "the platform";
+      const where = n.watch.dimension
+        ? `${n.watch.dimension} = '${n.watch.value}'`
+        : "the platform";
       const d = await sendNotification(to, `${n.watch.metric} moved again on ${where}`, body);
-      say(`  -> ${to || n.watch.userId}   ${d.sent ? `sent via ${d.via}` : `not sent: ${d.reason}`}`);
-      say(body.split("\n").map((l) => `     ${l}`).join("\n"));
+      say(
+        `  -> ${to || n.watch.userId}   ${d.sent ? `sent via ${d.via}` : `not sent: ${d.reason}`}`,
+      );
+      say(
+        body
+          .split("\n")
+          .map((l) => `     ${l}`)
+          .join("\n"),
+      );
       say(``);
     }
     if (found.length === 0) say(`  Nothing new. Watermarks unchanged.\n`);

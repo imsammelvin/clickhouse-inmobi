@@ -320,8 +320,8 @@ mcpServers:
       # LibreChat substitutes these and re-resolves them before every tool call, so a watch created in
       # chat belongs to a real account and the notification has somewhere to go. Without them
       # everything still works — watches are just filed under "anonymous", and `watch_this` says so.
-      X-User-Id: '{{LIBRECHAT_USER_ID}}'
-      X-User-Email: '{{LIBRECHAT_USER_EMAIL}}'
+      X-User-Id: "{{LIBRECHAT_USER_ID}}"
+      X-User-Email: "{{LIBRECHAT_USER_EMAIL}}"
 ```
 
 Notes for whoever wires it:
