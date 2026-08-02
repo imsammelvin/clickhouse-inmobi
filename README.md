@@ -251,7 +251,7 @@ header. `get_evidence <id>` resolves any figure back to its SQL.
 (optional — everything except narration works without one).
 
 ```bash
-git clone https://github.com/sam-m-anarix/click-a-thon-26-submissions.git
+git clone https://github.com/sidagarwal04/click-a-thon-26-submissions.git
 cd "click-a-thon-26-submissions/The Boring Team"
 bun install
 
