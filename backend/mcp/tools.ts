@@ -192,12 +192,25 @@ const listDimensionValues: ToolDef = {
       window,
       typeof args.limit === "number" ? args.limit : 30,
     );
+    // Same reasoning as compare_periods/rank_segments/get_metric: this result gets replayed on every
+    // later turn, so cap what's inlined independent of the `limit` the caller asked for.
+    const SHOWN_VALUES = 20;
+    const valuesShown = values.slice(0, SHOWN_VALUES);
     return {
       summary: `${values.length} value(s) of ${String(args.dimension)}`,
       payload: {
         dimension: args.dimension,
         window,
-        values,
+        values: valuesShown,
+        valueCount: values.length,
+        ...(values.length > SHOWN_VALUES
+          ? {
+              valuesNote:
+                `${values.length - SHOWN_VALUES} further value(s) not shown -- values are already ` +
+                "ranked by traffic, so the head is the meaningful part; narrow with a smaller window " +
+                "if you need a specific one.",
+            }
+          : {}),
         truncated: values.length >= MAX_ROWS,
         servedFrom,
       },
@@ -258,12 +271,28 @@ const getMetric: ToolDef = {
       limit: args.limit as number | undefined,
     });
     const head = r.rows[0];
+    // Same reasoning as compare_periods/rank_segments below: every tool result gets replayed
+    // verbatim on every later turn, so an hourly-granularity, wide-window call is worth capping here
+    // too rather than trusting the caller's `limit` alone.
+    const SHOWN_ROWS = 20;
+    const rowsShown = r.rows.slice(0, SHOWN_ROWS);
     return {
       summary:
         r.rows.length === 1 && head
           ? `${r.metric} = ${head.value?.toFixed(4) ?? "null"} (${head.requests.toLocaleString()} requests)`
           : `${r.rows.length} row(s) of ${r.metric}`,
-      payload: r,
+      payload: {
+        ...r,
+        rows: rowsShown,
+        rowCount: r.rows.length,
+        ...(r.rows.length > SHOWN_ROWS
+          ? {
+              rowsNote:
+                `${r.rows.length - SHOWN_ROWS} further row(s) not shown -- narrow the window, add ` +
+                "a filter, or raise granularity, rather than raising `limit`.",
+            }
+          : {}),
+      },
     };
   },
 };
@@ -321,12 +350,30 @@ const comparePeriodsTool: ToolDef = {
       limit: args.limit as number | undefined,
     });
     const head = r.rows[0];
+    // Every tool result gets replayed verbatim on every later turn of the same conversation -- a
+    // `limit: 200` call (the schema allows up to MAX_ROWS) was seen costing 60k+ chars, repeated on
+    // every subsequent round-trip. Cap what's inlined here the same way `investigate`'s ruledOut
+    // list already is: rows themselves already ranked by the query, so a small head is the
+    // meaningful part; the rest is one call away by re-asking with a narrower filter or dimension.
+    const SHOWN_ROWS = 20;
+    const rowsShown = r.rows.slice(0, SHOWN_ROWS);
     return {
       summary:
         r.rows.length === 1 && head?.deltaPct !== null && head?.deltaPct !== undefined
           ? `${r.metric} ${fmtPct(head.deltaPct)} vs baseline`
           : `${r.rows.length} row(s) compared`,
-      payload: r,
+      payload: {
+        ...r,
+        rows: rowsShown,
+        rowCount: r.rows.length,
+        ...(r.rows.length > SHOWN_ROWS
+          ? {
+              rowsNote:
+                `${r.rows.length - SHOWN_ROWS} further row(s) not shown -- narrow with \`filters\` ` +
+                `or a smaller \`group_by\` if you need a specific one, rather than raising \`limit\`.`,
+            }
+          : {}),
+      },
     };
   },
 };
@@ -373,7 +420,26 @@ const rankSegmentsTool: ToolDef = {
       filters: asRecord(args.filters),
       limit: args.limit as number | undefined,
     });
-    return { summary: `${r.rows.length} ${r.dimension} value(s), ${r.order} first`, payload: r };
+    // Same reasoning as compare_periods just above: a full 200-row rank was seen costing 22k+ chars,
+    // replayed on every later turn of the conversation. Rows are already ordered by the query, so
+    // the head is the meaningful part.
+    const SHOWN_ROWS = 20;
+    const rowsShown = r.rows.slice(0, SHOWN_ROWS);
+    return {
+      summary: `${r.rows.length} ${r.dimension} value(s), ${r.order} first`,
+      payload: {
+        ...r,
+        rows: rowsShown,
+        rowCount: r.rows.length,
+        ...(r.rows.length > SHOWN_ROWS
+          ? {
+              rowsNote:
+                `${r.rows.length - SHOWN_ROWS} further row(s) not shown -- narrow with ` +
+                "`filters` if you need a specific one, rather than raising `limit`.",
+            }
+          : {}),
+      },
+    };
   },
 };
 
@@ -437,7 +503,16 @@ const findIncidents: ToolDef = {
       }),
     );
     const firings = perMetric.flat();
+    // clusterWindows already returns these ranked by impact (magnitude x duration), most severe
+    // first -- see backend/engine/segments.ts. The nextStep cap below relies on that ordering.
     const windows = clusterWindows(groupIntoIncidents(firings));
+
+    // Only the top few windows get an explicit "go call investigate" invitation. Handing back a
+    // nextStep on every one of a dozen windows was the direct cause of a single sweep turning into a
+    // dozen-plus sequential investigate() calls (~3.5 minutes for one reply) -- see
+    // pitch/latency-analysis.md. The rest are still fully returned, with the same numbers, just
+    // without the per-row nudge to drill in.
+    const NEXT_STEP_TOP_N = 3;
 
     return {
       summary: `${windows.length} incident window(s) across ${metrics.length} metric(s)`,
@@ -447,7 +522,7 @@ const findIncidents: ToolDef = {
         gates: "abs(change) >= 10% AND abs(sigma) >= 5, min 150 requests/day/segment",
         servedFrom: health?.ready ? "rollup:daily" : "raw",
         windowCount: windows.length,
-        windows: windows.slice(0, limit).map((w) => ({
+        windows: windows.slice(0, limit).map((w, i) => ({
           metric: w.metric,
           from: w.from,
           to: w.to,
@@ -458,15 +533,24 @@ const findIncidents: ToolDef = {
           requestsPerDay: w.lead.requestsPerDay,
           correlatedSegments: w.correlatedSegments,
           examples: w.examples,
-          nextStep:
-            `investigate(metric='${w.metric}', from='${w.from}', to='${w.to}') to get the cause, ` +
-            `the dollars and the ruled-out list`,
+          ...(i < NEXT_STEP_TOP_N
+            ? {
+                nextStep:
+                  `investigate(metric='${w.metric}', from='${w.from}', to='${w.to}') to get the ` +
+                  `cause, the dollars and the ruled-out list`,
+              }
+            : {}),
         })),
         truncated: windows.length > limit,
         note:
           windows.length > limit
             ? `${windows.length - limit} further window(s) not shown — raise \`limit\` to see them.`
             : undefined,
+        investigateGuidance:
+          `Windows are ranked by impact, most severe first. Only the top ${NEXT_STEP_TOP_N} carry a ` +
+          `\`nextStep\` -- investigate at most those, in one turn, unless the user explicitly asks for ` +
+          `more. Mention the remaining windows in one line each (metric, dates, lead segment) without ` +
+          `investigating them.`,
       },
     };
   },
@@ -477,7 +561,9 @@ const investigateTool: ToolDef = {
   description:
     "The full root-cause investigation for a moving metric: detect -> decompose -> localize -> " +
     "residualize -> classify -> price. Use it for any 'why' question ('why did revenue drop on " +
-    "Jun 23?', 'what caused the fill rate dip?') and for any window find_incidents returned. It " +
+    "Jun 23?', 'what caused the fill rate dip?') and for any window find_incidents returned that " +
+    "carries a `nextStep` — do not call this for every window a sweep returns, only the ranked few " +
+    "that were invited; more windows are available on request. It " +
     "returns the cause segment, the cause channel with an owner, the dollar impact per day, and — " +
     "importantly — the segments it CHECKED AND CLEARED as mere dilution of the real cause, which a " +
     "ranked drill-down would have reported as 20 extra findings. It can also legitimately conclude " +
@@ -723,6 +809,11 @@ const exportTrace: ToolDef = {
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
   handler: async (_args, _ledger, session) => {
     const { path, trace } = session.export();
+    // The written artifact at `path` is always the complete trace -- this is only what gets
+    // inlined into the chat, and a long investigation's call list replayed on every later turn adds
+    // up like any other tool result. `path` is the actual audit artifact; this is a preview of it.
+    const SHOWN_CALLS = 20;
+    const callsShown = trace.calls.slice(0, SHOWN_CALLS);
     return {
       summary: `${trace.totals.calls} call(s) -> ${path}`,
       payload: {
@@ -731,7 +822,7 @@ const exportTrace: ToolDef = {
         runId: trace.runId,
         startedAt: trace.startedAt,
         totals: trace.totals,
-        calls: trace.calls.map((c) => ({
+        calls: callsShown.map((c) => ({
           callId: c.callId,
           tool: c.tool,
           ok: c.ok,
@@ -740,6 +831,13 @@ const exportTrace: ToolDef = {
           summary: c.summary,
           otelTraceId: c.otelTraceId,
         })),
+        ...(trace.calls.length > SHOWN_CALLS
+          ? {
+              callsNote:
+                `${trace.calls.length - SHOWN_CALLS} further call(s) not shown here -- the full list ` +
+                `is in the file at \`path\`.`,
+            }
+          : {}),
       },
     };
   },
