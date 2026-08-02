@@ -794,7 +794,7 @@ were genuinely covered — `investigation` -> `stage.*`, `clickhouse.select/exec
 2. **`clickhouse/rollup.ts`, `planRollup`** — the rollup-vs-raw decision on every query, and when it
    declined it said nothing about why. Split into `decidePlan()` so each fallback names a reason,
    wrapped in a sync span, mirrored to a `rollup.plan.decisions` counter (source + reason + grain) so
-   the fallback *rate* is a metric query, not a trace scan. `ensureRollupReady` spans the one call
+   the fallback _rate_ is a metric query, not a trace scan. `ensureRollupReady` spans the one call
    that queries; the cached path deliberately does not. **samarth — this is your file; the planner's
    logic and its return values are byte-identical, only the `return null`s now carry a label.**
 3. **MCP query ops** — `measure`/`compare_periods`/`rank_segments`/`dimension_values`/`daily_series`/
@@ -802,8 +802,8 @@ were genuinely covered — `investigation` -> `stage.*`, `clickhouse.select/exec
    which op ran or what came back. Each now has a `query.*` span carrying `servedFrom`. That last one
    is the T-013 claim: it lived only in the response envelope, so proving it held over a run meant
    re-reading JSON. Thin wrappers over renamed `*Inner` functions — query bodies untouched.
-4. **Nine entry points** (`diagnose`, `eval/run`, `narrate`, `parity`, `synth/{verify,generate,
-   destroy}`, `verify-rollup`, `bench-rollup`) initialised the pipeline, or nothing at all, and never
+4. **Nine entry points** — `diagnose`, `eval/run`, `narrate`, `parity`, the three `synth/` scripts,
+   `verify-rollup`, `bench-rollup` — initialised the pipeline, or nothing at all, and never
    opened a span — so their logs went to `otel_logs` with no `trace_id`, since a record is only
    correlated if a span is active when it is emitted. Each now has a root span with outcome
    attributes. Several `main()`s were restructured because ordering is load-bearing: a span opened
@@ -821,8 +821,8 @@ gate as its own process; those already export their own traces, and a span here 
 without threading `traceparent` through the environment.
 
 **`bun run build` now builds the project.** It was `bun build backend/api/server.ts` — one of 28 entry
-points, silently. `backend/scripts/build.ts` typechecks, then bundles every entry point *derived from
-`package.json` scripts* so the list cannot go stale, with `target: bun` (these use `Bun.serve`/
+points, silently. `backend/scripts/build.ts` typechecks, then bundles every entry point _derived from
+`package.json` scripts_ so the list cannot go stale, with `target: bun` (these use `Bun.serve`/
 `Bun.spawn`/`Bun.file`; a node build fails at runtime rather than at build) and a **mirrored layout** —
 `shared/constants` computes `REPO_ROOT` from `import.meta.dir` and the dashboard resolves `frontend/`
 the same way, so a flat `--outdir` breaks both. `dist/` stands in for the repo root, with `schema.sql`,

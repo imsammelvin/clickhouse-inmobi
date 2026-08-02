@@ -11,8 +11,8 @@
 - Audited OpenTelemetry span coverage across the whole post-restructure tree (spans vs. actual work,
   per file), then closed every gap it found. Branch `dev/mohan/otel-coverage-gaps`, 8 commits.
   Full write-up in `context/journal/BROADCAST.md` under today's date — not repeated here.
-  - `dashboard-server/server.ts`: SERVER span + W3C propagation + CLIENT span on the Langfuse call
-    - flush on SIGINT/SIGTERM.
+  - `dashboard-server/server.ts`: SERVER span, W3C propagation, a CLIENT span on the Langfuse
+    call, and a flush on SIGINT/SIGTERM.
   - `clickhouse/rollup.ts`: `rollup.plan` / `rollup.ready` spans and a `rollup.plan.decisions`
     counter, with a named reason on every fallback.
   - `mcp/query.ts`: a `query.*` span per op, carrying `servedFrom`.
