@@ -38,16 +38,28 @@ const errorJson = (error: unknown, status = 500): Response =>
 // /api/anomalies -- what the engine actually found, live off find_incidents.
 // -------------------------------------------------------------------------------------------------
 
-async function apiAnomalies(): Promise<Response> {
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+async function apiAnomalies(url: URL): Promise<Response> {
   const client = makeClient();
   try {
     const session = new Session(client, `dash${Date.now() % 100000}`);
+    // Validated here rather than passed through: `find_incidents` rejects a bad window with an error,
+    // and a date typo should narrow the sweep, not blank the panel.
+    const from = url.searchParams.get("from");
+    const to = url.searchParams.get("to");
+    const window: Record<string, string> = {};
+    if (from && ISO_DATE.test(from)) window.from = from;
+    if (to && ISO_DATE.test(to)) window.to = to;
+
     const { isError, text } = await callTool(session, "find_incidents", {
       metrics: DEFAULT_METRICS,
       limit: 50,
+      ...window,
     });
     if (isError) throw new Error(text);
     const payload = JSON.parse(text) as {
+      reportedWindow?: { from: string; to: string };
       windows: Array<{
         metric: string;
         from: string;
@@ -59,7 +71,15 @@ async function apiAnomalies(): Promise<Response> {
         correlatedSegments: number;
       }>;
     };
-    return json({ measuredAt: new Date().toISOString(), windows: payload.windows });
+    // The dataset bounds come back so the picker can clamp itself to days that exist — asking for a
+    // window outside the loaded data is the one way to get an empty panel that looks like "all clear".
+    const bounds = (payload as { reportedWindow?: { from: string; to: string } }).reportedWindow;
+    return json({
+      measuredAt: new Date().toISOString(),
+      appliedWindow: { from: window.from ?? bounds?.from ?? null, to: window.to ?? bounds?.to ?? null },
+      dataBounds: bounds ?? null,
+      windows: payload.windows,
+    });
   } catch (error) {
     return errorJson(error);
   } finally {
@@ -252,7 +272,7 @@ function main(): void {
     async fetch(req) {
       const url = new URL(req.url);
 
-      if (url.pathname === "/api/anomalies") return apiAnomalies();
+      if (url.pathname === "/api/anomalies") return apiAnomalies(url);
       if (url.pathname === "/api/rollup-comparison") return apiRollupComparison();
       if (url.pathname === "/api/llm-cost") return apiLlmCost();
       if (url.pathname === "/api/system-health") return apiSystemHealth();

@@ -102,17 +102,66 @@ let anomaliesData = [];
 let anomaliesSort = { key: "worstSigma", dir: "desc" };
 let anomaliesFilter = { metric: "all", direction: "all", q: "" };
 
+/* The window the user has chosen. Empty means "all time", which is the sweep's own default. */
+let anomaliesRange = { from: "", to: "" };
+
 async function loadAnomalies() {
   const el = $("#anomalies-body");
+  el.className = "loading";
+  el.innerHTML = '<div class="spinner"></div>Loading…';
   try {
-    const data = await getJson("/api/anomalies");
+    const qs = new URLSearchParams();
+    if (anomaliesRange.from) qs.set("from", anomaliesRange.from);
+    if (anomaliesRange.to) qs.set("to", anomaliesRange.to);
+    const data = await getJson("/api/anomalies" + (qs.toString() ? `?${qs}` : ""));
     anomaliesData = data.windows || [];
+
+    /* Clamp the pickers to days that exist. A window outside the loaded data returns nothing, and an
+       empty panel reads as "all clear" rather than "you asked about days we do not have" — which is
+       the most misleading thing this screen could do. */
+    const b = data.dataBounds;
+    if (b) {
+      for (const id of ["#a-from", "#a-to"]) {
+        const input = $(id);
+        if (!input) continue;
+        input.min = b.from;
+        input.max = b.to;
+        if (!input.value) input.value = id === "#a-from" ? b.from : b.to;
+      }
+    }
+    const w = data.appliedWindow;
+    const note = $("#a-range-note");
+    if (note && w) {
+      note.textContent =
+        `${anomaliesData.length} window(s) over ${w.from} → ${w.to}` +
+        (anomaliesRange.from || anomaliesRange.to ? "" : " (all loaded data)");
+    }
     renderAnomalies();
   } catch (e) {
     el.className = "err";
     el.innerHTML = "⚠ Could not load anomalies: " + esc(e.message);
   }
 }
+
+$("#a-apply")?.addEventListener("click", () => {
+  const from = $("#a-from")?.value ?? "";
+  const to = $("#a-to")?.value ?? "";
+  if (from && to && from > to) {
+    $("#a-range-note").textContent = "From is after To — swap them.";
+    return;
+  }
+  anomaliesRange = { from, to };
+  loadAnomalies();
+});
+
+$("#a-reset")?.addEventListener("click", () => {
+  anomaliesRange = { from: "", to: "" };
+  const b = $("#a-from");
+  if (b) b.value = b.min || "";
+  const t = $("#a-to");
+  if (t) t.value = t.max || "";
+  loadAnomalies();
+});
 
 function anomalySeverity(x) {
   return x.worstPct >= 0 ? "rise" : "drop";
