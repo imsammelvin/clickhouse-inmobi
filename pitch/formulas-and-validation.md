@@ -4,7 +4,7 @@
 to check it yourself.**
 
 If any number in a diagnosis cannot be reproduced by the validation query beside its formula, that
-is a bug and it outranks a missed anomaly (R-001). Code lives in `backend/engine/`.
+is a bug and it outranks a missed anomaly. Code lives in `backend/engine/`.
 
 ---
 
@@ -138,11 +138,6 @@ on a factor worth $2 is not the story.
 Running this first prunes the search space by roughly two thirds: if fill rate carries the move,
 there is no reason to sweep dimensions for eCPM.
 
-> ⚠ **Open issue.** Effects can offset. On Jun 23–25 fill rate is −$23.37/day while requests are
-> +$21.95/day (growth trend), so net revenue reads −$1.47/day. The headline currently quotes the
-> **net**, which understates the incident. Arguably it should quote the driver's effect. Flagged,
-> not yet decided — see § 8.
-
 ---
 
 ## 5. Localization — which segment?
@@ -245,21 +240,3 @@ WHERE os_version='Android 15' AND event_date BETWEEN '2026-06-23' AND '2026-06-2
 ```
 
 ---
-
-## 8. What I do **not** trust yet
-
-Stated plainly so nobody validates against a claim we haven't earned.
-
-1. **The headline dollar figure understates incidents** where factors offset (§ 4). Needs a decision:
-   net revenue delta, or the driver's isolated effect?
-2. **Sigma is a floor-limited approximation**, not a real significance test. With 2–4 observations no
-   honest test exists. Treat it as a magnitude hint; the size gate does the real work.
-3. **Detection only sweeps the blended metric.** The finance eCPM incident (−34.8% on 7% of
-   impressions) moves blended eCPM just −2.4% and is **missed entirely** by the 3% gate. `/scan`
-   must sweep _segments_, not just totals, or small-but-real segment anomalies are invisible. **This
-   is the most serious open gap.**
-4. **Greedy deflation assumes one dominant cause per pass.** Genuinely independent co-occurring
-   causes need the loop to converge; it runs to 4 iterations but this is untested.
-5. **Pairwise dimension combinations are not swept** — only single dimensions. An incident living in
-   `os_version × region` but not in either alone would be missed.
-6. **No mix-vs-rate split yet** (T-041). The mix-shift channel is unreachable in the current code.

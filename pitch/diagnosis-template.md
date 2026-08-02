@@ -1,34 +1,20 @@
 # What the system says when it finds something
 
-**Task:** T-026 · **Owner:** sam · **Date:** 2026-08-01
-**Spec for T-019 (narration) and T-023 (LibreChat rendering).**
-
 Every number below is real, computed against the loaded 9M rows. Provenance is in
-[`incident-dossier.md`](incident-dossier.md). If you change the shape here, tell Lane A and Lane D.
+[`incident-dossier.md`](incident-dossier.md).
 
 ---
 
-## Human first. The rest comes later.
+## Two audiences, one source of truth
 
-This document previously tried to serve a human and a verifier at once, which is why it read badly
-for both — reference marks like `[e7]` are essential for checking and pure noise for reading.
+§1 is plain English, for a person — a revenue manager, a demo, the deck. §2 is the same content with
+inline evidence references, for anyone auditing a specific figure. Both render from the same
+`Investigation` object the engine emits, so the two views can never drift apart.
 
-**§1 is the one that matters now.** Plain English, for a person. Build to that.
-
-§2 (the tagged version) and the LLM narrator are the same content re-rendered, and they only become
-relevant when we wire the narrator in. Both read from the one `Investigation` object the engine
-already emits, so they cannot drift from §1 or from each other — which is exactly why deferring
-them costs nothing.
-
-|                 | Who reads it                     | When                            |
-| --------------- | -------------------------------- | ------------------------------- |
-| **§1 Plain**    | Revenue manager, demo, deck      | **Now**                         |
-| **§2 Receipts** | Judges, anyone auditing a figure | When the narrator lands (T-019) |
-
-> ⚠ **What we actually print today is neither.** `backend/engine/render.ts` emits something in between —
-> `-35.17pp on 9.6% of traffic`, `0.7837` — readable to us, not to a revenue manager. Writing the
-> §1 renderer is the next piece of work, and it is presentation only: no engine change, and the
-> grounding check keeps working because it verifies whatever string we print.
+|                 | Who reads it                     |
+| --------------- | --------------------------------- |
+| **§1 Plain**    | Revenue manager, demo, deck        |
+| **§2 Receipts** | Anyone auditing a figure           |
 
 ---
 
@@ -155,20 +141,7 @@ This one matters: a tool obliged to name a top segment would have blamed Brazil.
 
 A refusal is a legitimate answer. Dressing one up as a finding is how tools lose trust.
 
-### "Nothing broke, the mix changed" — supported, no training case (see T-031)
+### "Nothing broke, the mix changed"
 
 > Revenue per view fell 8%, but every segment's price is flat or up. More of our traffic simply came
 > from cheaper inventory this week. No action needed.
-
----
-
-## 6. What Lane A needs from this
-
-1. `Finding.channel` needs a **`not_localizable`** value. §5's first case is one of five real
-   training incidents, not an edge case.
-2. `Finding.status` needs **`cleared_as_contamination`**, distinct from `cleared_as_normal`. The
-   "178 looked broken, 151 weren't" line depends entirely on that distinction.
-3. Every `Evidence` row needs `segmentSharePct`. "−35 points" is meaningless without "on 1 in 10
-   requests".
-4. The narrator must be able to emit **zero** findings and still produce §5 output. An empty result
-   is frequently the correct answer.

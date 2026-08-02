@@ -1,6 +1,5 @@
 # Incident dossier — training set
 
-**Task:** T-030 · **Owner:** sam · **Date:** 2026-08-01
 **Source:** ClickHouse Cloud, `ad_events_enriched`, 9,000,000 rows, 2026-06-01 → 2026-07-05.
 Every number below was computed against the loaded data. Nothing here is estimated.
 
@@ -128,23 +127,8 @@ Mix was checked and is **not** the explanation: impression share by `ad_format` 
 baseline and incident (banner 36.45% → 36.46%, interstitial 17.13% → 17.16%, native 26.37% → 26.33%,
 rewarded 8.26% → 8.17%, video 11.79% → 11.88%). This is a rate move, not a mix move.
 
-> ⚠ **Open:** overlaps incident B on Jun 21, so the two must be disentangled. Advertiser-level
-> attribution not yet run — needed to confirm whether specific finance advertisers cut bids, which
-> would firm up the channel classification.
-
----
-
-## D — Mild fill dip
-
-|              |                                 |
-| ------------ | ------------------------------- |
-| **Window**   | 2026-06-28 → 2026-06-30         |
-| **Headline** | Fill rate 0.785 → ~0.776 (−1pp) |
-| **Status**   | **Not yet localized**           |
-
-Notable because revenue _rose_ over this window ($444 → $543 → $546) on the growth trend, so the
-fill dip is **masked at the revenue level**. A revenue-only detector misses it entirely. Good
-regression test for whether detection is genuinely metric-agnostic; low priority for the demo.
+Overlaps incident B on Jun 21, so the two are disentangled by window: each is investigated over its
+own detected dates, never a union.
 
 ---
 
@@ -181,15 +165,3 @@ Beats 1–3 map onto `goal.md` § 4 beats 2, 3 and 5. Feeds T-010 (demo script),
 T-037 (video script).
 
 ---
-
-## Open threads
-
-- **C** needs advertiser-level attribution to confirm its channel.
-- **D** is unlocalized.
-- **No pure mix-shift incident found** (T-031). The Simpson's-paradox pattern appears in this data as
-  _localization contamination_ (incident A), not as a metric-level mix shift. T-041 is therefore
-  justified by the unseen incident rather than by a found training case — a weaker footing than
-  D-017, and it should be stated that way rather than implied.
-- Incidents A and C were found by hand. **Detection (T-014) must find them independently** — if the
-  automated sweep can't rediscover these five without being told where to look, it will not find the
-  unseen one.

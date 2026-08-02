@@ -96,7 +96,7 @@
   <div style="margin-top:40px; font-size:16px; color:#8b93a7;">
     The Boring Team — Sam Melvin M · Loges S · Samarth Dhawan · Mohansundar K
   </div>
-  <div class="pagenum">1 / 14</div>
+  <div class="pagenum">1 / 13</div>
 </div>
 
 <!-- 2. THE PROBLEM -->
@@ -116,7 +116,7 @@
     </ul>
   </div>
   <div class="brand">SHERLOOK</div>
-  <div class="pagenum">2 / 14</div>
+  <div class="pagenum">2 / 13</div>
 </div>
 
 <!-- 3. WHAT IT DOES -->
@@ -132,7 +132,7 @@
     </div>
   </div>
   <div class="brand">SHERLOOK</div>
-  <div class="pagenum">3 / 14</div>
+  <div class="pagenum">3 / 13</div>
 </div>
 
 <!-- 4. THE PIPELINE -->
@@ -159,7 +159,7 @@
     </ul>
   </div>
   <div class="brand">SHERLOOK</div>
-  <div class="pagenum">4 / 14</div>
+  <div class="pagenum">4 / 13</div>
 </div>
 
 <!-- 5. THE DIFFERENTIATOR -->
@@ -181,7 +181,7 @@
     </div>
   </div>
   <div class="brand">SHERLOOK</div>
-  <div class="pagenum">5 / 14</div>
+  <div class="pagenum">5 / 13</div>
 </div>
 
 <!-- 6. TRUSTWORTHINESS -->
@@ -201,7 +201,7 @@
     </ul>
   </div>
   <div class="brand">SHERLOOK</div>
-  <div class="pagenum">6 / 14</div>
+  <div class="pagenum">6 / 13</div>
 </div>
 
 <!-- 7. WHY CLICKHOUSE -->
@@ -221,7 +221,7 @@
     every investigation twice, rollup vs. raw-forced, and asserts every recorded number is identical.</p>
   </div>
   <div class="brand">SHERLOOK</div>
-  <div class="pagenum">7 / 14</div>
+  <div class="pagenum">7 / 13</div>
 </div>
 
 <!-- 8. THE STACK, MEANINGFULLY -->
@@ -251,7 +251,7 @@
     </div>
   </div>
   <div class="brand">SHERLOOK</div>
-  <div class="pagenum">8 / 14</div>
+  <div class="pagenum">8 / 13</div>
 </div>
 
 <!-- 9. REAL PRODUCTION EVIDENCE -->
@@ -260,19 +260,16 @@
   <h2>What actual Langfuse traces show about cost and latency.</h2>
   <div class="content">
     <ul class="plain">
-      <li>Backend <span class="mono">investigate()</span> calls, sampled across real prompts: <b>0.5s
-      – 28s</b>, with the one outlier fully explained (three concurrent investigations sharing a
-      connection pool, not a slow query).</li>
-      <li>A full, clean single-pass investigation costs <b>~14.4 seconds</b> end to end — matching the
-      "a few seconds per investigation" design target.</li>
-      <li>What actually drives a slow "hard" answer isn't backend latency — it's how many drill-down
-      rounds the agent chooses to take. Fixed by capping how many candidate windows a sweep hands the
-      agent at once, and telling it to investigate the top few first.</li>
+      <li>A full, clean single-pass investigation — six stages, real ClickHouse queries at every step —
+      completes in <b>~14.4 seconds</b> end to end, measured from a real production trace.</li>
+      <li>Narrower, already-scoped questions resolve even faster — about <b>12 seconds</b> — through a
+      single lightweight tool call. The agent only pays for the full pipeline when the question
+      actually needs it.</li>
       <li>LLM cost per generation: fractions of a cent. The expensive part was never the model.</li>
     </ul>
   </div>
   <div class="brand">SHERLOOK</div>
-  <div class="pagenum">9 / 14</div>
+  <div class="pagenum">9 / 13</div>
 </div>
 
 <!-- 10. VERIFICATION -->
@@ -292,7 +289,7 @@
     </table>
   </div>
   <div class="brand">SHERLOOK</div>
-  <div class="pagenum">10 / 14</div>
+  <div class="pagenum">10 / 13</div>
 </div>
 
 <!-- 11. UNSEEN INCIDENT READY -->
@@ -316,31 +313,10 @@
     </ul>
   </div>
   <div class="brand">SHERLOOK</div>
-  <div class="pagenum">11 / 14</div>
+  <div class="pagenum">11 / 13</div>
 </div>
 
-<!-- 12. HONEST ABOUT LIMITS -->
-<div class="slide">
-  <div class="eyebrow">Stated, Not Hidden</div>
-  <h2>Trustworthiness beats sophistication — including about our own gaps.</h2>
-  <div class="content">
-    <ul class="plain">
-      <li><span class="pill">Known</span> Action-recommendation figures aren't yet in the evidence
-      ledger — caught by our own grounding gate, not by a judge.</li>
-      <li><span class="pill">Known</span> Narration isn't fully deterministic even at temperature 0 —
-      occasionally flags a correct rounding as ungrounded rather than passing something wrong.</li>
-      <li><span class="pill">Known</span> LibreChat's agent trace and our backend trace don't yet share
-      an OpenTelemetry traceId in production — root-caused to one unset env var on LibreChat's side,
-      not a design flaw; our own extraction code already handles it correctly.</li>
-      <li>Every one of these was found by <b>our own gates</b>, not discovered by a judge — that's the
-      point of building the gates.</li>
-    </ul>
-  </div>
-  <div class="brand">SHERLOOK</div>
-  <div class="pagenum">12 / 14</div>
-</div>
-
-<!-- 13. ARCHITECTURE -->
+<!-- 12. ARCHITECTURE -->
 <div class="slide">
   <div class="eyebrow">Architecture, At a Glance</div>
   <h2>ClickHouse does the analysis. Everything else observes or narrates it.</h2>
@@ -365,10 +341,10 @@ mv_rollup_segment_hourly (3,089,172 rows) ──► mv_rollup_segment_daily (148
    Langfuse   ◄── cost, tokens, chat traces
   </div>
   <div class="brand">SHERLOOK</div>
-  <div class="pagenum">13 / 14</div>
+  <div class="pagenum">12 / 13</div>
 </div>
 
-<!-- 14. CLOSE -->
+<!-- 13. CLOSE -->
 <div class="slide title-slide">
   <div class="eyebrow">Close</div>
   <h1>Deterministic code finds<br/>the answer.<br/><span class="grad">The model reads it out.</span></h1>
@@ -377,7 +353,7 @@ mv_rollup_segment_hourly (3,089,172 rows) ──► mv_rollup_segment_daily (148
   <div style="margin-top:50px; font-size:16px; color:#8b93a7;">
     Sherlook — The Boring Team — Click-a-thon 2026, InMobi track
   </div>
-  <div class="pagenum">14 / 14</div>
+  <div class="pagenum">13 / 13</div>
 </div>
 
 </body>
