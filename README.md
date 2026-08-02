@@ -63,6 +63,12 @@ Nothing on it is a mock — every number is read back out of ClickHouse or Langf
 _Also available as a standalone file: [docs/architecture.md](docs/architecture.md) /
 [docs/architecture.png](docs/architecture.png)._
 
+**Data lineage, and exactly where the AI layer sits versus where a human designed the logic:**
+[docs/data-lineage-and-human-intelligence.md](docs/data-lineage-and-human-intelligence.md). Short
+version — the model touches nothing upstream of a fully-verified result object, and every threshold,
+formula and classification rule in this system is deterministic code a person wrote, not a model's
+judgment call.
+
 ### Where the analysis runs
 
 **In ClickHouse. The LLM never writes SQL and cannot.**
