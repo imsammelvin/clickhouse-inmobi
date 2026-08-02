@@ -41,7 +41,7 @@
     "langfuse:trace": "bun run backend/langfuse-poc/trace-stub.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "dashboard": "OTEL_SERVICE_NAME=clickhouse-inmobi-dashboard bun run backend/dashboard-server/server.ts"
+    "dashboard": "OTEL_SERVICE_NAME=clickhouse-inmobi-dashboard bun --watch run backend/dashboard-server/server.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",
