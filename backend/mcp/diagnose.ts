@@ -161,11 +161,33 @@ function rankAndGroup(windows: SweepWindow[], avgRequestsPerDay: number): Joined
   const sameWindow = (a: SweepWindow, b: SweepWindow): boolean =>
     a.from === b.from && a.to === b.to;
 
+  /**
+   * Same dates is NOT enough to call two windows the same incident. The lead has to agree on which
+   * dimension is responsible.
+   *
+   * `sameWindow` alone used to be the whole first clause, and it merged on dates while ignoring both
+   * the metric and the segment. On the 6-10 July slice that collapsed two unrelated events into one:
+   * a fill_rate break led by `publisher_tier = tier_3` (-$31.68/day) absorbed an eCPM repricing led
+   * by region (-$84.47/day), and the report announced "one incident, not four". The larger of the two
+   * was never investigated and never appeared — the digest said the platform was fine.
+   *
+   * Two incidents genuinely can share a window. What makes them ONE is a shared cause, and the lead
+   * dimension is the cheapest honest proxy for that: a requests collapse dragging revenue down with
+   * it leads on the same dimension in both metrics, because it is the same segment failing.
+   *
+   * Comparing the dimension rather than the exact value is deliberate. The same underlying break
+   * often surfaces as `country = ID` in one metric and `country|ad_format = ID|rewarded` in another;
+   * demanding an identical value would split those, and over-splitting a digest is a nuisance where
+   * under-splitting hides an incident.
+   */
+  const sameLeadDimension = (a: SweepWindow, b: SweepWindow): boolean =>
+    a.leadSegment.dimension === b.leadSegment.dimension;
+
   for (const s of scored) {
     // Descending severity, so the first match is always the strongest view of the event.
     const host = out.find(
       (o) =>
-        sameWindow(o.primary, s.w) ||
+        (sameWindow(o.primary, s.w) && sameLeadDimension(o.primary, s.w)) ||
         (o.primary.metric === s.w.metric &&
           sameSegment(o.primary, s.w) &&
           overlaps(o.primary, s.w)),
