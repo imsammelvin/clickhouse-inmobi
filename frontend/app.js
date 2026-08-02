@@ -625,3 +625,54 @@ function renderHealth() {
     });
   });
 }
+
+
+/* ---------------------------------------------------------------------------------------------
+ * While you were away.
+ *
+ * The watchman runs on a cron, so its findings have to wait for you rather than the other way round.
+ * The browser remembers when you last dismissed the strip and asks only for what came after, so
+ * returning to the tab does not replay incidents you have already read — a banner that shows the same
+ * three things every morning is a banner nobody reads by Thursday.
+ * ------------------------------------------------------------------------------------------------ */
+const AWAY_SEEN_KEY = "watchman.seenAt";
+
+async function loadAway() {
+  const el = document.querySelector("#away");
+  if (!el) return;
+  const since = localStorage.getItem(AWAY_SEEN_KEY);
+  let data;
+  try {
+    data = await getJson(`/api/watch${since ? `?since=${encodeURIComponent(since)}` : ""}`);
+  } catch {
+    return; // the dashboard is useful without this; never let it break the page
+  }
+
+  const items = data.notifications ?? [];
+  if (items.length === 0) {
+    el.hidden = true;
+    return;
+  }
+
+  document.querySelector("#away-title").textContent =
+    `While you were away — ${items.length} thing${items.length > 1 ? "s" : ""} you asked to be told about`;
+
+  document.querySelector("#away-list").innerHTML = items
+    .map((n) => {
+      const dir = n.pct < 0 ? "down" : "up";
+      return `<li><b>${n.metric}</b> ${dir} ${Math.abs(n.pct).toFixed(0)}% on <b>${n.where}</b>
+        &middot; ${n.day} &middot; ~${Number(n.requestsPerDay).toLocaleString()} requests/day</li>`;
+    })
+    .join("");
+
+  el.hidden = false;
+}
+
+document.querySelector("#away-dismiss")?.addEventListener("click", () => {
+  // Watermark by NOW, not by the newest item shown: anything the cron writes while the tab is open
+  // is still unseen, and marking it read here would silently swallow it.
+  localStorage.setItem(AWAY_SEEN_KEY, new Date().toISOString());
+  document.querySelector("#away").hidden = true;
+});
+
+loadAway();

@@ -494,3 +494,23 @@ tr.sev-rise td:first-child {
   font-size: 11px;
   user-select: none;
 }
+
+
+/* While you were away — the watchman's output, surfaced on return.
+   Uses --bad because every notification here is a recurrence of something already diagnosed. */
+#away {
+  margin: 0; padding: 14px 20px;
+  background: color-mix(in srgb, var(--bad) 12%, var(--panel-solid));
+  border-bottom: 1px solid var(--border);
+  border-left: 3px solid var(--bad);
+}
+#away .away-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+#away strong { font-size: 14px; color: var(--text); }
+#away button {
+  background: transparent; border: 1px solid var(--border); color: var(--muted);
+  border-radius: 6px; padding: 4px 12px; font-size: 12px; cursor: pointer;
+}
+#away button:hover { color: var(--text); border-color: var(--muted); }
+#away ul { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
+#away li { font-size: 13px; color: var(--muted); line-height: 1.5; }
+#away li b { color: var(--text); font-weight: 600; }

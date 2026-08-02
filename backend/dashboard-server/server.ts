@@ -18,6 +18,8 @@ import { makeClient, makeTelemetryClient, select } from "../clickhouse/client";
 import { Session } from "../mcp/trace";
 import { callTool } from "../mcp/tools";
 import { DEFAULT_METRICS } from "../engine/scan";
+import { readFileSync, existsSync } from "node:fs";
+import { listWatches, renderNotification, type Notification } from "../mcp/watch";
 import { initObservability } from "../../shared/utils/telemetryUtils";
 
 const PORT = Number(process.env.DASHBOARD_PORT ?? 4500);
@@ -177,6 +179,54 @@ async function apiSystemHealth(): Promise<Response> {
 }
 
 // -------------------------------------------------------------------------------------------------
+// /api/watch -- what the watchman found while nobody was looking.
+//
+// The point of the watchman is that it runs when you are not here, so its output has to survive until
+// you come back. The cron appends every firing to a JSONL log; this reads it. `since` lets the browser
+// ask only for what it has not shown yet, which is what makes "while you were away" mean anything
+// rather than replaying the same three incidents on every page load.
+// -------------------------------------------------------------------------------------------------
+
+const WATCH_LOG = join(import.meta.dir, "../mcp/watches/notifications.jsonl");
+
+function apiWatch(url: URL): Response {
+  const since = url.searchParams.get("since");
+  if (!existsSync(WATCH_LOG)) {
+    return json({ notifications: [], watching: listWatches().length, log: false });
+  }
+
+  const events = readFileSync(WATCH_LOG, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .flatMap((line) => {
+      try {
+        return [JSON.parse(line) as Notification & { at: string }];
+      } catch {
+        // A half-written final line is normal when the cron is mid-append; skip it rather than 500.
+        return [];
+      }
+    })
+    .filter((e) => !since || e.at > since)
+    .reverse()
+    .slice(0, 25);
+
+  return json({
+    watching: listWatches().length,
+    log: true,
+    notifications: events.map((e) => ({
+      at: e.at,
+      day: e.day,
+      metric: e.watch.metric,
+      where: e.watch.dimension ? `${e.watch.dimension} = '${e.watch.value}'` : "platform-wide",
+      pct: e.pct,
+      requestsPerDay: e.requestsPerDay,
+      // The same words the email would have carried, so the two channels cannot drift apart.
+      text: renderNotification(e),
+    })),
+  });
+}
+
+// -------------------------------------------------------------------------------------------------
 
 async function serveStatic(pathname: string): Promise<Response | null> {
   const rel = pathname === "/" ? "/index.html" : pathname;
@@ -206,6 +256,7 @@ function main(): void {
       if (url.pathname === "/api/rollup-comparison") return apiRollupComparison();
       if (url.pathname === "/api/llm-cost") return apiLlmCost();
       if (url.pathname === "/api/system-health") return apiSystemHealth();
+      if (url.pathname === "/api/watch") return apiWatch(url);
       if (url.pathname === "/api/config") return json({ libreChatUrl: LIBRECHAT_URL });
 
       const staticRes = await serveStatic(url.pathname);
