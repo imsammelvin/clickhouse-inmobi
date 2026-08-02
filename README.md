@@ -69,6 +69,10 @@ version — the model touches nothing upstream of a fully-verified result object
 formula and classification rule in this system is deterministic code a person wrote, not a model's
 judgment call.
 
+**Proof, not just a diagram — the literal SQL text, per stage, from a real production trace:**
+[docs/clickstack-tracing.md](docs/clickstack-tracing.md).
+Link: https://hyperdx.clickhouse.cloud/search?chcServiceId=fae2f5ab-faa6-44e8-84e2-a5f20335948f&source=6a6dbfb89438499c968280be&where=TraceId%2520%253D%2520%272dc755ccf1ec14e01638ef948c2114d7%27&select=&whereLanguage=sql&filters=%255B%257B%2522type%2522%253A%2522sql%2522%252C%2522condition%2522%253A%2522SpanName%2520IN%2520(%27ledger.run.get_metric%27)%2522%257D%255D&orderBy=&from=1785650133000&to=1785651033000&isLive=false&eventRowWhere=%257B%2522id%2522%253A%2522SpanName%253D%27investigation%27%2520AND%2520Timestamp%253DparseDateTime64BestEffort(%272026-08-02T05%253A57%253A35.182000000Z%27%252C%25209)%2520AND%2520SpanId%253D%27409481f2cecab96f%27%2520AND%2520ServiceName%253D%27clickhouse-inmobi-mcp%27%2520AND%2520(Duration)%252F1e9%253D9.788444235%2520AND%2520ParentSpanId%253D%277b42a5245053103b%27%2520AND%2520StatusCode%253D%27Unset%27%2522%252C%2522type%2522%253A%2522trace%2522%252C%2522aliasWith%2522%253A%255B%255D%252C%2522traceId%2522%253A%25222dc755ccf1ec14e01638ef948c2114d7%2522%257D
+
 ### Where the analysis runs
 
 **In ClickHouse. The LLM never writes SQL and cannot.**
