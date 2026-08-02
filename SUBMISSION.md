@@ -1,7 +1,4 @@
-# \<TEAM NAME\>
-
-> **Copy this file into the Click-a-thon submissions fork as `<TeamName>/README.md`.**
-> Four placeholders need filling before it ships — they are marked `«FILL»` and listed at the bottom.
+# The Boring Team
 
 ## Track
 
@@ -16,7 +13,7 @@ only narrates.
 
 ## Team Members
 
-- «FILL» Name (@handle)
+- «FILL» Name (@sam-m-anarix)
 
 ## What it does
 
@@ -217,7 +214,8 @@ header. `get_evidence <id>` resolves any figure back to its SQL.
 (optional — everything except narration works without one).
 
 ```bash
-git clone «FILL: repo url» && cd «repo»
+git clone https://github.com/sam-m-anarix/click-a-thon-26-submissions.git
+cd "click-a-thon-26-submissions/The Boring Team"
 bun install
 
 cp .env.example .env        # then fill in:

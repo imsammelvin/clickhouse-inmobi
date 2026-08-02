@@ -12,20 +12,20 @@ investigation trace are two separate OTel trees — see engineering notes), so e
 correlated to backend work **by wall-clock overlap**, not by traceId. Where that correlation is
 independently checkable we say so.
 
-| # | Type | Wall clock | LLM round-trips | Backend shape |
-|---|------|-----------|:---:|---|
-| 1 | Hard | 201.5 s (00:02:54.9 → 00:06:16.4) | 20 | Iterative — 14 separate `investigate()` calls, agent drilling down repeatedly |
-| 2 | Hard | 47.9 s (00:06:22.8 → 00:07:10.7) | 3 | Iterative — 7 `investigate()` calls |
-| 3 | Hard | 12.2 s (00:07:36.1 → 00:07:48.3) | 1 | Single lightweight tool call, no full `investigate()` |
-| 4 | Easy | 12.3 s (00:08:58.3 → 00:09:10.6) | 2 | Single lightweight tool call, no full `investigate()` |
-| 5 | Easy | 42.8 s (00:09:29.8 → 00:10:12.7 LLM) + 14.4 s investigate | 3 | **One** clean end-to-end `investigate()` call |
+| #   | Type | Wall clock                                                | LLM round-trips | Backend shape                                                                 |
+| --- | ---- | --------------------------------------------------------- | :-------------: | ----------------------------------------------------------------------------- |
+| 1   | Hard | 201.5 s (00:02:54.9 → 00:06:16.4)                         |       20        | Iterative — 14 separate `investigate()` calls, agent drilling down repeatedly |
+| 2   | Hard | 47.9 s (00:06:22.8 → 00:07:10.7)                          |        3        | Iterative — 7 `investigate()` calls                                           |
+| 3   | Hard | 12.2 s (00:07:36.1 → 00:07:48.3)                          |        1        | Single lightweight tool call, no full `investigate()`                         |
+| 4   | Easy | 12.3 s (00:08:58.3 → 00:09:10.6)                          |        2        | Single lightweight tool call, no full `investigate()`                         |
+| 5   | Easy | 42.8 s (00:09:29.8 → 00:10:12.7 LLM) + 14.4 s investigate |        3        | **One** clean end-to-end `investigate()` call                                 |
 
 ## The headline pattern
 
 **Hard and easy don't differ in backend cost per call — they differ in how many times the agent calls
 back.** A single `investigate()` call is fast regardless of prompt difficulty (see stage timing below).
 What makes prompt 1 take 3.5 minutes isn't slow ClickHouse — it's the agent choosing to drill down 14
-times, each round costing an LLM generation *and* a tool round-trip. Prompt 5 ("easy") resolves the
+times, each round costing an LLM generation _and_ a tool round-trip. Prompt 5 ("easy") resolves the
 whole investigation in one shot.
 
 This matches what we already knew from load-testing (`scalability-state.md`): the pipeline itself is
@@ -39,6 +39,7 @@ side alone; the lever left is how many drill-down rounds the agent decides to ta
 - **Slowest:** 27.998 s, inside prompt 1 (hard #1), at 00:03:50.755–00:04:18.753.
 
 That slowest call is independently confirmed two ways:
+
 1. LibreChat's own `tool-dispatch` span for the same round-trip measured **28.046 s**
    (00:03:50.720–00:04:18.766) — a 48 ms difference from our backend's own 27.998 s, i.e. the two
    independent traces agree on the same event almost to the millisecond, which is the strongest evidence
@@ -54,14 +55,14 @@ That slowest call is independently confirmed two ways:
 Prompt 5 (easy #2) is the cleanest sample: exactly one `investigate()` call, no drill-down, full
 pipeline, 14.416 s total (00:10:20.310 → 00:10:34.726).
 
-| Stage | ~Time | Note |
-|---|---:|---|
-| detect | ~3.3 s | segment scan + baseline sweep |
-| decompose | ~0.5 s | |
-| localize | ~5.4 s | 4 rollup reads |
-| residualize | ~7.8 s | masked re-sweep — **the single most expensive named span** |
-| classify | ~0.4 s | `uniqExact`, raw table (can't be converted — see scalability-state.md) |
-| confirm | ~0.2 s | |
+| Stage       |  ~Time | Note                                                                   |
+| ----------- | -----: | ---------------------------------------------------------------------- |
+| detect      | ~3.3 s | segment scan + baseline sweep                                          |
+| decompose   | ~0.5 s |                                                                        |
+| localize    | ~5.4 s | 4 rollup reads                                                         |
+| residualize | ~7.8 s | masked re-sweep — **the single most expensive named span**             |
+| classify    | ~0.4 s | `uniqExact`, raw table (can't be converted — see scalability-state.md) |
+| confirm     | ~0.2 s |                                                                        |
 
 `residualize` being the long pole here is consistent with `scalability-state.md`'s finding that it's the
 last unconverted stage (masked re-sweeps still hit raw data, ~4 queries per investigation). This is a

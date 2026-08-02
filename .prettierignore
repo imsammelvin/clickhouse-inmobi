@@ -2,3 +2,6 @@ dist/
 node_modules/
 # Frozen exhibit -- a captured snapshot of one investigation's output, not authored source.
 pitch/example-report/
+# Vendored upstream app -- not our source, and reformatting 3,792 third-party files would make
+# every future diff against it unreadable.
+frontend/LibreChat/
