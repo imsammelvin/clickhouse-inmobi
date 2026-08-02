@@ -37,7 +37,7 @@
     "bench": "bun run backend/engine/benchmark.ts",
     "bench:rollup": "bun run backend/scripts/bench-rollup.ts",
     "explain": "bun run backend/engine/cli.ts",
-    "build": "bun build backend/api/server.ts --outdir dist --target=node",
+    "build": "bun run backend/scripts/build.ts",
     "langfuse:trace": "bun run backend/langfuse-poc/trace-stub.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

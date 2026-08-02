@@ -24,7 +24,13 @@ import { readCost, type CostReport } from "../mcp/cost";
 import { Session } from "../mcp/trace";
 import { callTool } from "../mcp/tools";
 import { fmt, runScript, secondsSince } from "../../shared/utils/common.utils";
-import { initObservability, log, shutdownObservability } from "../../shared/utils/telemetryUtils";
+import type { Span } from "@opentelemetry/api";
+import {
+  initObservability,
+  log,
+  shutdownObservability,
+  withSpan,
+} from "../../shared/utils/telemetryUtils";
 
 const asJson = process.argv.includes("--json");
 const out = (s = ""): void => {
@@ -174,6 +180,14 @@ const ratio = (raw: number, roll: number): string =>
 
 const main = async (): Promise<void> => {
   initObservability();
+  try {
+    await withSpan("bench_rollup.run", { "app.calls": CALLS.length }, runBenchRollup);
+  } finally {
+    await shutdownObservability();
+  }
+};
+
+const runBenchRollup = async (span: Span): Promise<void> => {
   const startedAt = performance.now();
 
   try {
@@ -239,6 +253,18 @@ const main = async (): Promise<void> => {
       },
     };
 
+    // The headline numbers, on the span as well as on stdout -- this is the T-013 claim, and having
+    // it in otel_traces means "was the speedup still there last Tuesday" is a query, not an archive dig.
+    span.setAttributes({
+      "app.bench.raw.read_rows": totals.raw.readRows,
+      "app.bench.raw.server_ms": totals.raw.serverMs,
+      "app.bench.raw.peak_memory_bytes": totals.raw.peakMemoryBytes,
+      "app.bench.rollup.read_rows": totals.rollup.readRows,
+      "app.bench.rollup.server_ms": totals.rollup.serverMs,
+      "app.bench.rollup.peak_memory_bytes": totals.rollup.peakMemoryBytes,
+      "app.bench.queries": totals.raw.queries,
+    });
+
     out(
       `\n${CALLS.length} calls, ${totals.raw.queries} queries\n` +
         `  rows read    ${fmt(totals.raw.readRows).padStart(14)} -> ${fmt(totals.rollup.readRows).padStart(12)}` +
@@ -274,7 +300,7 @@ const main = async (): Promise<void> => {
 
     log.info(`\nbench:rollup done in ${secondsSince(startedAt)}`);
   } finally {
-    await shutdownObservability();
+    span.setAttribute("app.wall_ms", Math.round(performance.now() - startedAt));
   }
 };
 

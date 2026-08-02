@@ -23,7 +23,12 @@
 import { callTool } from "../tools";
 import { Session } from "../trace";
 import { CLEAN_DAYS, DIMS, PLANTED, SHAPE, dateOf, specFingerprint, weekendOffsets } from "./spec";
-import { initObservability, shutdownObservability } from "../../../shared/utils/telemetryUtils";
+import type { Span } from "@opentelemetry/api";
+import {
+  initObservability,
+  shutdownObservability,
+  withSpan,
+} from "../../../shared/utils/telemetryUtils";
 
 const say = (s = ""): void => {
   process.stdout.write(`${s}\n`);
@@ -67,6 +72,14 @@ async function main(): Promise<void> {
   }
 
   initObservability();
+  try {
+    await withSpan("synth.verify", { "app.database": db }, (span) => runSynthVerify(span, db));
+  } finally {
+    await shutdownObservability();
+  }
+}
+
+async function runSynthVerify(span: Span, db: string): Promise<void> {
   const session = new Session();
   let failures = 0;
   const fail = (msg: string): void => {
@@ -414,11 +427,17 @@ async function main(): Promise<void> {
         ? `\nEvery planted deviation was found and localized, nothing was invented on a quiet day.\n`
         : `\n${failures} gated failure(s) above. This is a dataset the engine has never seen.\n`,
     );
+    span.setAttributes({
+      "app.synth.planted": planted,
+      "app.synth.windows_reported": windows.length,
+      "app.synth.spurious": spurious.length,
+      "app.synth.failures": failures,
+      "app.synth.seed": SHAPE.seed,
+    });
     process.exitCode = failures === 0 ? 0 : 1;
   } finally {
     session.export();
     await session.close();
-    await shutdownObservability();
   }
 }
 

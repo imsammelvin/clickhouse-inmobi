@@ -13,12 +13,18 @@
  * file is presentation, not a second copy of the query logic.
  */
 import { join } from "node:path";
-import { Ledger } from "../engine/ledger";
+import { SpanKind, SpanStatusCode, context, propagation } from "@opentelemetry/api";
 import { makeClient, makeTelemetryClient, select } from "../clickhouse/client";
 import { Session } from "../mcp/trace";
 import { callTool } from "../mcp/tools";
 import { DEFAULT_METRICS } from "../engine/scan";
-import { initObservability } from "../../shared/utils/telemetryUtils";
+import {
+  initObservability,
+  log,
+  shutdownObservability,
+  trySpan,
+  withSpan,
+} from "../../shared/utils/telemetryUtils";
 
 const PORT = Number(process.env.DASHBOARD_PORT ?? 4500);
 // The static page lives in top-level frontend/, separate from this API/proxy server.
@@ -112,14 +118,32 @@ async function apiLlmCost(): Promise<Response> {
 
   try {
     const auth = Buffer.from(`${publicKey}:${secretKey}`).toString("base64");
-    const res = await fetch(
-      `${baseUrl}/api/public/metrics?query=${encodeURIComponent(JSON.stringify(query))}`,
+    // CLIENT span, and no `traceparent` injected: Langfuse's public API is a third party that will
+    // not continue our trace, so propagating into it buys nothing. What this span is for is the
+    // other half -- a slow or 5xx-ing Langfuse showing up as this panel's latency, attributed.
+    const body = await withSpan(
+      "langfuse.metrics",
       {
-        headers: { Authorization: `Basic ${auth}` },
+        "http.request.method": "GET",
+        "server.address": new URL(baseUrl).host,
+        "url.path": "/api/public/metrics",
+        "app.window_hours": 24,
       },
+      async (span) => {
+        const res = await fetch(
+          `${baseUrl}/api/public/metrics?query=${encodeURIComponent(JSON.stringify(query))}`,
+          {
+            headers: { Authorization: `Basic ${auth}` },
+          },
+        );
+        span.setAttribute("http.response.status_code", res.status);
+        if (!res.ok) throw new Error(`Langfuse API ${res.status}: ${await res.text()}`);
+        const parsed = (await res.json()) as { data: unknown[] };
+        span.setAttribute("app.rows", parsed.data.length);
+        return parsed;
+      },
+      SpanKind.CLIENT,
     );
-    if (!res.ok) throw new Error(`Langfuse API ${res.status}: ${await res.text()}`);
-    const body = (await res.json()) as { data: unknown[] };
     return json({ measuredAt: now.toISOString(), windowHours: 24, rows: body.data });
   } catch (error) {
     return errorJson(error);
@@ -194,24 +218,95 @@ async function serveStatic(pathname: string): Promise<Response | null> {
   });
 }
 
+/** The set of paths that get their own span name. Everything else collapses to one label. */
+const API_ROUTES = new Set([
+  "/api/anomalies",
+  "/api/rollup-comparison",
+  "/api/llm-cost",
+  "/api/system-health",
+  "/api/config",
+]);
+
+/**
+ * Span names must be low-cardinality or the trace list becomes unreadable. The API routes are a
+ * fixed set so they can be used verbatim; every static asset collapses to `/static/*`, with the
+ * real path kept in `url.path` where high cardinality is fine.
+ */
+const routeLabel = (pathname: string): string =>
+  API_ROUTES.has(pathname) ? pathname : "/static/*";
+
+async function dispatch(pathname: string): Promise<Response> {
+  if (pathname === "/api/anomalies") return apiAnomalies();
+  if (pathname === "/api/rollup-comparison") return apiRollupComparison();
+  if (pathname === "/api/llm-cost") return apiLlmCost();
+  if (pathname === "/api/system-health") return apiSystemHealth();
+  if (pathname === "/api/config") return json({ libreChatUrl: LIBRECHAT_URL });
+
+  const staticRes = await serveStatic(pathname);
+  return staticRes ?? new Response("Not found", { status: 404 });
+}
+
+/**
+ * One SERVER span per request, same shape as `backend/api/server.ts`.
+ *
+ * `propagation.extract` + `context.with` matter here specifically: this server calls `callTool`,
+ * which opens `mcp.tool.*`, which runs the whole investigation engine. Without a parent on the
+ * context those spans root a brand-new trace each, so a slow dashboard panel could not be followed
+ * down into the stage that made it slow.
+ */
+const handle = async (req: Request): Promise<Response> => {
+  const url = new URL(req.url);
+  const parent = propagation.extract(context.active(), Object.fromEntries(req.headers));
+
+  const handled = await context.with(parent, () =>
+    trySpan(
+      `${req.method} ${routeLabel(url.pathname)}`,
+      {
+        "http.request.method": req.method,
+        "http.route": routeLabel(url.pathname),
+        "url.path": url.pathname,
+        "url.scheme": url.protocol.replace(":", ""),
+        "server.address": url.host,
+        "user_agent.original": req.headers.get("user-agent") ?? "",
+      },
+      async (span) => {
+        const response = await dispatch(url.pathname);
+        span.setAttribute("http.response.status_code", response.status);
+        // 4xx is the caller asking for something that isn't there; only 5xx is our failure.
+        if (response.status >= 500) {
+          span.setStatus({ code: SpanStatusCode.ERROR, message: `HTTP ${response.status}` });
+        }
+        return response;
+      },
+      SpanKind.SERVER,
+    ),
+  );
+
+  if (handled.ok) return handled.value;
+
+  // A handler that threw rather than returning `errorJson` is a bug on our side. The span is
+  // already marked ERROR by `trySpan`; the browser gets a shape it can render.
+  log.error("dashboard request failed", {
+    "url.path": url.pathname,
+    "error.message": handled.error.message,
+  });
+  return json({ error: handled.error.message }, 500);
+};
+
 function main(): void {
   initObservability();
 
-  Bun.serve({
-    port: PORT,
-    async fetch(req) {
-      const url = new URL(req.url);
+  const server = Bun.serve({ port: PORT, fetch: handle });
 
-      if (url.pathname === "/api/anomalies") return apiAnomalies();
-      if (url.pathname === "/api/rollup-comparison") return apiRollupComparison();
-      if (url.pathname === "/api/llm-cost") return apiLlmCost();
-      if (url.pathname === "/api/system-health") return apiSystemHealth();
-      if (url.pathname === "/api/config") return json({ libreChatUrl: LIBRECHAT_URL });
-
-      const staticRes = await serveStatic(url.pathname);
-      return staticRes ?? new Response("Not found", { status: 404 });
-    },
-  });
+  // Not optional. The batch span processor holds un-exported spans, and a dashboard killed with
+  // Ctrl-C mid-demo would otherwise drop exactly the traces someone just asked to see.
+  const shutdown = async (): Promise<void> => {
+    await server.stop();
+    await shutdownObservability();
+    process.exit(0);
+  };
+  process.on("SIGINT", () => void shutdown());
+  process.on("SIGTERM", () => void shutdown());
 
   process.stderr.write(`[dashboard] http://localhost:${PORT}\n`);
 }

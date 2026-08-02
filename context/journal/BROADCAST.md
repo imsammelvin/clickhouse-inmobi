@@ -775,3 +775,72 @@ additive, doesn't touch backend/mcp.
 Langfuse env vars already set, same as everything else).
 
 **Commits:** none yet (working tree only). Not pushed (loges' own rule: only loges pushes their own).
+
+### 2026-08-02 05:55 — mohan — full OpenTelemetry span coverage, and a real `bun run build`
+
+**Crosses lanes: `backend/` (Lane A, loges) and `backend/mcp/` + `backend/clickhouse/` (Lane B,
+samarth/sam).** Branch `dev/mohan/otel-coverage-gaps`, seven commits, nothing pushed to `main`.
+Reviewers: loges for the dashboard/scripts half, samarth for `rollup.ts`, sam for `mcp/`.
+
+**The audit.** Counted spans against work per file across the post-restructure tree. Covered lanes
+were genuinely covered — `investigation` -> `stage.*`, `clickhouse.select/exec/insert`, `ledger.run`,
+`mcp.tool.*`, and `api/server.ts`'s SERVER span with W3C propagation. Five gaps, all now closed:
+
+1. **`dashboard-server/server.ts`** called `initObservability()` and then emitted nothing. No SERVER
+   span, no `traceparent` extraction, no flush on exit. Since it calls `callTool`, every panel ran the
+   whole engine under a fresh root trace — a slow panel could not be followed into the stage that
+   caused it. Now mirrors `api/server.ts`, plus a CLIENT span on the Langfuse metrics call and a
+   SIGINT/SIGTERM flush. Span names are route templates; static assets collapse to `/static/*`.
+2. **`clickhouse/rollup.ts`, `planRollup`** — the rollup-vs-raw decision on every query, and when it
+   declined it said nothing about why. Split into `decidePlan()` so each fallback names a reason,
+   wrapped in a sync span, mirrored to a `rollup.plan.decisions` counter (source + reason + grain) so
+   the fallback _rate_ is a metric query, not a trace scan. `ensureRollupReady` spans the one call
+   that queries; the cached path deliberately does not. **samarth — this is your file; the planner's
+   logic and its return values are byte-identical, only the `return null`s now carry a label.**
+3. **MCP query ops** — `measure`/`compare_periods`/`rank_segments`/`dimension_values`/`daily_series`/
+   `dataset_overview` sat in the gap between `mcp.tool.*` and `ledger.run` with nothing recording
+   which op ran or what came back. Each now has a `query.*` span carrying `servedFrom`. That last one
+   is the T-013 claim: it lived only in the response envelope, so proving it held over a run meant
+   re-reading JSON. Thin wrappers over renamed `*Inner` functions — query bodies untouched.
+4. **Nine entry points** — `diagnose`, `eval/run`, `narrate`, `parity`, the three `synth/` scripts,
+   `verify-rollup`, `bench-rollup` — initialised the pipeline, or nothing at all, and never
+   opened a span — so their logs went to `otel_logs` with no `trace_id`, since a record is only
+   correlated if a span is active when it is emitted. Each now has a root span with outcome
+   attributes. Several `main()`s were restructured because ordering is load-bearing: a span opened
+   before `initObservability()` gets the no-op tracer, and a span still open at shutdown is never
+   exported — so entry points that called `process.exit()` mid-flight now return an exit code and
+   `main` exits once, after the flush.
+5. **`narrate.ts`** additionally gets `gen_ai.*` attributes on the LLM call. That is the one real
+   generation in the repo, and the reason `telemetryUtils` needs `shouldExportSpan: () => true`;
+   Langfuse can now render it as a generation with model and token counts.
+
+**Two entry points stay uninstrumented on purpose**, with the reason in the file so the next audit
+does not "fix" them. `observability/verify.ts` asserts "the latest trace has exactly one root" against
+`otel_traces` — instrumenting it would make it grade its own trace. `mcp/verify-all.ts` spawns each
+gate as its own process; those already export their own traces, and a span here could not parent them
+without threading `traceparent` through the environment.
+
+**`bun run build` now builds the project.** It was `bun build backend/api/server.ts` — one of 28 entry
+points, silently. `backend/scripts/build.ts` typechecks, then bundles every entry point _derived from
+`package.json` scripts_ so the list cannot go stale, with `target: bun` (these use `Bun.serve`/
+`Bun.spawn`/`Bun.file`; a node build fails at runtime rather than at build) and a **mirrored layout** —
+`shared/constants` computes `REPO_ROOT` from `import.meta.dir` and the dashboard resolves `frontend/`
+the same way, so a flat `--outdir` breaks both. `dist/` stands in for the repo root, with `schema.sql`,
+`clickstack-schema.sql`, the dashboard's benchmark JSON and `frontend/` copied in beside the bundles;
+`InMobi/` is symlinked, not copied. **This touches `package.json` — announcing per AGENTS.md § 2.**
+
+**Verified against live infrastructure, not fixtures:** `mcp:eval` 16/16 (gated 60/60), `criteria`
+4/4, `parity` 5/5 identical and all rollup-served, `ch:verify-rollup` 283/283 probes agree (265
+rollup-served), `typecheck` clean, `build` 28/28 (32 MiB). Confirmed in `otel_traces` over the run:
+`rollup.plan` 752 (434 rollup / 314 raw:rollup_not_ready / 4 raw:no_such_cut), `query.measure` 298,
+`query.rank_segments` 165, `query.compare_periods` 44, `rollup.ready` 10, plus `eval.run`,
+`parity.run`, `verify_rollup.run` and the dashboard's `GET /api/*` under
+`clickhouse-inmobi-dashboard`. Bundles smoke-tested from `dist/`: `ping` reaches ClickHouse, the
+dashboard serves `/`, `/api/config` and `/api/rollup-comparison` off the copied assets.
+
+**Also noted, not fixed (not my lane):** an earlier branch `dev/mohan/otel-span-coverage` carries two
+commits of span-attribute enrichment written against the pre-restructure paths. It never merged and
+`main` has since moved every file, so it needs a rebase or a redo; this branch does not include it.
+
+**Commits:** `4f2c35f`, `fac99f5`, `c5d7a6b`, `b56a518`, `d57b1f2`, `21eea6a`, `62bd229` on
+`dev/mohan/otel-coverage-gaps`. Not pushed — say the word and I will, or review locally first.

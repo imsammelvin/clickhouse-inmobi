@@ -45,6 +45,22 @@ import {
   planRollup,
   sourceLabel,
 } from "../clickhouse/rollup";
+import { withSpan } from "../../shared/utils/telemetryUtils";
+import type { Span } from "@opentelemetry/api";
+
+/**
+ * The result half of every `query.*` span below.
+ *
+ * `ledger.run` already traces the SQL, and `mcp.tool.*` already traces the call — what neither has
+ * is *which query op* ran, over what, and what came back. `servedFrom` in particular: it is the
+ * rollup-vs-raw claim the whole T-013 story rests on, and until now it existed only in the response
+ * envelope, so proving it held over a run meant re-reading JSON rather than querying otel_traces.
+ */
+const annotate = (span: Span, servedFrom: string, rows: number, truncated?: boolean): void => {
+  span.setAttribute("app.served_from", servedFrom);
+  span.setAttribute("app.rows", rows);
+  if (truncated !== undefined) span.setAttribute("app.truncated", truncated);
+};
 
 /**
  * Longest window any single tool call may span.
@@ -421,7 +437,7 @@ function granularityColumn(g: Granularity | undefined): { expr: string; name: st
  * function in the same pass — a delta without a size is not interpretable, and making the caller
  * issue a second call to get it invites them to skip it.
  */
-export async function measure(ledger: Ledger, args: MeasureArgs): Promise<MeasureResult> {
+async function measureInner(ledger: Ledger, args: MeasureArgs): Promise<MeasureResult> {
   const def = resolveMetric(args.metric);
   const window = assertWindow(args.from, args.to);
   const scope = buildScope(args.filters, def);
@@ -527,6 +543,24 @@ LIMIT ${limit + 1}`.trim();
   };
 }
 
+export const measure = (ledger: Ledger, args: MeasureArgs): Promise<MeasureResult> =>
+  withSpan(
+    "query.measure",
+    {
+      "app.metric": String(args.metric ?? ""),
+      "app.window.from": String(args.from ?? ""),
+      "app.window.to": String(args.to ?? args.from ?? ""),
+      "app.group_by": (args.group_by ?? []).join(","),
+      "app.filter_dims": Object.keys(args.filters ?? {}).join(","),
+      "app.granularity": args.granularity ?? "total",
+    },
+    async (span) => {
+      const result = await measureInner(ledger, args);
+      annotate(span, result.servedFrom, result.rows.length, result.truncated);
+      return result;
+    },
+  );
+
 // ---------------------------------------------------------------------------------------------
 // compare
 // ---------------------------------------------------------------------------------------------
@@ -577,7 +611,7 @@ export interface CompareResult {
  * a "compare to last week" tool that quietly used a mean would manufacture a Saturday incident on
  * demand. When the caller supplies an explicit baseline window we use it and say so.
  */
-export async function comparePeriods(ledger: Ledger, args: CompareArgs): Promise<CompareResult> {
+async function comparePeriodsInner(ledger: Ledger, args: CompareArgs): Promise<CompareResult> {
   const def = resolveMetric(args.metric);
   const current = assertWindow(args.from, args.to);
   const scope = buildScope(args.filters, def);
@@ -731,6 +765,27 @@ LIMIT ${limit + 1}`.trim();
   };
 }
 
+export const comparePeriods = (ledger: Ledger, args: CompareArgs): Promise<CompareResult> =>
+  withSpan(
+    "query.compare_periods",
+    {
+      "app.metric": String(args.metric ?? ""),
+      "app.window.from": String(args.from ?? ""),
+      "app.window.to": String(args.to ?? args.from ?? ""),
+      // Whether the caller pinned a baseline or took the same-weekday default (D-012) changes what
+      // the numbers mean, so it belongs on the span rather than only in the response text.
+      "app.baseline.explicit": Boolean(args.baseline_from),
+      "app.group_by": (args.group_by ?? []).join(","),
+      "app.filter_dims": Object.keys(args.filters ?? {}).join(","),
+    },
+    async (span) => {
+      const result = await comparePeriodsInner(ledger, args);
+      annotate(span, result.servedFrom, result.rows.length, result.truncated);
+      span.setAttribute("app.baseline.days", result.baselineDates.length);
+      return result;
+    },
+  );
+
 // ---------------------------------------------------------------------------------------------
 // rank
 // ---------------------------------------------------------------------------------------------
@@ -766,7 +821,7 @@ export interface RankResult {
  * duly reported `ctr +1312%` on an advertiser with 403 requests. The floor is reported in the result
  * so the answer can say what was left out instead of implying the list is exhaustive.
  */
-export async function rankSegments(ledger: Ledger, args: RankArgs): Promise<RankResult> {
+async function rankSegmentsInner(ledger: Ledger, args: RankArgs): Promise<RankResult> {
   const def = resolveMetric(args.metric);
   const dimension = assertDimension(args.dimension, def);
   const window = assertWindow(args.from, args.to);
@@ -848,6 +903,24 @@ LIMIT ${limit}`.trim();
   };
 }
 
+export const rankSegments = (ledger: Ledger, args: RankArgs): Promise<RankResult> =>
+  withSpan(
+    "query.rank_segments",
+    {
+      "app.metric": String(args.metric ?? ""),
+      "app.dimension": String(args.dimension ?? ""),
+      "app.window.from": String(args.from ?? ""),
+      "app.window.to": String(args.to ?? args.from ?? ""),
+      "app.order": args.order ?? "worst",
+      "app.filter_dims": Object.keys(args.filters ?? {}).join(","),
+    },
+    async (span) => {
+      const result = await rankSegmentsInner(ledger, args);
+      annotate(span, result.servedFrom, result.rows.length);
+      return result;
+    },
+  );
+
 // ---------------------------------------------------------------------------------------------
 // vocabulary
 // ---------------------------------------------------------------------------------------------
@@ -865,7 +938,29 @@ export interface DimensionValue {
  * with no SQL tool to fall back on a guess is a dead end. Cheap: one grouped scan, LIMIT applied
  * server-side.
  */
-export async function dimensionValues(
+export const dimensionValues = (
+  ledger: Ledger,
+  dimension: string,
+  metricName: string,
+  window: Window,
+  limit = 30,
+): Promise<{ values: DimensionValue[]; servedFrom: string }> =>
+  withSpan(
+    "query.dimension_values",
+    {
+      "app.metric": metricName,
+      "app.dimension": dimension,
+      "app.window.from": window.from,
+      "app.window.to": window.to,
+    },
+    async (span) => {
+      const result = await dimensionValuesInner(ledger, dimension, metricName, window, limit);
+      annotate(span, result.servedFrom, result.values.length);
+      return result;
+    },
+  );
+
+async function dimensionValuesInner(
   ledger: Ledger,
   dimension: string,
   metricName: string,
@@ -898,10 +993,14 @@ LIMIT ${Math.min(Math.max(1, Math.floor(limit)), MAX_ROWS)}`.trim(),
 }
 
 /** Daily series for one metric across the whole dataset — the input to the growth estimate. */
-export async function dailySeries(
-  ledger: Ledger,
-  metricName: string,
-): Promise<Map<string, number>> {
+export const dailySeries = (ledger: Ledger, metricName: string): Promise<Map<string, number>> =>
+  withSpan("query.daily_series", { "app.metric": metricName }, async (span) => {
+    const series = await dailySeriesInner(ledger, metricName);
+    span.setAttribute("app.rows", series.size);
+    return series;
+  });
+
+async function dailySeriesInner(ledger: Ledger, metricName: string): Promise<Map<string, number>> {
   const def = resolveMetric(metricName);
   const src = source(def, []);
   const rows = await ledger.run<{ d: string; v: number | null }>(
@@ -933,7 +1032,19 @@ export interface DatasetOverview {
   servedFrom: string;
 }
 
-export async function datasetOverview(ledger: Ledger): Promise<DatasetOverview> {
+export const datasetOverview = (ledger: Ledger): Promise<DatasetOverview> =>
+  withSpan("query.dataset_overview", {}, async (span) => {
+    const overview = await datasetOverviewInner(ledger);
+    // One row by construction, so `app.rows` would say nothing; the shape of the dataset does.
+    span.setAttribute("app.served_from", overview.servedFrom);
+    span.setAttribute("app.dataset.days", overview.days);
+    span.setAttribute("app.dataset.from", overview.from);
+    span.setAttribute("app.dataset.to", overview.to);
+    span.setAttribute("app.dataset.requests", overview.requests);
+    return overview;
+  });
+
+async function datasetOverviewInner(ledger: Ledger): Promise<DatasetOverview> {
   const src = source(METRICS.revenue!, []);
   const [row] = await ledger.run<Record<string, unknown>>(
     `
