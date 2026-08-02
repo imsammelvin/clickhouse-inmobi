@@ -199,7 +199,15 @@ function renderAnomalies() {
   rows = rows.slice().sort((a, b) => {
     const va = key === "window" ? a.from : key === "sigma" ? Math.abs(a.worstSigma) : a[key];
     const vb = key === "window" ? b.from : key === "sigma" ? Math.abs(b.worstSigma) : b[key];
-    const cmp = typeof va === "string" ? va.localeCompare(vb) : va - vb;
+    let cmp = typeof va === "string" ? va.localeCompare(vb) : va - vb;
+
+    /* Ties need a deterministic order or the sort looks broken.
+       Dozens of windows share a start date, so sorting by date alone reshuffles them on every render
+       and it reads as if the click did nothing. Break by end date, then by severity, so equal dates
+       come out in a stable and actually useful order. */
+    if (cmp === 0 && key === "window") cmp = a.to.localeCompare(b.to);
+    if (cmp === 0) cmp = Math.abs(b.worstSigma) - Math.abs(a.worstSigma);
+    if (cmp === 0) cmp = a.metric.localeCompare(b.metric);
     return dir === "asc" ? cmp : -cmp;
   });
 

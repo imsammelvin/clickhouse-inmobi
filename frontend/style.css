@@ -305,12 +305,21 @@ th {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  cursor: pointer;
   user-select: none;
   white-space: nowrap;
 }
-th:hover {
+/* Only the sortable ones look clickable. Every header used to get cursor:pointer, so clicking
+   "Lead segment" did nothing and the whole table read as if sorting were broken. */
+th[data-sort] {
+  cursor: pointer;
+}
+th[data-sort]:hover {
   color: var(--text);
+}
+/* A hint on the sortable-but-not-currently-sorted headers, so it is discoverable before the click. */
+th[data-sort]:not(.sorted)::after {
+  content: " ⇅";
+  opacity: 0.35;
 }
 th.sorted::after {
   content: " ▾";
