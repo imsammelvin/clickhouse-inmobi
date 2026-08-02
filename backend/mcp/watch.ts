@@ -188,8 +188,17 @@ async function diagnose(metric: string, from: string, to: string): Promise<Diagn
  * "New" is per watch: a firing on or before that watch's watermark has already been reported, and
  * re-reporting it is exactly how an alert channel gets muted.
  */
-export async function runOnce(): Promise<Notification[]> {
-  const watches = load();
+export async function runOnce(opts: { only?: string } = {}): Promise<Notification[]> {
+  /**
+   * `all` is what gets written back; `watches` is only what this pass sweeps.
+   *
+   * They must stay separate. Saving the filtered list would delete every watch this pass did not
+   * look at — the scoped path (`only`) sweeps exactly one, so that mistake would wipe the file down
+   * to a single entry the first time a watch is created. Both arrays hold the SAME objects, so the
+   * `w.watermark` writes below still land in `all`.
+   */
+  const all = load();
+  const watches = opts.only ? all.filter((w) => w.id === opts.only) : all;
   if (watches.length === 0) return [];
 
   const ledger = new Ledger();
@@ -222,11 +231,29 @@ export async function runOnce(): Promise<Notification[]> {
       const incidents = groupIntoIncidents(await scanSegments(ledger, metric, growth));
 
       for (const w of watches.filter((x) => x.metric === metric)) {
-        for (const inc of incidents) {
-          const sameSegment =
-            w.dimension === null || (inc.dimension === w.dimension && inc.value === w.value);
-          if (!sameSegment) continue;
-          if (w.watermark && inc.to <= w.watermark) continue; // already told them
+        const fresh = incidents
+          .filter((inc) => w.dimension === null || (inc.dimension === w.dimension && inc.value === w.value))
+          .filter((inc) => !w.watermark || inc.to > w.watermark) // already told them
+          // Sorted because the watermark below is the last element, and `groupIntoIncidents` does
+          // not promise an order. Getting this wrong sets the watermark to an early day and re-reports
+          // everything after it on the next run.
+          .sort((a, b) => a.to.localeCompare(b.to));
+        if (fresh.length === 0) continue;
+
+        /**
+         * A watch that has never reported has the whole dataset behind it, so report only its most
+         * recent incident.
+         *
+         * Every other run reports everything new, which is right — those are things that happened
+         * since the last look. But the FIRST pass is different: its "since" is the beginning of time,
+         * and a segment with a dozen historical incidents would arrive as a dozen alerts, each one
+         * costing a full investigation. That is a history dump, not news, and the user already knows
+         * about it — seeing an incident is what made them ask for the watch.
+         *
+         * The watermark still moves past all of them, so the ones not reported are not reported later.
+         */
+        const report = w.watermark ? fresh : fresh.slice(-1);
+        for (const inc of report) {
           found.push({
             watch: w,
             day: inc.to,
@@ -235,8 +262,8 @@ export async function runOnce(): Promise<Notification[]> {
             requestsPerDay: inc.requestsPerDay,
             diagnosis: await diagnose(metric, inc.from, inc.to),
           });
-          w.watermark = inc.to;
         }
+        w.watermark = fresh[fresh.length - 1]!.to;
       }
     }
   } finally {
@@ -244,7 +271,8 @@ export async function runOnce(): Promise<Notification[]> {
   }
 
   if (found.length) {
-    save(watches);
+    save(all); // the full list, not the swept subset -- see the note at the top of this function
+
     mkdirSync(DIR, { recursive: true });
     for (const n of found) {
       appendFileSync(LOG, `${JSON.stringify({ at: new Date().toISOString(), ...n })}\n`);
