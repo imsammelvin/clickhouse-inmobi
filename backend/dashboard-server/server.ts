@@ -83,7 +83,9 @@ async function apiAnomalies(url: URL): Promise<Response> {
      *
      * Memoized in the engine after the first resolve, so this is one cheap query per process.
      */
-    const bounds = await ensureDatasetBounds(<T>(sql: string): Promise<T[]> => select<T>(client, sql));
+    const bounds = await ensureDatasetBounds(<T>(sql: string): Promise<T[]> =>
+      select<T>(client, sql),
+    );
     const defaulted = !window.from && !window.to;
     if (defaulted) {
       window.from = shiftDays(bounds.end, DEFAULT_RANGE_DAYS - 1);
@@ -150,6 +152,17 @@ async function apiRollupComparison(): Promise<Response> {
 // /api/llm-cost -- Langfuse's own metrics API, called server-side so keys never reach the browser.
 // -------------------------------------------------------------------------------------------------
 
+/** Shared by every Langfuse public-API call below -- one place to fail with the same clear error. */
+function langfuseAuth(): { baseUrl: string; auth: string } | null {
+  const publicKey = process.env.LANGFUSE_PUBLIC_KEY;
+  const secretKey = process.env.LANGFUSE_SECRET_KEY;
+  if (!publicKey || !secretKey) return null;
+  return {
+    baseUrl: process.env.LANGFUSE_BASE_URL ?? "https://cloud.langfuse.com",
+    auth: Buffer.from(`${publicKey}:${secretKey}`).toString("base64"),
+  };
+}
+
 async function apiLlmCost(): Promise<Response> {
   const publicKey = process.env.LANGFUSE_PUBLIC_KEY;
   const secretKey = process.env.LANGFUSE_SECRET_KEY;
@@ -202,6 +215,431 @@ async function apiLlmCost(): Promise<Response> {
       SpanKind.CLIENT,
     );
     return json({ measuredAt: now.toISOString(), windowHours: 24, rows: body.data });
+  } catch (error) {
+    return errorJson(error);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// /api/llm-cost/recent-prompts -- the last few real chat prompts: what was asked, what it cost, and
+// the tool-call sequence that answered it, so a user can see their own prompt actually working.
+// -------------------------------------------------------------------------------------------------
+
+interface LangfuseToolCall {
+  name: string;
+  args: Record<string, unknown>;
+}
+
+interface LangfuseObservation {
+  id: string;
+  startTime: string;
+  latency: number | null;
+  input: unknown;
+  output: unknown;
+}
+
+interface LangfuseTrace {
+  id: string;
+  timestamp: string;
+  input: unknown;
+  totalCost: number;
+  latency: number;
+  sessionId: string | null;
+}
+
+/** LibreChat's MCP tool names carry a `_mcp_<server-name>` suffix -- strip it back to the plain name
+ *  a user would recognize (`investigate`, not `investigate_mcp_sherlook-mcp`). */
+function stripMcpSuffix(name: string): string {
+  const i = name.indexOf("_mcp_");
+  return i === -1 ? name : name.slice(0, i);
+}
+
+/**
+ * A trace's `input` is the new user message when it starts a fresh turn, but the full accumulated
+ * message array when it is a continuation within an ongoing tool-calling exchange -- both shapes are
+ * observed in production. Either way, the most recent `role: "user"` message is the actual question
+ * driving this particular run.
+ */
+function extractPrompt(input: unknown): string {
+  if (typeof input === "string") return input;
+  if (!Array.isArray(input)) return "(no prompt recorded)";
+  for (let i = input.length - 1; i >= 0; i--) {
+    const m = input[i] as { role?: string; content?: unknown } | undefined;
+    if (m?.role !== "user") continue;
+    if (typeof m.content === "string") return m.content;
+    if (Array.isArray(m.content)) {
+      const part = m.content.find(
+        (p): p is { type: string; text: string } =>
+          typeof p === "object" && p !== null && (p as { type?: string }).type === "text",
+      );
+      if (part) return part.text;
+    }
+  }
+  return "(no prompt recorded)";
+}
+
+/**
+ * DeepSeek (like every OpenAI-style tool-calling model) emits an empty `content` alongside its
+ * `tool_calls` -- confirmed directly against a real generation's `output` in production. There is no
+ * model-authored "why I picked this" text anywhere in the trace to surface; the model simply doesn't
+ * narrate. So this doesn't try to reproduce reasoning that was never recorded -- it builds a plain
+ * sentence from what each tool's OWN payload actually found.
+ *
+ * It also never shows the raw tool name (`rank_segments`, `compare_periods`, ...) or a raw
+ * `dimension='value'` pair -- a revenue manager has no reason to know what those words mean, and this
+ * page's whole point is trust, not a technical trail. That mirrors the rule already enforced on the
+ * chat's own answers (backend/mcp/protocol.ts's "WHAT STAYS INTERNAL": never volunteer stage or tool
+ * names). `label` is the plain-English stand-in for the tool name; `summary` is the plain-English
+ * stand-in for its result.
+ */
+interface StepPreview {
+  label: string;
+  summary: string;
+}
+
+/** "publisher_tier" -> "publisher tier". Field/dimension names are the raw column names in the
+ *  dataset (see backend/mcp/query.ts) -- always snake_case, never meant for display as-is. */
+const plainWord = (s: string): string => s.replace(/_/g, " ");
+
+/** "tier_3" -> "Tier 3", "Android 15" -> "Android 15". Dimension VALUES are real data, so this only
+ *  reshapes the common enum-code shape (snake_case) and leaves anything already human (a real app
+ *  name, an OS version string) untouched. */
+const plainValue = (s: string): string =>
+  s.includes("_")
+    ? s
+        .split("_")
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(" ")
+    : s;
+
+/** The three ratio metrics named as acronyms/abbreviations in backend/engine/metrics.ts -- everything
+ *  else in METRICS (revenue, requests, impressions, clicks, fill_rate, render_rate) already reads
+ *  fine through plainWord alone. */
+const METRIC_DISPLAY: Record<string, string> = {
+  ecpm: "eCPM",
+  ctr: "CTR",
+  rpr: "revenue per request",
+};
+const plainMetric = (m: string): string => METRIC_DISPLAY[m] ?? plainWord(m);
+
+/** Renders a `group` (e.g. `{publisher_tier: 'tier_3', region: 'APAC'}`) as "Tier 3 publishers in
+ *  APAC" rather than the technical `publisher_tier='tier_3'` pairing a data tool would print. */
+const plainGroup = (group: unknown): string => {
+  if (!group || typeof group !== "object" || Object.keys(group).length === 0)
+    return "the whole platform";
+  return Object.entries(group as Record<string, string>)
+    .map(([k, v]) => `${plainValue(v)} (${plainWord(k)})`)
+    .join(", ");
+};
+
+/** A ratio like 0.673 only means something to a reader as "67.3%" -- fmt is unit-aware using the
+ *  same `unit` field every row-returning tool already reports (query.ts's MeasureResult/CompareResult/
+ *  RankResult), so this never guesses at a metric's shape. */
+const fmtValue = (value: unknown, unit: unknown): string => {
+  if (typeof value !== "number") return "no data";
+  if (unit === "ratio") return `${(value * 100).toFixed(1)}%`;
+  if (unit === "usd") return `$${value.toFixed(2)}`;
+  return value.toLocaleString();
+};
+const fmtDeltaPct = (n: unknown): string =>
+  typeof n === "number"
+    ? `${n >= 0 ? "up" : "down"} ${Math.abs(n).toFixed(1)}%`
+    : "no change recorded";
+
+const asArray = (v: unknown): Array<Record<string, unknown>> => (Array.isArray(v) ? v : []);
+
+/** Our own narrative text (`investigate`'s `headline`) is already written for a revenue manager,
+ *  except metric names are still the raw dataset column (`fill_rate`, `render_rate`) -- the only two
+ *  with an underscore among the metric set in backend/mcp/query.ts's METRICS. */
+const plainHeadline = (s: string): string =>
+  s
+    .replace(/\bfill_rate\b/g, "fill rate")
+    .replace(/\brender_rate\b/g, "render rate")
+    .replace(/\becpm\b/g, "eCPM")
+    .replace(/\bctr\b/g, "CTR")
+    .replace(/\brpr\b/g, "revenue per request");
+
+function buildStepPreview(tool: string, p: Record<string, unknown>): StepPreview {
+  switch (tool) {
+    case "investigate": {
+      const req = p.request as { metric?: string } | undefined;
+      const metric = plainMetric(req?.metric ?? "the metric");
+      const label = `Investigated ${metric}`;
+      const bits = [
+        plainHeadline(typeof p.headline === "string" ? p.headline : "No headline available."),
+      ];
+      if (typeof p.ruledOutCount === "number" && p.ruledOutCount > 0) {
+        bits.push(
+          `Also checked ${p.ruledOutCount} other possible explanation(s) and ruled them out.`,
+        );
+      }
+      return { label, summary: bits.join(" ") };
+    }
+    case "find_incidents": {
+      const metrics = Array.isArray(p.metricsSwept) ? p.metricsSwept.length : 0;
+      return {
+        label: "Scanned for anomalies",
+        summary: `Scanned ${metrics} metric(s) for anything unusual -- found ${p.windowCount ?? 0} thing(s) worth a closer look.`,
+      };
+    }
+    case "rank_segments": {
+      const dim = plainWord(String(p.dimension ?? "segment"));
+      const metric = plainMetric(String(p.metric ?? "the metric"));
+      const label = `Checked which ${dim} was worst on ${metric}`;
+      const rows = asArray(p.rows);
+      if (!rows.length)
+        return {
+          label,
+          summary: `Checked every ${dim} for ${metric} -- none had enough data to judge.`,
+        };
+      const top = rows[0]!;
+      return {
+        label,
+        summary: `Checked every ${dim} to find the worst ${metric} -- ${plainGroup(top.group)} came out worst, at ${fmtValue(top.value, p.unit)}.`,
+      };
+    }
+    case "compare_periods": {
+      const metric = plainMetric(String(p.metric ?? "the metric"));
+      const label = `Compared ${metric} to its usual level`;
+      const rows = asArray(p.rows);
+      if (!rows.length)
+        return { label, summary: `Compared ${metric} to its usual level -- nothing to compare.` };
+      const biggest = [...rows].sort(
+        (a, b) => Math.abs((b.deltaPct as number) ?? 0) - Math.abs((a.deltaPct as number) ?? 0),
+      )[0]!;
+      const scope = rows.length > 1 ? `across ${rows.length} segment(s), ` : "";
+      return {
+        label,
+        summary: `Compared ${metric} to its usual level ${scope}-- the biggest move was ${plainGroup(biggest.group)}, ${fmtDeltaPct(biggest.deltaPct)} versus normal.`,
+      };
+    }
+    case "get_metric": {
+      const metric = plainMetric(String(p.metric ?? "the metric"));
+      const label = `Looked up ${metric}`;
+      const rows = asArray(p.rows);
+      if (rows.length === 1) {
+        const row = rows[0]!;
+        return {
+          label,
+          summary: `${metric} was ${fmtValue(row.value, p.unit)}, based on ${Number(row.requests ?? 0).toLocaleString()} requests.`,
+        };
+      }
+      return {
+        label,
+        summary: `Looked up ${metric} broken out across ${rows.length} row(s) of data.`,
+      };
+    }
+    case "explain_revenue": {
+      const driver = typeof p.driver === "string" ? plainWord(p.driver) : null;
+      return {
+        label: "Checked what drove revenue",
+        summary: driver
+          ? `Checked which lever moved revenue -- it was ${driver}, worth ${fmtValue(p.revenueDeltaPerDay, "usd")} a day.`
+          : `Checked which lever moved revenue -- no single factor stood out.`,
+      };
+    }
+    case "describe_data": {
+      const window = p.window as { days?: number } | undefined;
+      const volumes = p.volumes as { requests?: number } | undefined;
+      return {
+        label: "Loaded the dataset overview",
+        summary: `Loaded ${window?.days ?? "some"} day(s) of data, covering ${Number(volumes?.requests ?? 0).toLocaleString()} requests.`,
+      };
+    }
+    case "list_dimension_values": {
+      const dim = plainWord(String(p.dimension ?? "values"));
+      return {
+        label: `Looked up ${dim} values`,
+        summary: `Found ${p.valueCount ?? 0} distinct ${dim} value(s) in the data.`,
+      };
+    }
+    case "get_evidence": {
+      const label = "Checked the underlying data";
+      if (p.matched !== undefined) {
+        return {
+          label,
+          summary: `Searched the underlying records -- ${p.matched} of ${p.totalRecorded} matched.`,
+        };
+      }
+      return { label, summary: `Looked up one specific number to confirm it.` };
+    }
+    case "export_trace": {
+      const totals = p.totals as { calls?: number } | undefined;
+      return {
+        label: "Saved the audit trail",
+        summary: `Saved a full record of the ${totals?.calls ?? 0} check(s) made, for anyone who wants to audit it later.`,
+      };
+    }
+    default:
+      // An unrecognized/new tool -- still avoid a raw name/field dump.
+      return { label: plainWord(tool), summary: "Ran a check as part of this answer." };
+  }
+}
+
+/**
+ * A tool-dispatch's `output` wraps one LangGraph tool message per call in the same dispatch, in the
+ * same order as `input` -- each message's `content` is that call's raw JSON response text (or a
+ * plain-text error). Only a short preview is kept per call; the full payload is discarded immediately
+ * after parsing so nothing large ever reaches the browser.
+ */
+function extractStepCalls(o: LangfuseObservation): StepPreview[] {
+  const calls = Array.isArray(o.input) ? (o.input as LangfuseToolCall[]) : [];
+  let messages: Array<{ content?: unknown }> = [];
+  try {
+    const parsedOut = typeof o.output === "string" ? JSON.parse(o.output) : o.output;
+    const m = (parsedOut as { messages?: unknown } | null)?.messages;
+    if (Array.isArray(m)) messages = m;
+  } catch {
+    // Not JSON, or not the shape we expect -- previews stay empty rather than guessing.
+  }
+  return calls.map((c, i) => {
+    const name = stripMcpSuffix(c.name);
+    // Generic fallback label -- deliberately not derived from the raw tool name (that's the exact
+    // "technical stuff" this page exists to hide). Only overridden below when enough of a truncated
+    // payload survives to say something more specific.
+    const fallback = {
+      label: "Ran an additional check",
+      summary: "This check didn't complete successfully.",
+    };
+    const content = messages[i]?.content;
+    if (typeof content !== "string") return fallback;
+    try {
+      const parsed = JSON.parse(content) as Record<string, unknown>;
+      return buildStepPreview(name, parsed);
+    } catch {
+      // Two different reasons land here: a tool that genuinely errored returns a plain-text
+      // message instead of JSON; a large payload (investigate's especially) can also arrive
+      // truncated mid-string from upstream span-size limits, which breaks JSON.parse on otherwise-
+      // fine data. Both the headline and the metric it investigated sit near the front of that
+      // payload and usually survive a truncation that cuts off later fields, so recover what's
+      // there before falling back to a generic, honest "it failed."
+      const headlineMatch = content.match(/"headline"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+      if (!headlineMatch) return fallback;
+      const metricMatch = content.match(/"metric"\s*:\s*"([^"]+)"/);
+      const label =
+        name === "investigate"
+          ? `Investigated ${plainMetric(metricMatch?.[1] ?? "the metric")}`
+          : fallback.label;
+      return { label, summary: plainHeadline(headlineMatch[1]!) };
+    }
+  });
+}
+
+/** A fresh turn's own tool-dispatch steps can be empty when the model answers from a PRIOR turn's
+ *  investigation already in context (observed: a one-line follow-up costing $0.001, zero tool calls
+ *  of its own, in the same Langfuse session as the investigation that answered it minutes earlier).
+ *  Merging in the same session's steps, walked backward from this prompt's own end time and stopped
+ *  at the first gap wider than this, keeps "what was investigated" attached to the answer it actually
+ *  supports without dragging in an unrelated, much older part of a long-running session. */
+const SESSION_STEP_GAP_MS = 3 * 60 * 1000;
+
+async function apiRecentPrompts(): Promise<Response> {
+  const creds = langfuseAuth();
+  if (!creds) return errorJson(new Error("LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY not set"), 503);
+  const { baseUrl, auth } = creds;
+
+  try {
+    const prompts = await withSpan(
+      "langfuse.recent_prompts",
+      { "http.request.method": "GET", "server.address": new URL(baseUrl).host },
+      async (span) => {
+        // `name=AgentRun` is LibreChat's own name for one agent turn -- the same filter that isolates
+        // real chat activity from this dashboard's own polling traffic, which also lands in Langfuse.
+        const tracesRes = await fetch(
+          `${baseUrl}/api/public/traces?limit=5&orderBy=timestamp.desc&name=AgentRun`,
+          { headers: { Authorization: `Basic ${auth}` } },
+        );
+        if (!tracesRes.ok) {
+          throw new Error(`Langfuse API ${tracesRes.status}: ${await tracesRes.text()}`);
+        }
+        const traces = ((await tracesRes.json()) as { data: LangfuseTrace[] }).data;
+        span.setAttribute("app.trace_count", traces.length);
+
+        // One fetch per distinct session, shared across every prompt from that session, rather than
+        // one fetch per prompt -- the last 5 prompts are frequently 2-3 turns of the same session.
+        const sessionSteps = new Map<string, Promise<LangfuseObservation[]>>();
+        const stepsForSession = (sessionId: string): Promise<LangfuseObservation[]> => {
+          let p = sessionSteps.get(sessionId);
+          if (p) return p;
+          p = fetch(
+            `${baseUrl}/api/public/observations?sessionId=${encodeURIComponent(sessionId)}` +
+              `&name=tool-dispatch&limit=100&orderBy=startTime.desc`,
+            { headers: { Authorization: `Basic ${auth}` } },
+          )
+            .then((res) =>
+              res.ok ? (res.json() as Promise<{ data: LangfuseObservation[] }>) : null,
+            )
+            .then((body) =>
+              (body?.data ?? []).sort((a, b) => a.startTime.localeCompare(b.startTime)),
+            );
+          sessionSteps.set(sessionId, p);
+          return p;
+        };
+
+        return Promise.all(
+          traces.map(async (t, idx) => {
+            const promptEndMs = new Date(t.timestamp).getTime() + t.latency * 1000;
+            // Bound the backward walk at the previous OLDER prompt WE ALSO SHOW, in the same
+            // session, so its own tool calls never get re-attributed to a later, unrelated prompt
+            // just because the two happened to land within the gap window of each other (observed:
+            // four back-to-back small-talk turns in one session, one of which called a tool --
+            // without this bound, that one call showed up under all four).
+            let lowerBoundMs = -Infinity;
+            for (let j = idx + 1; j < traces.length; j++) {
+              if (traces[j]!.sessionId === t.sessionId) {
+                lowerBoundMs = new Date(traces[j]!.timestamp).getTime() + traces[j]!.latency * 1000;
+                break;
+              }
+            }
+            let cluster: LangfuseObservation[] = [];
+            if (t.sessionId) {
+              const all = await stepsForSession(t.sessionId);
+              let lastIdx = -1;
+              for (let i = all.length - 1; i >= 0; i--) {
+                const tMs = new Date(all[i]!.startTime).getTime();
+                if (tMs > promptEndMs) continue;
+                if (tMs < lowerBoundMs) break; // already claimed by an earlier shown prompt
+                lastIdx = i;
+                break;
+              }
+              if (lastIdx >= 0) {
+                cluster = [all[lastIdx]!];
+                let cursorMs = new Date(all[lastIdx]!.startTime).getTime();
+                for (let i = lastIdx - 1; i >= 0; i--) {
+                  const tMs = new Date(all[i]!.startTime).getTime();
+                  if (tMs < lowerBoundMs) break;
+                  if (cursorMs - tMs > SESSION_STEP_GAP_MS) break;
+                  cluster.unshift(all[i]!);
+                  cursorMs = tMs;
+                }
+              }
+            }
+            const steps = cluster.map((o) => {
+              const calls = extractStepCalls(o);
+              return {
+                calls,
+                // Several tools dispatched in the same round-trip were genuinely evaluated together
+                // -- e.g. ranking a segment by two different dimensions at once before picking one --
+                // worth saying explicitly rather than letting them read as a sequence.
+                parallel: calls.length > 1,
+                startTime: o.startTime,
+                latencySec: o.latency ?? 0,
+              };
+            });
+            return {
+              traceId: t.id,
+              timestamp: t.timestamp,
+              prompt: extractPrompt(t.input),
+              costUsd: t.totalCost,
+              latencySec: t.latency,
+              steps,
+            };
+          }),
+        );
+      },
+      SpanKind.CLIENT,
+    );
+    return json({ measuredAt: new Date().toISOString(), prompts });
   } catch (error) {
     return errorJson(error);
   }
@@ -331,6 +769,7 @@ const API_ROUTES = new Set([
   "/api/anomalies",
   "/api/rollup-comparison",
   "/api/llm-cost",
+  "/api/llm-cost/recent-prompts",
   "/api/system-health",
   "/api/watch",
   "/api/config",
@@ -354,6 +793,7 @@ async function dispatch(url: URL): Promise<Response> {
   if (pathname === "/api/anomalies") return apiAnomalies(url);
   if (pathname === "/api/rollup-comparison") return apiRollupComparison();
   if (pathname === "/api/llm-cost") return apiLlmCost();
+  if (pathname === "/api/llm-cost/recent-prompts") return apiRecentPrompts();
   if (pathname === "/api/system-health") return apiSystemHealth();
   if (pathname === "/api/watch") return apiWatch(url);
   if (pathname === "/api/config") return json({ libreChatUrl: LIBRECHAT_URL });

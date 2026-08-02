@@ -4,12 +4,13 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Mission Control — Ad-Ops Root-Cause Analyst</title>
-    <link rel="stylesheet" href="style.css?v=3" />
+    <link rel="stylesheet" href="style.css?v=5" />
   </head>
   <body>
     <nav>
       <div class="brand">
-        <span class="dot" aria-hidden="true"></span>Mission <span class="grad">Control</span>
+        <span class="dot" aria-hidden="true"></span>
+        <span class="grad">The Boring Team</span>
       </div>
       <div class="tabs">
         <button data-view="chat" class="active"><span class="ic">💬</span>Chat</button>
@@ -19,7 +20,7 @@
         </button>
         <!-- Rollup vs Raw: hidden for now. The view and its API are intact; restore the button to bring it back. -->
         <button data-view="rollup" hidden><span class="ic">📦</span>Rollup vs Raw</button>
-        <button data-view="llm"><span class="ic">🧠</span>LLM Cost</button>
+        <button data-view="llm"><span class="ic">🧠</span>AI Insights</button>
         <button data-view="health"><span class="ic">💓</span>System Health</button>
       </div>
       <div class="nav-foot">live · ClickHouse + Langfuse + ClickStack</div>
@@ -80,11 +81,26 @@
 
       <div class="view" id="view-llm">
         <div class="pad">
-          <h1>🧠 LLM Cost</h1>
-          <div class="sub">Last 24h of real generations, pulled from Langfuse server-side.</div>
-          <div id="llm-body" class="loading">
-            <div class="spinner"></div>
-            Loading…
+          <h1>🧠 AI Insights</h1>
+          <div class="sub">
+            What the AI is actually doing: LLM spend, and, per prompt, the investigation trail
+            behind each answer.
+          </div>
+          <div class="subtabs">
+            <button class="subtab active" data-llmview="overview">Cost Overview</button>
+            <button class="subtab" data-llmview="prompts">Recent Prompts</button>
+          </div>
+          <div id="llm-view-overview">
+            <div id="llm-body" class="loading">
+              <div class="spinner"></div>
+              Loading…
+            </div>
+          </div>
+          <div id="llm-view-prompts" hidden>
+            <div id="llm-prompts-body" class="loading">
+              <div class="spinner"></div>
+              Loading…
+            </div>
           </div>
         </div>
       </div>
@@ -106,6 +122,6 @@
       </div>
     </main>
 
-    <script src="app.js?v=3"></script>
+    <script src="app.js?v=5"></script>
   </body>
 </html>

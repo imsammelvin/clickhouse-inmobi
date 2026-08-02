@@ -538,6 +538,124 @@ async function loadLlm() {
 }
 
 // ---------------------------------------------------------------------------
+// LLM Cost — sub-tabs (Overview / Recent Prompts)
+// ---------------------------------------------------------------------------
+
+const llmSubLoaded = new Set(["overview"]); // overview loads via the existing top-level view loader
+document.querySelectorAll(".subtab").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const v = btn.dataset.llmview;
+    document.querySelectorAll(".subtab").forEach((b) => b.classList.toggle("active", b === btn));
+    $("#llm-view-overview").hidden = v !== "overview";
+    $("#llm-view-prompts").hidden = v !== "prompts";
+    if (!llmSubLoaded.has(v)) {
+      llmSubLoaded.add(v);
+      if (v === "prompts") loadLlmPrompts();
+    }
+  });
+});
+
+/**
+ * One decision-tree step: the check(s) run in that round-trip, in plain English -- no tool names, no
+ * dimension='value' pairs, matching the same "never show the machinery" rule the chat's own answers
+ * already follow (backend/mcp/protocol.ts). Each pill is a short plain-English label ("Checked which
+ * publisher tier was worst"); clicking it expands the fuller sentence explaining what was found.
+ */
+function renderStep(step, i) {
+  const pills = step.calls.length
+    ? step.calls
+        .map((c, j) => {
+          const detailId = "step-detail-" + i + "-" + j;
+          return (
+            '<span class="tool-pill expandable" data-detail="' +
+            detailId +
+            '">🔍 ' +
+            esc(c.label) +
+            " ▾</span>"
+          );
+        })
+        .join(" ")
+    : '<span class="tool-pill">Answered directly, no check needed</span>';
+  const details = step.calls
+    .map(
+      (c, j) =>
+        '<div class="step-explain" id="step-detail-' + i + "-" + j + '" hidden>' + esc(c.summary) + "</div>",
+    )
+    .join("");
+  // "how many scenarios it covered" — a dispatch that bundled more than one tool call was genuinely
+  // weighing multiple candidates at once, not just calling tools one after another; say so.
+  const parallelNote = step.parallel
+    ? '<div class="step-parallel-note">Checked ' + step.calls.length + " things at once:</div>"
+    : "";
+  return (
+    '<div class="decision-step-wrap">' +
+    parallelNote +
+    '<div class="decision-step"><span class="step-idx">' +
+    (i + 1) +
+    "</span>" +
+    pills +
+    '<span class="step-ms">' +
+    step.latencySec.toFixed(2) +
+    "s</span></div>" +
+    details +
+    "</div>"
+  );
+}
+
+document.addEventListener("click", (e) => {
+  const pill = e.target.closest(".tool-pill.expandable");
+  if (!pill) return;
+  const detail = document.getElementById(pill.dataset.detail);
+  if (detail) detail.hidden = !detail.hidden;
+});
+
+async function loadLlmPrompts() {
+  const el = $("#llm-prompts-body");
+  try {
+    const data = await getJson("/api/llm-cost/recent-prompts");
+    const prompts = data.prompts || [];
+    if (!prompts.length) {
+      el.classList.remove("loading", "err");
+      el.innerHTML = '<div class="card empty">No recent prompts found.</div>';
+      return;
+    }
+    el.classList.remove("loading", "err");
+    el.innerHTML = prompts
+      .map(
+        (p) =>
+          '<div class="card prompt-card">' +
+          '<div class="prompt-text">💬 ' +
+          esc(p.prompt.length > 240 ? p.prompt.slice(0, 240) + "…" : p.prompt) +
+          "</div>" +
+          '<div class="prompt-meta">' +
+          "<span>" +
+          new Date(p.timestamp).toLocaleString() +
+          "</span>" +
+          "<span><b>$" +
+          p.costUsd.toFixed(4) +
+          "</b> cost</span>" +
+          "<span><b>" +
+          p.latencySec.toFixed(1) +
+          "s</b> total</span>" +
+          "<span><b>" +
+          p.steps.length +
+          "</b> step(s)</span>" +
+          "</div>" +
+          '<div class="decision-tree">' +
+          (p.steps.length
+            ? p.steps.map(renderStep).join("")
+            : '<div class="decision-step">No tool calls — answered directly.</div>') +
+          "</div>" +
+          "</div>",
+      )
+      .join("");
+  } catch (e) {
+    el.className = "err";
+    el.innerHTML = "⚠ Could not load recent prompts: " + esc(e.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // System Health — filter by layer, search, sort, latency bars
 // ---------------------------------------------------------------------------
 
