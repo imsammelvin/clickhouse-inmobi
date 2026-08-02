@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Sherlook — Pitch Deck</title>
+<style>
+  @page { size: 1280px 720px; margin: 0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #05060a; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    color: #eef0f6;
+  }
+  .slide {
+    width: 1280px;
+    height: 720px;
+    padding: 64px 76px;
+    page-break-after: always;
+    position: relative;
+    overflow: hidden;
+    background:
+      radial-gradient(1000px 500px at 10% -10%, rgba(108,140,255,0.16), transparent 60%),
+      radial-gradient(800px 450px at 105% 0%, rgba(168,108,255,0.14), transparent 55%),
+      linear-gradient(180deg, #05060a 0%, #0c0f18 100%);
+    display: flex;
+    flex-direction: column;
+  }
+  .slide:last-child { page-break-after: auto; }
+  .eyebrow {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #a86cff;
+    margin-bottom: 10px;
+  }
+  h1 {
+    font-size: 44px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    margin: 0 0 14px;
+    line-height: 1.15;
+  }
+  h2 {
+    font-size: 30px;
+    font-weight: 800;
+    margin: 0 0 22px;
+    letter-spacing: -0.01em;
+  }
+  .grad { background: linear-gradient(90deg, #eef0f6, #6c8cff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .sub { font-size: 18px; color: #8b93a7; line-height: 1.5; max-width: 900px; }
+  .pagenum { position: absolute; bottom: 28px; right: 40px; font-size: 12px; color: #4a5166; }
+  .brand { position: absolute; bottom: 28px; left: 76px; font-size: 12px; color: #4a5166; letter-spacing: 0.04em; }
+  .content { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+  .row { display: flex; gap: 28px; }
+  .col { flex: 1; }
+  .card {
+    background: rgba(22,26,38,0.72);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 16px;
+    padding: 24px 26px;
+  }
+  .stat-grid { display: flex; gap: 20px; margin-top: 8px; }
+  .stat { flex: 1; background: rgba(22,26,38,0.72); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 22px; text-align: center; }
+  .stat .n { font-size: 40px; font-weight: 800; background: linear-gradient(90deg, #eef0f6, #6c8cff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .stat .l { font-size: 13px; color: #8b93a7; margin-top: 6px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .pipe { display: flex; align-items: center; gap: 0; margin: 18px 0; }
+  .pipe .step {
+    flex: 1; background: rgba(22,26,38,0.85); border: 1px solid rgba(108,140,255,0.35);
+    border-radius: 12px; padding: 16px 10px; text-align: center; font-weight: 700; font-size: 15px;
+  }
+  .pipe .arrow { color: #6c8cff; font-size: 22px; padding: 0 6px; }
+  ul.plain { margin: 0; padding-left: 22px; font-size: 17px; line-height: 1.7; color: #d4d8e4; }
+  ul.plain li { margin-bottom: 8px; }
+  ul.plain b { color: #fff; }
+  code, .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .pill { display: inline-block; background: rgba(108,140,255,0.15); border-radius: 8px; padding: 4px 12px; font-size: 14px; font-weight: 700; margin: 3px 6px 3px 0; }
+  table.gates { width: 100%; border-collapse: collapse; font-size: 16px; }
+  table.gates th, table.gates td { text-align: left; padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+  table.gates th { color: #8b93a7; text-transform: uppercase; font-size: 12px; letter-spacing: 0.05em; }
+  .good { color: #3ecf8e; font-weight: 700; }
+  .title-slide { justify-content: center; align-items: flex-start; }
+  .title-slide h1 { font-size: 64px; }
+  .dot { display:inline-block; width:10px; height:10px; border-radius:50%; background:#3ecf8e; margin-right: 10px; }
+</style>
+</head>
+<body>
+
+<!-- 1. TITLE -->
+<div class="slide title-slide">
+  <div class="eyebrow"><span class="dot"></span>Click-a-thon 2026 · InMobi Track</div>
+  <h1>Sherlook<br/><span class="grad">From alert to answer.</span></h1>
+  <p class="sub">An automated root-cause analyst for an ad marketplace. It finds what broke, states what
+  it checked and ruled out, prices the damage, and says what to do — with deterministic code doing the
+  analysis and the LLM only narrating.</p>
+  <div style="margin-top:40px; font-size:16px; color:#8b93a7;">
+    The Boring Team — Sam Melvin M · Loges S · Samarth Dhawan · Mohansundar K
+  </div>
+  <div class="pagenum">1 / 14</div>
+</div>
+
+<!-- 2. THE PROBLEM -->
+<div class="slide">
+  <div class="eyebrow">The Problem</div>
+  <h2>When a metric drops, someone spends the morning slicing dashboards.</h2>
+  <div class="content">
+    <ul class="plain">
+      <li>An ad marketplace has <b>thousands of segments</b> — app, device, OS, geo, advertiser, ad
+      format — any combination of which can be the actual cause of a metric move.</li>
+      <li>A manual investigation means opening dashboards, guessing which cut to slice by, and hoping
+      the real cause isn't hiding behind three correlated red herrings.</li>
+      <li>Worse: a wrong diagnosis is expensive. <b>A single fabricated or misattributed number costs
+      more than a missed anomaly</b> — it sends the wrong team chasing the wrong fix.</li>
+      <li>What's needed isn't a smarter dashboard. It's a system that <b>investigates like an analyst
+      would</b> — and can prove its own work.</li>
+    </ul>
+  </div>
+  <div class="brand">SHERLOOK</div>
+  <div class="pagenum">2 / 14</div>
+</div>
+
+<!-- 3. WHAT IT DOES -->
+<div class="slide">
+  <div class="eyebrow">What Sherlook Does</div>
+  <h2>Four questions, answered automatically, every time.</h2>
+  <div class="content">
+    <div class="row">
+      <div class="col card"><b style="font-size:20px;">What broke?</b><p class="sub" style="font-size:15px;">Every metric, every day, swept against a same-weekday trailing baseline.</p></div>
+      <div class="col card"><b style="font-size:20px;">Where?</b><p class="sub" style="font-size:15px;">The exact segment(s) responsible — with every other suspect explicitly checked and cleared.</p></div>
+      <div class="col card"><b style="font-size:20px;">How much?</b><p class="sub" style="font-size:15px;">Dollars per day, priced from the same evidence that named the cause.</p></div>
+      <div class="col card"><b style="font-size:20px;">What now?</b><p class="sub" style="font-size:15px;">An owner and a funnel stage to look at — a diagnosis with no next step is half an answer.</p></div>
+    </div>
+  </div>
+  <div class="brand">SHERLOOK</div>
+  <div class="pagenum">3 / 14</div>
+</div>
+
+<!-- 4. THE PIPELINE -->
+<div class="slide">
+  <div class="eyebrow">The Pipeline</div>
+  <h2>Six stages. Every one of them SQL.</h2>
+  <div class="content">
+    <div class="pipe">
+      <div class="step">1. Detect</div><div class="arrow">→</div>
+      <div class="step">2. Decompose</div><div class="arrow">→</div>
+      <div class="step">3. Localize</div><div class="arrow">→</div>
+      <div class="step">4. Residualize</div><div class="arrow">→</div>
+      <div class="step">5. Confirm</div><div class="arrow">→</div>
+      <div class="step">6. Classify &amp; price</div>
+    </div>
+    <ul class="plain" style="margin-top:20px;">
+      <li><b>Detect</b> — same-weekday baseline, median + MAD (never mean/stddev — an incident in the
+      trailing window inflates the standard deviation and hides itself).</li>
+      <li><b>Decompose</b> — which part of the funnel moved: requests → fill → render → CTR → price.</li>
+      <li><b>Localize</b> — which segment values, across 8 dimensions and their pairs, carry the move.</li>
+      <li><b>Residualize</b> — the differentiator, next slide.</li>
+      <li><b>Confirm &amp; classify</b> — still significant once the cause is excluded? Technical break,
+      mix shift, or demand — with an owner and dollars/day.</li>
+    </ul>
+  </div>
+  <div class="brand">SHERLOOK</div>
+  <div class="pagenum">4 / 14</div>
+</div>
+
+<!-- 5. THE DIFFERENTIATOR -->
+<div class="slide">
+  <div class="eyebrow">The Differentiator</div>
+  <h2>When one segment breaks, everything containing it looks broken too.</h2>
+  <div class="content">
+    <p class="sub" style="font-size:19px;">Android 15's fill rate collapsed. Because Android 15 sits
+    inside Europe, and inside a popular device model, a naive drill-down blames Europe, the device,
+    and a dozen other slices that never actually moved on their own.</p>
+    <p class="sub" style="font-size:19px; margin-top:14px;"><b style="color:#fff;">Residualization removes
+    the cause's contribution and re-measures everything else.</b> Segments that only looked broken
+    because they contain the cause are <b style="color:#fff;">explicitly cleared</b>, with the residual
+    as proof — not silently dropped.</p>
+    <div class="stat-grid">
+      <div class="stat"><div class="n">840</div><div class="l">slices cleared, one incident</div></div>
+      <div class="stat"><div class="n">78%→43%</div><div class="l">Android 15 fill rate, the real cause</div></div>
+      <div class="stat"><div class="n">9.6%</div><div class="l">of traffic — the true blast radius</div></div>
+    </div>
+  </div>
+  <div class="brand">SHERLOOK</div>
+  <div class="pagenum">5 / 14</div>
+</div>
+
+<!-- 6. TRUSTWORTHINESS -->
+<div class="slide">
+  <div class="eyebrow">Trustworthiness Is a Gate, Not an Aspiration</div>
+  <h2>The LLM cannot write SQL. There is no tool that lets it.</h2>
+  <div class="content">
+    <ul class="plain">
+      <li>The MCP server exposes <b>13 typed tools</b> — <span class="mono" style="font-size:14px;">describe_data, get_metric, compare_periods, rank_segments, find_incidents, investigate,
+      explain_revenue, get_evidence, export_trace...</span> — and not one accepts a raw query.</li>
+      <li>Enforced by a <b>gate</b>, not a promise: <span class="mono">bun run sanity</span> fails the
+      build if any tool name matches <span class="mono">/sql|query|exec|raw/</span>.</li>
+      <li>A <b>grounding check</b> re-reads the finished diagnosis and maps every numeral back to a
+      recorded evidence row, at the precision printed. A number that can't be traced is a failure.</li>
+      <li>The model's entire job: read a JSON result, write a paragraph. That's the whole failure
+      surface — small enough to actually test.</li>
+    </ul>
+  </div>
+  <div class="brand">SHERLOOK</div>
+  <div class="pagenum">6 / 14</div>
+</div>
+
+<!-- 7. WHY CLICKHOUSE -->
+<div class="slide">
+  <div class="eyebrow">Why ClickHouse</div>
+  <h2>Rows read and rows returned are bounded by cardinality, not by event volume.</h2>
+  <div class="content">
+    <div class="stat-grid">
+      <div class="stat"><div class="n">58x</div><div class="l">fewer rows read, rollup vs. raw</div></div>
+      <div class="stat"><div class="n">45x</div><div class="l">faster server time</div></div>
+      <div class="stat"><div class="n">5 / 6</div><div class="l">investigation stages rollup-served</div></div>
+    </div>
+    <p class="sub" style="margin-top:22px; font-size:17px;">Two materialized views, maintained on
+    insert: <span class="mono">ad_events → mv_rollup_segment_hourly (3.09M rows) → mv_rollup_segment_daily
+    (148.8K rows)</span>, the daily cascading from the hourly rather than a second independent
+    aggregation — so the two grains cannot drift apart. <span class="mono">bun run parity</span> runs
+    every investigation twice, rollup vs. raw-forced, and asserts every recorded number is identical.</p>
+  </div>
+  <div class="brand">SHERLOOK</div>
+  <div class="pagenum">7 / 14</div>
+</div>
+
+<!-- 8. THE STACK, MEANINGFULLY -->
+<div class="slide">
+  <div class="eyebrow">ClickStack · Langfuse · LibreChat</div>
+  <h2>All three. None of them decorative.</h2>
+  <div class="content">
+    <div class="row">
+      <div class="col card">
+        <b style="font-size:19px;">ClickStack</b>
+        <p class="sub" style="font-size:15px; margin-top:10px;">Every stage, every tool call, every SQL
+        statement is a span — with the statement text and row count attached. A slow answer traces down
+        to the exact query that made it slow.</p>
+      </div>
+      <div class="col card">
+        <b style="font-size:19px;">Langfuse</b>
+        <p class="sub" style="font-size:15px; margin-top:10px;">Real production cost/token attribution
+        per model. The dashboard's own "Recent Prompts" view reads Langfuse's API server-side to show
+        real prompts, real cost, and what was actually checked for each one.</p>
+      </div>
+      <div class="col card">
+        <b style="font-size:19px;">LibreChat</b>
+        <p class="sub" style="font-size:15px; margin-top:10px;">The chat surface, talking to the MCP
+        server over streamable HTTP. User identity flows through as headers, so a scheduled watch
+        belongs to a person and follow-ups carry the same evidence as the first answer.</p>
+      </div>
+    </div>
+  </div>
+  <div class="brand">SHERLOOK</div>
+  <div class="pagenum">8 / 14</div>
+</div>
+
+<!-- 9. REAL PRODUCTION EVIDENCE -->
+<div class="slide">
+  <div class="eyebrow">Real Production Evidence, Not a Benchmark Script</div>
+  <h2>What actual Langfuse traces show about cost and latency.</h2>
+  <div class="content">
+    <ul class="plain">
+      <li>Backend <span class="mono">investigate()</span> calls, sampled across real prompts: <b>0.5s
+      – 28s</b>, with the one outlier fully explained (three concurrent investigations sharing a
+      connection pool, not a slow query).</li>
+      <li>A full, clean single-pass investigation costs <b>~14.4 seconds</b> end to end — matching the
+      "a few seconds per investigation" design target.</li>
+      <li>What actually drives a slow "hard" answer isn't backend latency — it's how many drill-down
+      rounds the agent chooses to take. Fixed by capping how many candidate windows a sweep hands the
+      agent at once, and telling it to investigate the top few first.</li>
+      <li>LLM cost per generation: fractions of a cent. The expensive part was never the model.</li>
+    </ul>
+  </div>
+  <div class="brand">SHERLOOK</div>
+  <div class="pagenum">9 / 14</div>
+</div>
+
+<!-- 10. VERIFICATION -->
+<div class="slide">
+  <div class="eyebrow">Verification</div>
+  <h2>Not "it worked when we tried it" — a gate suite that runs every time.</h2>
+  <div class="content">
+    <table class="gates">
+      <tr><th>Gate</th><th>Result</th></tr>
+      <tr><td>mcp:eval</td><td class="good">16/16 cases, 60/60 gated accuracy</td></tr>
+      <tr><td>criteria</td><td class="good">criteria.failed = 0 / 4</td></tr>
+      <tr><td>ch:verify-rollup</td><td class="good">283 probes compared, 265 served from rollup</td></tr>
+      <tr><td>parity</td><td class="good">all 5 scenarios rollup-served, every number matched raw</td></tr>
+      <tr><td>synth:verify</td><td class="good">0 gated failures on data the engine has never seen</td></tr>
+      <tr><td>mcp:handshake</td><td class="good">13 tools, no SQL escape hatch</td></tr>
+      <tr><td>secrets</td><td class="good">no credential in any tracked file</td></tr>
+    </table>
+  </div>
+  <div class="brand">SHERLOOK</div>
+  <div class="pagenum">10 / 14</div>
+</div>
+
+<!-- 11. UNSEEN INCIDENT READY -->
+<div class="slide">
+  <div class="eyebrow">Built For the Unseen Incident</div>
+  <h2>One command. No arguments. Nothing hand-written.</h2>
+  <div class="content">
+    <div class="card" style="font-family:ui-monospace,monospace; font-size:16px; padding:20px 24px; color:#a6e3a1;">
+      $ bun run diagnose<br/>
+      &nbsp;&nbsp;sweep everything → rank &amp; cut → group → investigate top N → report
+    </div>
+    <ul class="plain" style="margin-top:20px;">
+      <li>Tested against <b>synthetic data with planted deviations the engine has never seen</b>
+      (<span class="mono">synth:build</span> / <span class="mono">synth:verify</span>) — so tuning
+      to the training incidents was never the goal.</li>
+      <li><b>Rank and cut:</b> every firing window is scored and listed, not just the escalated ones —
+      a digest that silently drops what it saw is how a real incident gets missed.</li>
+      <li>Output is <span class="mono">report.md</span> (diagnosis), <span class="mono">report.json</span>
+      (every number, with its evidence id), and the trace file — all three, by construction, not written
+      after the fact.</li>
+    </ul>
+  </div>
+  <div class="brand">SHERLOOK</div>
+  <div class="pagenum">11 / 14</div>
+</div>
+
+<!-- 12. HONEST ABOUT LIMITS -->
+<div class="slide">
+  <div class="eyebrow">Stated, Not Hidden</div>
+  <h2>Trustworthiness beats sophistication — including about our own gaps.</h2>
+  <div class="content">
+    <ul class="plain">
+      <li><span class="pill">Known</span> Action-recommendation figures aren't yet in the evidence
+      ledger — caught by our own grounding gate, not by a judge.</li>
+      <li><span class="pill">Known</span> Narration isn't fully deterministic even at temperature 0 —
+      occasionally flags a correct rounding as ungrounded rather than passing something wrong.</li>
+      <li><span class="pill">Known</span> LibreChat's agent trace and our backend trace don't yet share
+      an OpenTelemetry traceId in production — root-caused to one unset env var on LibreChat's side,
+      not a design flaw; our own extraction code already handles it correctly.</li>
+      <li>Every one of these was found by <b>our own gates</b>, not discovered by a judge — that's the
+      point of building the gates.</li>
+    </ul>
+  </div>
+  <div class="brand">SHERLOOK</div>
+  <div class="pagenum">12 / 14</div>
+</div>
+
+<!-- 13. ARCHITECTURE -->
+<div class="slide">
+  <div class="eyebrow">Architecture, At a Glance</div>
+  <h2>ClickHouse does the analysis. Everything else observes or narrates it.</h2>
+  <div class="content" style="font-family:ui-monospace,monospace; font-size:14.5px; line-height:1.55; color:#c7cbe0; white-space:pre;">
+ClickHouse Cloud (9,000,000 ad_events)
+        │  materialized on insert
+mv_rollup_segment_hourly (3,089,172 rows) ──► mv_rollup_segment_daily (148,767 rows)
+        │
+┌───────┴─────────────────────────────────────────┐
+│ Investigation engine — 6 stages, all SQL         │
+│ detect → decompose → localize → residualize      │
+│         → confirm → classify & price             │
+│ every query recorded to an evidence ledger       │
+└───────┬─────────────────┬─────────────┬──────────┘
+        │                 │             │
+   MCP server (13)   Mission Control  Watchman cron
+        │             (dashboard)     (unattended)
+   LibreChat ─────────────────────────► Alerts tab
+   (DeepSeek narrates)
+
+   ClickStack ◄── OTel spans, every stage / tool / query
+   Langfuse   ◄── cost, tokens, chat traces
+  </div>
+  <div class="brand">SHERLOOK</div>
+  <div class="pagenum">13 / 14</div>
+</div>
+
+<!-- 14. CLOSE -->
+<div class="slide title-slide">
+  <div class="eyebrow">Close</div>
+  <h1>Deterministic code finds<br/>the answer.<br/><span class="grad">The model reads it out.</span></h1>
+  <p class="sub" style="margin-top:20px;">That's the whole idea. Every number on screen came out of
+  ClickHouse on request — nothing here is a mock.</p>
+  <div style="margin-top:50px; font-size:16px; color:#8b93a7;">
+    Sherlook — The Boring Team — Click-a-thon 2026, InMobi track
+  </div>
+  <div class="pagenum">14 / 14</div>
+</div>
+
+</body>
+</html>
