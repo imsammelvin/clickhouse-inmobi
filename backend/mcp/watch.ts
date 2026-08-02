@@ -29,6 +29,8 @@ import { groupIntoIncidents, scanSegments } from "../engine/segments";
 import { DATASET_END, ensureDatasetBounds } from "../engine/baseline";
 import { estimateWeeklyGrowth } from "../engine/baseline";
 import { METRICS, metricExpr } from "../engine/metrics";
+import { investigate } from "../engine/orchestrate";
+import { recommendAction } from "./action";
 import { deliveryStatus, sendNotification } from "./notify";
 
 const DIR = process.env.MCP_WATCH_DIR ?? "backend/mcp/watches";
@@ -96,12 +98,57 @@ export function removeWatch(id: string, userId?: string): boolean {
   return true;
 }
 
+/** The engine's verdict on the recurrence, not just the fact of it. */
+export interface Diagnosis {
+  channel: string;
+  owner: string;
+  /** One line on what is actually broken, from the funnel evidence. */
+  because: string;
+  impactUsdPerDay: number | null;
+  /** How many slices looked implicated and were cleared — the differentiator, in one number. */
+  clearedCount: number;
+  status: string;
+}
+
 export interface Notification {
   watch: Watch;
   day: string;
   pct: number;
   sigma: number;
   requestsPerDay: number;
+  /** Absent when the investigation could not run; the alert is still sent. */
+  diagnosis?: Diagnosis;
+}
+
+/**
+ * Diagnose a recurrence so the alert says what happened AND why.
+ *
+ * A notification that only restates the firing — "fill_rate down 45%" — makes the reader open the chat
+ * to learn anything. The cron has time the reader does not, so it spends ~5s running the same
+ * six-stage investigation the chat would have run, and the alert arrives with a cause and an owner.
+ *
+ * Failure is non-fatal on purpose: a diagnosis that cannot be produced must not suppress the alert.
+ * Knowing something recurred is worth more than knowing nothing.
+ */
+async function diagnose(metric: string, from: string, to: string): Promise<Diagnosis | undefined> {
+  const ledger = new Ledger();
+  try {
+    const inv = await investigate({ metric, from, to, ledger });
+    const action = await recommendAction(ledger, inv);
+    return {
+      channel: inv.primaryChannel,
+      owner: action.owner,
+      because: action.whereToLook[0] ?? inv.headline,
+      impactUsdPerDay:
+        inv.findings.find((f) => f.revenueImpactUsd !== null)?.revenueImpactUsd ?? null,
+      clearedCount: inv.ruledOut.filter((r) => r.status === "cleared_as_contamination").length,
+      status: action.status,
+    };
+  } catch {
+    return undefined;
+  } finally {
+    await ledger.close();
+  }
 }
 
 /**
@@ -155,6 +202,7 @@ export async function runOnce(): Promise<Notification[]> {
             pct: inc.worstPct,
             sigma: inc.worstSigma,
             requestsPerDay: inc.requestsPerDay,
+            diagnosis: await diagnose(metric, inc.from, inc.to),
           });
           w.watermark = inc.to;
         }
@@ -178,19 +226,41 @@ export async function runOnce(): Promise<Notification[]> {
 export function renderNotification(n: Notification): string {
   const where = n.watch.dimension ? `${n.watch.dimension} = '${n.watch.value}'` : "the platform";
   const dir = n.pct < 0 ? "down" : "up";
+  const d = n.diagnosis;
   return [
     `It happened again: ${where}.`,
     ``,
     `${n.watch.metric} is ${dir} ${Math.abs(n.pct).toFixed(0)}% on ${n.day}, ` +
       `on about ${n.requestsPerDay.toLocaleString()} requests a day.`,
-    n.watch.baselineImpactUsdPerDay !== null
-      ? `When you last saw this it was worth $${Math.abs(n.watch.baselineImpactUsdPerDay).toFixed(2)}/day.`
+    d ? `` : ``,
+    d ? `${channelLabel(d.channel)} — ${d.owner}.` : ``,
+    d ? d.because : ``,
+    d && d.impactUsdPerDay !== null
+      ? `Worth ${d.impactUsdPerDay < 0 ? "-" : ""}$${Math.abs(d.impactUsdPerDay).toFixed(2)}/day.`
+      : ``,
+    d && d.clearedCount > 0
+      ? `${d.clearedCount} other slice(s) looked implicated and were checked and cleared.`
       : ``,
     ``,
-    `Ask for the full diagnosis:  "why did ${n.watch.metric} drop on ${n.day}?"`,
+    `Full diagnosis:  "why did ${n.watch.metric} drop on ${n.day}?"`,
   ]
-    .filter(Boolean)
-    .join("\n");
+    .filter((l) => l !== undefined && l !== null)
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n");
+}
+
+/** Channel as a person would say it. Mirrors the table in engine/render.ts, which is not exported. */
+export function channelLabel(channel: string): string {
+  const labels: Record<string, string> = {
+    technical_break: "Something is broken",
+    demand_change: "The market moved — demand",
+    supply_change: "The market moved — supply",
+    mix_shift: "Nothing is broken, the traffic mix moved",
+    seasonality: "Expected weekly pattern",
+    not_localizable: "Platform-wide, no single segment",
+    no_anomaly: "Within its normal band",
+  };
+  return labels[channel] ?? channel;
 }
 
 if (import.meta.main) {

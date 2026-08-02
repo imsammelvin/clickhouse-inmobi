@@ -19,7 +19,7 @@ import { Session } from "../mcp/trace";
 import { callTool } from "../mcp/tools";
 import { DEFAULT_METRICS } from "../engine/scan";
 import { readFileSync, existsSync } from "node:fs";
-import { listWatches, renderNotification, type Notification } from "../mcp/watch";
+import { channelLabel, listWatches, renderNotification, type Notification } from "../mcp/watch";
 import { initObservability } from "../../shared/utils/telemetryUtils";
 
 const PORT = Number(process.env.DASHBOARD_PORT ?? 4500);
@@ -242,6 +242,9 @@ function apiWatch(url: URL): Response {
       requestsPerDay: e.requestsPerDay,
       // The same words the email would have carried, so the two channels cannot drift apart.
       text: renderNotification(e),
+      diagnosis: e.diagnosis
+        ? { ...e.diagnosis, channelLabel: channelLabel(e.diagnosis.channel) }
+        : null,
     })),
   });
 }

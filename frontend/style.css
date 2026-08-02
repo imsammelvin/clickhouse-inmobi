@@ -118,6 +118,12 @@ nav .tabs {
   gap: 4px;
   overflow-x: auto;
 }
+/* `display: flex` below beats the browser's own `[hidden] { display: none }`, so a hidden nav button
+   kept rendering. Anything marked hidden must actually be hidden — restore Rollup vs Raw by removing
+   the attribute in index.html, not by weakening this. */
+nav button[hidden] {
+  display: none;
+}
 nav button {
   display: flex;
   align-items: center;
@@ -518,3 +524,16 @@ tr.fresh td { color: var(--text); }
 em.new { color: var(--bad); font-style: normal; font-weight: 700; font-size: 10px; text-transform: uppercase; }
 td.drop { color: var(--bad); font-variant-numeric: tabular-nums; }
 td.rise { color: var(--good); font-variant-numeric: tabular-nums; }
+
+/* Alert cards. The verdict leads; the numbers are supporting detail, because "what broke and who
+   owns it" is the thing a reader needs before anything else. */
+.card.alert { padding: 14px 16px; margin-bottom: 10px; }
+.card.alert.fresh { border-left: 3px solid var(--bad); }
+.alert-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.alert-what { font-size: 14px; color: var(--text); }
+.alert-what .drop { color: var(--bad); font-weight: 700; }
+.alert-what .rise { color: var(--good); font-weight: 700; }
+.alert-meta { font-size: 11px; color: var(--muted); margin-top: 4px; }
+.alert-verdict { font-size: 13px; color: var(--text); margin-top: 10px; font-weight: 600; }
+.alert-because { font-size: 13px; color: var(--muted); margin-top: 4px; line-height: 1.55; }
+.alert-cleared { font-size: 12px; color: var(--muted); margin-top: 6px; }

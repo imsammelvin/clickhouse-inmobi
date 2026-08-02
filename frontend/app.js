@@ -740,22 +740,37 @@ function renderAlerts() {
   }
 
   const seenAt = localStorage.getItem(ALERTS_SEEN_KEY) ?? "";
-  el.innerHTML =
-    '<table><thead><tr><th>When</th><th>Metric</th><th>Where</th><th>Day</th><th>Move</th><th>Req/day</th></tr></thead><tbody>' +
-    alertItems
-      .map((n) => {
-        const fresh = n.at > seenAt;
-        const dir = n.pct < 0 ? "drop" : "rise";
-        return (
-          `<tr class="${fresh ? "fresh" : ""}">` +
-          `<td>${esc(new Date(n.at).toLocaleString())}${fresh ? ' <em class="new">new</em>' : ""}</td>` +
-          `<td>${esc(n.metric)}</td><td>${esc(n.where)}</td><td>${esc(n.day)}</td>` +
-          `<td class="${dir}">${n.pct >= 0 ? "+" : ""}${n.pct.toFixed(0)}%</td>` +
-          `<td>${Number(n.requestsPerDay).toLocaleString()}</td></tr>`
-        );
-      })
-      .join("") +
-    "</tbody></table>";
+  /* Cards rather than a table row. The numbers alone ("fill_rate -45%") only restate what fired;
+     what a reader needs first is what broke and who owns it, which the cron already worked out. */
+  el.innerHTML = alertItems
+    .map((n) => {
+      const fresh = n.at > seenAt;
+      const dir = n.pct < 0 ? "drop" : "rise";
+      const d = n.diagnosis;
+      const money =
+        d && d.impactUsdPerDay !== null
+          ? `${d.impactUsdPerDay < 0 ? "-" : ""}$${Math.abs(d.impactUsdPerDay).toFixed(2)}/day`
+          : null;
+      return (
+        `<div class="card alert${fresh ? " fresh" : ""}">` +
+        `<div class="alert-top">` +
+        `<span class="alert-what"><b>${esc(n.metric)}</b> ${dir === "drop" ? "fell" : "rose"} ` +
+        `<span class="${dir}">${Math.abs(n.pct).toFixed(0)}%</span> on <b>${esc(n.where)}</b></span>` +
+        `${fresh ? '<em class="new">new</em>' : ""}` +
+        `</div>` +
+        `<div class="alert-meta">${esc(n.day)} &middot; ~${Number(n.requestsPerDay).toLocaleString()} requests/day` +
+        `${money ? ` &middot; <b>${esc(money)}</b>` : ""} &middot; caught ${esc(new Date(n.at).toLocaleString())}</div>` +
+        (d
+          ? `<div class="alert-verdict"><b>${esc(d.channelLabel ?? d.channel)}</b>${d.owner ? ` — ${esc(d.owner)}` : ""}</div>` +
+            `<div class="alert-because">${esc(d.because)}</div>` +
+            (d.clearedCount > 0
+              ? `<div class="alert-cleared">✅ ${d.clearedCount} other slice(s) looked implicated and were checked and cleared.</div>`
+              : "")
+          : `<div class="alert-because">Detected by the sweep; the full investigation did not complete, so no cause is stated here. Ask in chat: "why did ${esc(n.metric)} drop on ${esc(n.day)}?"</div>`) +
+        `</div>`
+      );
+    })
+    .join("");
 
   // Opening the tab is the read receipt. Marked AFTER rendering so the "new" markers are visible on
   // the visit that earned them, and gone on the next.
