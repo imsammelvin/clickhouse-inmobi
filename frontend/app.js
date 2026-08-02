@@ -716,7 +716,10 @@ let libreChatUrl = "";
  */
 function askInChat(question) {
   if (!libreChatUrl) return;
-  const url = new URL(libreChatUrl);
+  /* /c/new, not / — LibreChat's root route is `<Navigate to="/c/new" replace>`, and React Router's
+     Navigate drops the query string, so `/?prompt=…` arrived as a bare reload with the question gone.
+     Going straight to the destination route skips the redirect and the parameter survives. */
+  const url = new URL("/c/new", libreChatUrl);
   url.searchParams.set("prompt", question);
   const frame = $("#chat-frame");
   if (frame) frame.src = url.toString();
@@ -835,9 +838,11 @@ function renderAlerts() {
                 `. They only moved because the real cause sits inside them.</div>`
               : "") +
 
+            (d.nextQuestion
+              ? `<div class="alert-next">Next: <code>${esc(d.nextQuestion)}</code></div>`
+              : "") +
             `<div class="alert-actions">` +
               `<button type="button" class="ask" data-ask="${esc(alertQuestion(n))}">💬 Ask in chat</button>` +
-              (d.nextQuestion ? `<span class="alert-next">or: <code>${esc(d.nextQuestion)}</code></span>` : "") +
             `</div>`
           : `<div class="alert-because">Detected by the sweep; the full investigation did not complete, so no cause is stated here.</div>` +
             `<div class="alert-actions"><button type="button" class="ask" data-ask="${esc(alertQuestion(n))}">💬 Ask in chat</button></div>`) +
