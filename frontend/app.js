@@ -87,6 +87,7 @@ function loadView(v) {
 async function loadChat() {
   try {
     const cfg = await getJson("/api/config");
+    libreChatUrl = cfg.libreChatUrl;
     $("#chat-frame").src = cfg.libreChatUrl;
   } catch (e) {
     $("#chat-frame").outerHTML =
@@ -699,6 +700,42 @@ function renderHealth() {
  * ------------------------------------------------------------------------------------------------ */
 const ALERTS_SEEN_KEY = "watchman.seenAt";
 
+/* Set once the config lands; the ask button needs it to rebuild the iframe URL. */
+let libreChatUrl = "";
+
+/**
+ * Hand an alert to the chat, with the question already typed.
+ *
+ * The chat is a cross-origin iframe, so nothing here can reach into its input. LibreChat reads
+ * `?prompt=` from its own URL though, so pointing the frame at that is the supported way in.
+ *
+ * Deliberately NOT `&submit=true`. Auto-sending would spend a real investigation the moment someone
+ * clicks, and would leave them watching a request they never chose to make. Pre-filling puts the
+ * question in front of them and lets them edit it or press send — which is also the difference
+ * between a shortcut and a surprise.
+ */
+function askInChat(question) {
+  if (!libreChatUrl) return;
+  const url = new URL(libreChatUrl);
+  url.searchParams.set("prompt", question);
+  const frame = $("#chat-frame");
+  if (frame) frame.src = url.toString();
+  activateView("chat");
+}
+
+/* The question an alert should open with: metric, segment and day, so the engine can scope it
+   without a follow-up. Built from the alert's own fields rather than the diagnosis, so it still
+   works when the investigation did not complete. */
+function alertQuestion(n) {
+  const dir = n.pct < 0 ? "drop" : "rise";
+  return `Why did ${n.metric} ${dir} on ${n.day} for ${n.where}? Walk me through the cause and what was ruled out.`;
+}
+
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-ask]");
+  if (btn) askInChat(btn.getAttribute("data-ask"));
+});
+
 let alertItems = [];
 
 /* The log accumulates across watch lifetimes, so re-creating a watch replays incidents it already
@@ -798,10 +835,12 @@ function renderAlerts() {
                 `. They only moved because the real cause sits inside them.</div>`
               : "") +
 
-            (d.nextQuestion
-              ? `<div class="alert-next">Next: <code>${esc(d.nextQuestion)}</code></div>`
-              : "")
-          : `<div class="alert-because">Detected by the sweep; the full investigation did not complete, so no cause is stated here. Ask in chat: "why did ${esc(n.metric)} drop on ${esc(n.day)}?"</div>`) +
+            `<div class="alert-actions">` +
+              `<button type="button" class="ask" data-ask="${esc(alertQuestion(n))}">💬 Ask in chat</button>` +
+              (d.nextQuestion ? `<span class="alert-next">or: <code>${esc(d.nextQuestion)}</code></span>` : "") +
+            `</div>`
+          : `<div class="alert-because">Detected by the sweep; the full investigation did not complete, so no cause is stated here.</div>` +
+            `<div class="alert-actions"><button type="button" class="ask" data-ask="${esc(alertQuestion(n))}">💬 Ask in chat</button></div>`) +
         `</div>`
       );
     })

@@ -561,3 +561,12 @@ em.new { background: var(--accent); color: #0b0b0c; }
 .alert-next { font-size: 12px; color: var(--muted); margin-top: 8px; }
 .alert-next code { background: var(--panel-solid); border: 1px solid var(--border);
   border-radius: 5px; padding: 2px 6px; font-size: 11px; }
+
+/* Hand-off to chat. Sits with the suggested follow-up, since both are "what to do next". */
+.alert-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+button.ask {
+  background: var(--accent); color: #0b0b0c; border: none; border-radius: 7px;
+  padding: 6px 14px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit;
+}
+button.ask:hover { filter: brightness(1.1); }
+.alert-actions .alert-next { margin-top: 0; }
