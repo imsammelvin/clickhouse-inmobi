@@ -20,6 +20,7 @@
  */
 import type { Ledger } from "../engine/ledger";
 import { investigate } from "../engine/orchestrate";
+import type { Investigation } from "../engine/types";
 import { renderNarrative } from "../engine/render";
 import { checkGrounding } from "../engine/grounding";
 import { decompose } from "../engine/stages/decompose";
@@ -556,6 +557,69 @@ const findIncidents: ToolDef = {
   },
 };
 
+/**
+ * `ruledOut` can run into the hundreds -- residualize can clear 800+ segments as dilution on a single
+ * window (observed: 840 on the flagship incident), and inlining every one as a full JSON object was
+ * the single largest driver of oversized LLM context seen in practice (one `investigate` call alone
+ * reached ~98k input tokens with this uncapped).
+ */
+const SHOWN_RULED_OUT = 15;
+
+/**
+ * The `investigate` result, shaped once and exported so nothing can build a near-miss of it.
+ *
+ * Extracted from the tool handler because `eval/narrate.ts` was hand-rolling its own version to feed
+ * the narrator -- and quietly diverged. It sent the first 8 ruled-out segments with no total, where
+ * this sends 15 AND `ruledOutCount`. A live run caught the consequence: asked why fill rate dropped,
+ * the model wrote "178 other slices ... were cleared". The real figure was 840, and 178 appears
+ * nowhere in the data. Given a truncated list and no count, it produced a number that looked right.
+ *
+ * The grounding gate caught it, which is the system working. But the eval was scoring a payload the
+ * server never sends, so it was neither testing the real contract nor reproducing a real failure --
+ * the worst of both. One exported shape means the eval cannot drift from production again.
+ *
+ * The cap itself is not a silent drop: top N in the order the engine found them, a count, and a
+ * pointer to the rest. `narrative` states the true total regardless, so the human-readable answer
+ * never changes -- only what gets inlined as raw JSON.
+ */
+export function investigatePayload(
+  inv: Investigation,
+  narrative: string,
+  grounding: ReturnType<typeof checkGrounding>,
+  action: unknown,
+): Record<string, unknown> {
+  return {
+    request: inv.request,
+    headline: inv.headline,
+    channel: inv.primaryChannel,
+    narrative,
+    grounding: {
+      ok: grounding.ok,
+      numeralsChecked: grounding.total,
+      grounded: grounding.grounded,
+      ungrounded: grounding.ungrounded,
+      meaning:
+        "Every numeral in `narrative` was matched against a recorded evidence row at the " +
+        "precision printed. ok=false means do not repeat the narrative — say so instead.",
+    },
+    action,
+    findings: inv.findings,
+    ruledOut: inv.ruledOut.slice(0, SHOWN_RULED_OUT),
+    ruledOutCount: inv.ruledOut.length,
+    ...(inv.ruledOut.length > SHOWN_RULED_OUT
+      ? {
+          ruledOutNote:
+            `${inv.ruledOut.length - SHOWN_RULED_OUT} further ruled-out segment(s) not shown ` +
+            `here (each with its residual as proof) -- narrative above already states the true ` +
+            `total; call export_trace for the full list.`,
+        }
+      : {}),
+    planSteps: inv.planSteps,
+    evidenceCount: inv.evidence.length,
+    traceId: inv.traceId,
+  };
+}
+
 const investigateTool: ToolDef = {
   name: "investigate",
   description:
@@ -618,49 +682,9 @@ const investigateTool: ToolDef = {
     // gets inlined into the tool result, not about what gets checked for trustworthiness.
     const grounding = checkGrounding(narrative, inv.evidence);
 
-    // `ruledOut` can run into the hundreds -- residualize can clear 800+ segments as dilution on a
-    // single window (observed: 832, on the flagship incident), and inlining every one as a full
-    // JSON object was the single largest driver of oversized LLM context seen in practice (one
-    // `investigate` call alone reached ~98k input tokens with this uncapped). Capped the same way
-    // `evidenceIds` already is below: top N in the order the engine found them, a count, and a
-    // pointer to where the rest live -- not a silent drop. `narrative` already states the true
-    // total ("N false lead(s) eliminated") regardless of this cap, so the human-readable answer
-    // does not change, only what gets inlined as raw JSON.
-    const SHOWN_RULED_OUT = 15;
-    const ruledOutShown = inv.ruledOut.slice(0, SHOWN_RULED_OUT);
-
     return {
       summary: `${inv.primaryChannel}: ${inv.headline.slice(0, 90)}`,
-      payload: {
-        request: inv.request,
-        headline: inv.headline,
-        channel: inv.primaryChannel,
-        narrative,
-        grounding: {
-          ok: grounding.ok,
-          numeralsChecked: grounding.total,
-          grounded: grounding.grounded,
-          ungrounded: grounding.ungrounded,
-          meaning:
-            "Every numeral in `narrative` was matched against a recorded evidence row at the " +
-            "precision printed. ok=false means do not repeat the narrative — say so instead.",
-        },
-        action,
-        findings: inv.findings,
-        ruledOut: ruledOutShown,
-        ruledOutCount: inv.ruledOut.length,
-        ...(inv.ruledOut.length > SHOWN_RULED_OUT
-          ? {
-              ruledOutNote:
-                `${inv.ruledOut.length - SHOWN_RULED_OUT} further ruled-out segment(s) not shown ` +
-                `here (each with its residual as proof) -- narrative above already states the true ` +
-                `total; call export_trace for the full list.`,
-            }
-          : {}),
-        planSteps: inv.planSteps,
-        evidenceCount: inv.evidence.length,
-        traceId: inv.traceId,
-      },
+      payload: investigatePayload(inv, narrative, grounding, action),
     };
   },
 };
