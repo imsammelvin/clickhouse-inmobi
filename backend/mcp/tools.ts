@@ -760,8 +760,9 @@ const watchThis: ToolDef = {
     "recurs. Offer this ONCE, right after reporting a real cause — 'want me to tell you if this comes " +
     "back?' — and call it only if they say yes. Never offer it for a no-anomaly or cannot-assess " +
     "verdict: there is nothing to watch. Never ask the user for a threshold; pass the impact the " +
-    "investigation already measured. Notification happens by cron, out of band — it cannot arrive in " +
-    "this chat, so do not imply that it will.",
+    "investigation already measured. A scheduled sweep does the checking, and the result appears on " +
+    "the Alerts tab of Mission Control (plus mail or webhook if configured) — never in this chat, " +
+    "since nothing here can start a conversation. Tell them where it WILL appear.",
   inputSchema: {
     type: "object",
     properties: {
@@ -806,8 +807,8 @@ const watchThis: ToolDef = {
           "A sweep runs out of band on a schedule and checks whether this fires again. You are told " +
           "once per occurrence, not once per run, and nothing is sent while it stays normal.",
         deliveryCaveat:
-          "The notification arrives by mail or webhook, not in this chat — a chat server cannot start " +
-          "a conversation. Say so rather than implying an alert will appear here.",
+          "Appears on the Alerts tab of Mission Control, and by mail or webhook if one is configured. " +
+          "Not in this chat — a chat server cannot start a conversation — so tell them where to look.",
         accountCaveat:
           session.userId === "anonymous"
             ? "No user id reached this server, so this watch is not tied to an account. Add " +
