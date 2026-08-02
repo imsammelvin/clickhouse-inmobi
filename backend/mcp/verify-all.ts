@@ -15,6 +15,12 @@
  * The synthetic dataset gate is SKIPPED, never failed, when its database is absent or stale: it needs
  * `synth:build` first, and a missing scratch database is a setup state rather than a defect. Reporting
  * it as a failure would train everyone to ignore a red line.
+ *
+ * Deliberately uninstrumented. Every gate below is a separate process that opens its own root span
+ * and exports its own trace, so the work is already in ClickStack; a span here would only measure
+ * `Bun.spawn` waiting, and it could not parent the children anyway without threading `traceparent`
+ * through the environment and teaching each child to read it. Standing up an OTLP exporter to record
+ * a duration this script already prints is not worth the process it would run in.
  */
 const QUICK = process.argv.includes("--quick");
 

@@ -24,7 +24,12 @@
 import { callTool } from "../tools";
 import { Session } from "../trace";
 import { CASES, type EvalCase, type Near } from "./cases";
-import { initObservability, shutdownObservability } from "../../../shared/utils/telemetryUtils";
+import type { Span } from "@opentelemetry/api";
+import {
+  initObservability,
+  shutdownObservability,
+  withSpan,
+} from "../../../shared/utils/telemetryUtils";
 
 const argOf = (name: string): string | undefined => {
   const i = process.argv.indexOf(`--${name}`);
@@ -373,8 +378,12 @@ async function runCase(session: Session, c: EvalCase): Promise<CaseResult> {
   };
 }
 
-async function main(): Promise<void> {
-  initObservability();
+/**
+ * Returns the exit code rather than calling `process.exit` itself: the root span has to end and the
+ * batch processor has to flush before the process goes away, and `process.exit` from in here would
+ * take the whole run's telemetry with it. `main` exits, once, after both.
+ */
+async function runEval(span: Span): Promise<number> {
   const only = argOf("case");
   const cases = only ? CASES.filter((c) => c.id === only) : CASES;
   if (cases.length === 0) {
@@ -386,6 +395,8 @@ async function main(): Promise<void> {
 
   const session = new Session();
   const results: CaseResult[] = [];
+  span.setAttribute("app.eval.cases", cases.length);
+  if (only) span.setAttribute("app.eval.case_filter", only);
   try {
     out(`\nACCURACY — ${cases.length} case(s), answered through the MCP tool layer\n`);
     for (const c of cases) {
@@ -404,7 +415,6 @@ async function main(): Promise<void> {
   } finally {
     const exported = session.export();
     await session.close();
-    await shutdownObservability();
 
     const gated = results.flatMap((r) => r.checks.filter((k) => k.gated));
     const reported = results.flatMap((r) => r.checks.filter((k) => !k.gated));
@@ -461,8 +471,30 @@ async function main(): Promise<void> {
       );
     }
 
-    process.exit(gatedPassed === gated.length ? 0 : 1);
+    span.setAttributes({
+      "app.eval.cases_passed": casesPassed,
+      "app.eval.gated_checks": gated.length,
+      "app.eval.gated_passed": gatedPassed,
+      "app.eval.reported_checks": reported.length,
+      "app.eval.reported_passed": reportedPassed,
+    });
+
+    // Returning from `finally` is deliberate and replaces the `process.exit` that used to sit here:
+    // same "this is the answer however we got out of the try" semantics, but it lets the span end.
+    // eslint-disable-next-line no-unsafe-finally
+    return gatedPassed === gated.length ? 0 : 1;
   }
+}
+
+async function main(): Promise<void> {
+  initObservability();
+  let code = 1;
+  try {
+    code = await withSpan("eval.run", {}, runEval);
+  } finally {
+    await shutdownObservability();
+  }
+  process.exit(code);
 }
 
 if (import.meta.main) {

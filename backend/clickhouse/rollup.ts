@@ -36,6 +36,18 @@
  * you serve a confidently wrong number.
  */
 import { MaterializedView, Table } from "../../shared/enums";
+import { counter, withSpan, withSyncSpan } from "../../shared/utils/telemetryUtils";
+
+/**
+ * How often each source served a query, labelled by the reason when it was the raw view.
+ *
+ * A metric rather than only a span attribute because the number worth watching is a *rate* -- "what
+ * fraction of queries fell back, and why" -- and answering that from spans means scanning traces.
+ */
+const planDecisions = counter(
+  "rollup.plan.decisions",
+  "Rollup planner outcomes, by source and fallback reason.",
+);
 
 // ---------------------------------------------------------------------------------------------
 // registry
@@ -263,8 +275,26 @@ let lastHealth: RollupHealth | null = null;
 export async function ensureRollupReady(
   run: <T>(sql: string) => Promise<T[]>,
 ): Promise<RollupHealth> {
+  // The cached answer is a field read, not work -- spanning it would put a span on every entry
+  // point that says nothing. Only the once-per-process check that actually queries gets one.
   if (lastHealth) return lastHealth;
 
+  return withSpan("rollup.ready", {}, async (span) => {
+    const health = await checkRollupReady(run);
+    span.setAttribute("app.rollup.ready", health.ready);
+    span.setAttribute("app.rollup.fact_events", health.factEvents);
+    span.setAttribute("app.rollup.rollup_events", health.rollupEvents);
+    span.setAttribute("app.rollup.daily_rows", health.dailyRows);
+    span.setAttribute("app.rollup.hourly_rows", health.hourlyRows);
+    // Not a span error: an unbuilt rollup is a correct, expected state that falls back to raw.
+    // Recording the reason is what makes "why is everything suddenly slow" answerable.
+    if (health.reason) span.setAttribute("app.rollup.reason", health.reason);
+    return health;
+  });
+}
+
+/** The check itself. Sets `ready`/`lastHealth` and never throws -- see the catch at the bottom. */
+async function checkRollupReady(run: <T>(sql: string) => Promise<T[]>): Promise<RollupHealth> {
   try {
     // EVERY dim key must account for the whole fact table, not just one of them.
     //
@@ -435,8 +465,46 @@ export interface PlanRequest {
  * normal, correct outcome, not an error. The only thing that would be an error is answering.
  */
 export function planRollup(request: PlanRequest): RollupPlan | null {
+  return withSyncSpan(
+    "rollup.plan",
+    {
+      "app.rollup.requested_grain": request.grain,
+      "app.rollup.dims": [...new Set(request.dims)].join(","),
+      "app.rollup.dim_count": new Set(request.dims).size,
+    },
+    (span) => {
+      const plan = decidePlan(request, (source, reason) => {
+        span.setAttribute("app.rollup.source", source);
+        if (reason) span.setAttribute("app.rollup.fallback_reason", reason);
+        planDecisions().add(1, {
+          source,
+          ...(reason ? { reason } : {}),
+          grain: request.grain,
+        });
+      });
+      if (plan) {
+        span.setAttribute("app.rollup.table", plan.table);
+        span.setAttribute("app.rollup.dim_key", plan.dimKey);
+      }
+      return plan;
+    },
+  );
+}
+
+/**
+ * The planner proper. Split out from `planRollup` so the span wrapper stays readable and so each
+ * `return null` can say *why* it declined -- "fell back" with no reason is the one thing that makes
+ * this decision hard to debug from a trace, because every fallback looks identical from outside.
+ */
+function decidePlan(
+  request: PlanRequest,
+  record: (source: string, reason?: string) => void,
+): RollupPlan | null {
   // Unchecked or behind the fact table: use the raw view. See `ensureRollupReady`.
-  if (ready !== true) return null;
+  if (ready !== true) {
+    record(RAW_SOURCE.label, ready === null ? "not_checked" : "rollup_not_ready");
+    return null;
+  }
 
   const dims = [...new Set(request.dims)];
 
@@ -444,15 +512,23 @@ export function planRollup(request: PlanRequest): RollupPlan | null {
   // source. Any single dimension's rows sum to the platform, so pick the cheapest: 5 values.
   const carrier = dims.length === 0 ? ["ad_format"] : dims;
   const dimKey = rollupDimKey(carrier);
-  if (!dimKey) return null;
+  if (!dimKey) {
+    record(RAW_SOURCE.label, "no_such_cut");
+    return null;
+  }
 
   // Fail the plan, not the query, if a metric formula cannot be translated.
   try {
     for (const expression of request.expressions ?? []) toRollupExpr(expression);
   } catch (error) {
-    if (error instanceof RollupUnsupported) return null;
+    if (error instanceof RollupUnsupported) {
+      record(RAW_SOURCE.label, "untranslatable_metric");
+      return null;
+    }
     throw error;
   }
+
+  record("rollup");
 
   const grain = request.grain;
   const table = ROLLUP_TABLES[grain];
