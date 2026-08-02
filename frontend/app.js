@@ -577,10 +577,33 @@ function renderStep(step, i) {
         .join(" ")
     : '<span class="tool-pill">Answered directly, no check needed</span>';
   const details = step.calls
-    .map(
-      (c, j) =>
-        '<div class="step-explain" id="step-detail-' + i + "-" + j + '" hidden>' + esc(c.summary) + "</div>",
-    )
+    .map((c, j) => {
+      const rows = c.rows && c.rows.length
+        ? '<ul class="step-rows">' +
+          c.rows
+            .map(
+              (r) =>
+                "<li><span class=\"row-label\">" +
+                esc(r.label) +
+                '</span><span class="row-value">' +
+                esc(r.value) +
+                "</span></li>",
+            )
+            .join("") +
+          "</ul>"
+        : "";
+      return (
+        '<div class="step-explain" id="step-detail-' +
+        i +
+        "-" +
+        j +
+        '" hidden><div class="step-explain-text">' +
+        esc(c.summary) +
+        "</div>" +
+        rows +
+        "</div>"
+      );
+    })
     .join("");
   // "how many scenarios it covered" — a dispatch that bundled more than one tool call was genuinely
   // weighing multiple candidates at once, not just calling tools one after another; say so.
@@ -640,6 +663,12 @@ async function loadLlmPrompts() {
           "<span><b>" +
           p.steps.length +
           "</b> step(s)</span>" +
+          "</div>" +
+          '<div class="prompt-ids">' +
+          (p.traceUrl
+            ? '<a href="' + esc(p.traceUrl) + '" target="_blank" rel="noopener">trace: ' + esc(p.traceId) + "</a>"
+            : "<span>trace: " + esc(p.traceId) + "</span>") +
+          (p.userId ? "<span>user: " + esc(p.userId) + "</span>" : "") +
           "</div>" +
           '<div class="decision-tree">' +
           (p.steps.length

@@ -589,14 +589,51 @@ tr.sev-rise td:first-child {
 .prompt-card .prompt-meta b {
   color: var(--text);
 }
+/* Technical identifiers for auditing -- deliberately smaller/mutedly than the plain-English meta
+   above, since these are for cross-referencing in Langfuse directly, not for the trust narrative. */
+.prompt-ids {
+  display: flex;
+  gap: 14px;
+  font-size: 10.5px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  color: var(--muted);
+  opacity: 0.75;
+  margin-bottom: 10px;
+}
+.prompt-ids a {
+  color: var(--muted);
+  text-decoration: underline dotted;
+}
+.prompt-ids a:hover {
+  color: var(--accent);
+}
+/* The tree: a vertical trunk down the left, each step a branch off it -- a prompt at the top,
+   its steps hanging off one spine, each step's calls hanging off that step in turn. */
 .decision-tree {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
+  margin-left: 4px;
+  padding-left: 14px;
+  border-left: 2px solid var(--border);
+}
+.decision-step-wrap {
+  position: relative;
+}
+.decision-step-wrap::before {
+  /* The branch connector from the trunk to this step. */
+  content: "";
+  position: absolute;
+  left: -14px;
+  top: 14px;
+  width: 12px;
+  height: 1px;
+  background: var(--border);
 }
 .decision-step {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   font-size: 12.5px;
   padding: 6px 10px;
@@ -629,15 +666,40 @@ tr.sev-rise td:first-child {
 }
 .step-explain {
   margin: 4px 0 0 26px;
-  padding: 8px 10px;
+  padding: 10px 12px;
   border-left: 2px solid var(--accent);
   background: var(--panel-solid);
   border-radius: 0 8px 8px 0;
   font-size: 12px;
   color: var(--muted);
 }
-.step-explain b {
+.step-explain-text {
   color: var(--text);
+  margin-bottom: 6px;
+}
+/* The actual query result, one row per segment/finding -- the "show the query result" part. */
+.step-rows {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 6px 0 0;
+  border-top: 1px dashed var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.step-rows li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 11.5px;
+}
+.step-rows .row-label {
+  color: var(--text);
+  flex-shrink: 0;
+}
+.step-rows .row-value {
+  color: var(--muted);
+  text-align: right;
 }
 .step-parallel-note {
   font-size: 11px;

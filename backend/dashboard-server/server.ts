@@ -245,6 +245,15 @@ interface LangfuseTrace {
   totalCost: number;
   latency: number;
   sessionId: string | null;
+  /** LibreChat's own Mongo user id, NOT an email -- Langfuse never receives an email address for a
+   *  trace (checked directly: neither `userId` nor `metadata` carries one). Resolving this to the
+   *  actual email would mean a new connection to LibreChat's own Mongo `users` collection, which
+   *  this dashboard doesn't have configured (no MONGO_URI anywhere in this repo's .env). */
+  userId: string | null;
+  /** Langfuse's own relative link to this trace's page, e.g. "/project/<id>/traces/<traceId>" --
+   *  joined with LANGFUSE_BASE_URL below to link straight out to the real trace for anyone who wants
+   *  to audit beyond what this page shows. */
+  htmlPath: string | null;
 }
 
 /** LibreChat's MCP tool names carry a `_mcp_<server-name>` suffix -- strip it back to the plain name
@@ -295,7 +304,16 @@ function extractPrompt(input: unknown): string {
 interface StepPreview {
   label: string;
   summary: string;
+  /** The actual result, in plain-English rows -- "what a proper investigation tree should show," not
+   *  just a one-line gloss. Capped per call (see ROW_CAP below); the full payload never reaches here
+   *  in the first place, so there is nothing larger being held back. */
+  rows?: Array<{ label: string; value: string }>;
 }
+
+/** Applied per tool call, not per prompt -- this is a human reading one card, not an LLM paying per
+ *  token, so it can afford to be generous, but a `rank_segments` call over 200 values still needs a
+ *  line somewhere. */
+const ROW_CAP = 8;
 
 /** "publisher_tier" -> "publisher tier". Field/dimension names are the raw column names in the
  *  dataset (see backend/mcp/query.ts) -- always snake_case, never meant for display as-is. */
@@ -348,6 +366,24 @@ const fmtDeltaPct = (n: unknown): string =>
 
 const asArray = (v: unknown): Array<Record<string, unknown>> => (Array.isArray(v) ? v : []);
 
+/** Formats one `Finding` (backend/engine/types.ts) -- used for both `investigate`'s real causes
+ *  (`findings`) and its cleared segments (`ruledOut`); the only difference is the value line, since a
+ *  cleared segment's own delta is dilution, not a cause -- its `residualPp`/`deltaPp` after excluding
+ *  the real cause is the number that actually matters. */
+const fmtFinding = (f: Record<string, unknown>): { label: string; value: string } => {
+  const segment = f.segment as { dimension: string; value: string } | null;
+  const label = segment ? plainGroup({ [segment.dimension]: segment.value }) : "The whole platform";
+  const status = String(f.status ?? "");
+  if (status === "cleared_as_contamination" || status.startsWith("cleared")) {
+    const residual = f.residualPp ?? f.deltaPp;
+    return {
+      label,
+      value: `Looked broken, but cleared -- once the real cause is excluded it's normal (residual ${fmtDeltaPct(residual)})`,
+    };
+  }
+  return { label, value: `${fmtDeltaPct(f.deltaPct)}, ${status.replace(/_/g, " ") || "flagged"}` };
+};
+
 /** Our own narrative text (`investigate`'s `headline`) is already written for a revenue manager,
  *  except metric names are still the raw dataset column (`fill_rate`, `render_rate`) -- the only two
  *  with an underscore among the metric set in backend/mcp/query.ts's METRICS. */
@@ -373,13 +409,34 @@ function buildStepPreview(tool: string, p: Record<string, unknown>): StepPreview
           `Also checked ${p.ruledOutCount} other possible explanation(s) and ruled them out.`,
         );
       }
-      return { label, summary: bits.join(" ") };
+      // The real causes first (there are usually 0-2), then a sample of what was checked and
+      // cleared -- this IS the "checked and ruled out" evidence, the differentiator the whole
+      // pipeline exists to produce, not something worth hiding behind a one-line count. Ruled-out
+      // entries with no segment (the platform-wide checks that make up most of a no-anomaly verdict)
+      // all read as an identical, uninformative "whole platform, cleared" line -- skip those in favor
+      // of the specific segments that actually looked suspicious before being excluded.
+      const findings = asArray(p.findings).map(fmtFinding);
+      const ruledOut = asArray(p.ruledOut)
+        .filter((f) => f.segment)
+        .slice(0, ROW_CAP - findings.length)
+        .map(fmtFinding);
+      return { label, summary: bits.join(" "), rows: [...findings, ...ruledOut] };
     }
     case "find_incidents": {
       const metrics = Array.isArray(p.metricsSwept) ? p.metricsSwept.length : 0;
+      const windows = asArray(p.windows)
+        .slice(0, ROW_CAP)
+        .map((w) => {
+          const lead = w.leadSegment as { dimension: string; value: string } | undefined;
+          return {
+            label: `${plainMetric(String(w.metric ?? ""))} (${w.from} to ${w.to})`,
+            value: `${lead ? plainGroup({ [lead.dimension]: lead.value }) : "platform-wide"}, ${fmtDeltaPct(w.worstPct)}`,
+          };
+        });
       return {
         label: "Scanned for anomalies",
         summary: `Scanned ${metrics} metric(s) for anything unusual -- found ${p.windowCount ?? 0} thing(s) worth a closer look.`,
+        rows: windows,
       };
     }
     case "rank_segments": {
@@ -387,23 +444,32 @@ function buildStepPreview(tool: string, p: Record<string, unknown>): StepPreview
       const metric = plainMetric(String(p.metric ?? "the metric"));
       const label = `Checked which ${dim} was worst on ${metric}`;
       const rows = asArray(p.rows);
-      if (!rows.length)
+      const rowsOut = rows
+        .slice(0, ROW_CAP)
+        .map((r) => ({ label: plainGroup(r.group), value: fmtValue(r.value, p.unit) }));
+      if (!rows.length) {
         return {
           label,
           summary: `Checked every ${dim} for ${metric} -- none had enough data to judge.`,
         };
+      }
       const top = rows[0]!;
       return {
         label,
         summary: `Checked every ${dim} to find the worst ${metric} -- ${plainGroup(top.group)} came out worst, at ${fmtValue(top.value, p.unit)}.`,
+        rows: rowsOut,
       };
     }
     case "compare_periods": {
       const metric = plainMetric(String(p.metric ?? "the metric"));
       const label = `Compared ${metric} to its usual level`;
       const rows = asArray(p.rows);
-      if (!rows.length)
+      const rowsOut = rows
+        .slice(0, ROW_CAP)
+        .map((r) => ({ label: plainGroup(r.group), value: `${fmtDeltaPct(r.deltaPct)} vs. usual` }));
+      if (!rows.length) {
         return { label, summary: `Compared ${metric} to its usual level -- nothing to compare.` };
+      }
       const biggest = [...rows].sort(
         (a, b) => Math.abs((b.deltaPct as number) ?? 0) - Math.abs((a.deltaPct as number) ?? 0),
       )[0]!;
@@ -411,12 +477,16 @@ function buildStepPreview(tool: string, p: Record<string, unknown>): StepPreview
       return {
         label,
         summary: `Compared ${metric} to its usual level ${scope}-- the biggest move was ${plainGroup(biggest.group)}, ${fmtDeltaPct(biggest.deltaPct)} versus normal.`,
+        rows: rowsOut,
       };
     }
     case "get_metric": {
       const metric = plainMetric(String(p.metric ?? "the metric"));
       const label = `Looked up ${metric}`;
       const rows = asArray(p.rows);
+      const rowsOut = rows
+        .slice(0, ROW_CAP)
+        .map((r) => ({ label: plainGroup(r.group), value: fmtValue(r.value, p.unit) }));
       if (rows.length === 1) {
         const row = rows[0]!;
         return {
@@ -427,15 +497,21 @@ function buildStepPreview(tool: string, p: Record<string, unknown>): StepPreview
       return {
         label,
         summary: `Looked up ${metric} broken out across ${rows.length} row(s) of data.`,
+        rows: rowsOut,
       };
     }
     case "explain_revenue": {
       const driver = typeof p.driver === "string" ? plainWord(p.driver) : null;
+      const factors = asArray(p.factors).map((f) => ({
+        label: plainWord(String(f.factor ?? "")),
+        value: `${fmtDeltaPct(f.deltaPct)}, ${fmtValue(f.revenueEffectUsdPerDay, "usd")}/day`,
+      }));
       return {
         label: "Checked what drove revenue",
         summary: driver
           ? `Checked which lever moved revenue -- it was ${driver}, worth ${fmtValue(p.revenueDeltaPerDay, "usd")} a day.`
           : `Checked which lever moved revenue -- no single factor stood out.`,
+        rows: factors,
       };
     }
     case "describe_data": {
@@ -628,6 +704,8 @@ async function apiRecentPrompts(): Promise<Response> {
             });
             return {
               traceId: t.id,
+              traceUrl: t.htmlPath ? `${baseUrl}${t.htmlPath}` : null,
+              userId: t.userId,
               timestamp: t.timestamp,
               prompt: extractPrompt(t.input),
               costUsd: t.totalCost,
