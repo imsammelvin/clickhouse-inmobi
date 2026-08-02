@@ -10,14 +10,14 @@
  * `investigate` takes exactly one metric and one window, so the join between them is a human piping
  * results into a CLI under time pressure. Here it is code:
  *
- *   describe_data -> find_incidents -> rank -> group -> investigate top N -> report
+ *   describe_data -> find_incidents -> rank -> group -> investigate every one -> report
  *
  * Two steps in the middle are the ones that turn a sweep into a digest:
  *
- *   RANK AND CUT. Dozens of firing windows is not a digest. Each is scored by a stated severity proxy
- *   — size of move x share of traffic x capped duration — and only the top N are investigated. What
- *   was not escalated is listed with its numbers and the reason, because a digest that silently drops
- *   what it saw is how a real incident gets missed.
+ *   RANK. Dozens of firing windows is not a digest, so each is scored by a stated severity proxy —
+ *   size of move x share of traffic x capped duration — and the report is ordered by it. Ranking
+ *   decides the ORDER only. Everything the sweep fired on is investigated, because the ranking is a
+ *   heuristic and the window it demotes can be the expensive one. `--top N` cuts for a fast pass.
  *
  *   GROUP. One incident lights up several metrics — the Jun 21 collapse fires on requests *and*
  *   revenue, a fill break drags CTR with it — so the weaker views are attached to the strongest and
@@ -49,11 +49,23 @@ import {
 } from "../../shared/utils/telemetryUtils";
 
 /**
- * How many incidents to investigate. A cap for readability, not a detection threshold: a digest a
- * person actually reads is under about six items, and everything below the cut is listed with its
- * numbers and the reason it was not escalated. Raise it with `--top`.
+ * Investigate EVERYTHING the sweep fires on. No cut by default.
+ *
+ * This used to default to 6 for readability, on the reasoning that a digest a person actually reads
+ * is short and anything below the cut still gets listed with its numbers. That reasoning is fine for
+ * a human skimming a morning digest and wrong for the job this command actually does, which is to be
+ * the unattended pass that nobody is watching.
+ *
+ * What it costs to be wrong is asymmetric. An extra investigated window costs about thirteen seconds
+ * and one more section in a report. A missed one is an incident nobody hears about — and the ranking
+ * that decides the cut is a stated heuristic (move x share x capped duration), not a measurement, so
+ * the thing it demotes can be the expensive one. On the 6-10 July slice a -$84/day repricing sat
+ * below a cut that had already spent slots on two windows that turned out to be no_anomaly.
+ *
+ * Ranking still decides the ORDER, which is what makes the report readable. It no longer decides
+ * what gets looked at. `--top N` is there when someone wants a fast partial pass.
  */
-const DEFAULT_TOP = 6;
+const DEFAULT_TOP = Number.POSITIVE_INFINITY;
 const DEFAULT_OUT = "backend/mcp/reports";
 
 /** Receipts shown per incident in the report. The rest stay in report.json. */
@@ -285,13 +297,36 @@ async function runDiagnose(span: Span): Promise<void> {
     const diagnosed: DiagnosedIncident[] = [];
     for (const j of selected) {
       say(`[diagnose] investigating ${j.primary.metric} ${j.primary.from}..${j.primary.to}`);
-      const res = await call(session, "investigate", {
+      /**
+       * Retried, because a dropped socket is not a verdict.
+       *
+       * Observed on the 6-10 July run: ClickHouse Cloud closed the connection mid-`residualize` and
+       * a real `fill_rate` technical break worth -$31.68/day dropped straight out of the digest into
+       * the skipped list. Nothing about that incident was uncertain — the database blinked.
+       *
+       * This is the unattended pass, so there is no human to notice a missing section and re-run it.
+       * Three attempts with a short backoff, and only then is it recorded as failed. Investigations
+       * are read-only, so retrying one cannot corrupt anything; the cost of a spare attempt is
+       * seconds, and the cost of not retrying is an incident nobody hears about.
+       */
+      let res = await call(session, "investigate", {
         metric: j.primary.metric,
         from: j.primary.from,
         to: j.primary.to,
       });
+      for (let attempt = 2; !res.ok && attempt <= 3; attempt++) {
+        say(
+          `[diagnose]   attempt ${attempt - 1} failed, retrying — ${String(res.data.error).slice(0, 90)}`,
+        );
+        await Bun.sleep(1500 * (attempt - 1));
+        res = await call(session, "investigate", {
+          metric: j.primary.metric,
+          from: j.primary.from,
+          to: j.primary.to,
+        });
+      }
       if (!res.ok) {
-        say(`[diagnose]   failed: ${String(res.data.error)}`);
+        say(`[diagnose]   FAILED after 3 attempts: ${String(res.data.error)}`);
         skipped.push({
           metric: j.primary.metric,
           from: j.primary.from,
@@ -299,7 +334,7 @@ async function runDiagnose(span: Span): Promise<void> {
           leadSegment: j.primary.leadSegment,
           worstPct: j.primary.worstPct,
           sharePct: j.sharePct,
-          reason: `investigation failed: ${String(res.data.error).slice(0, 120)}`,
+          reason: `investigation failed after 3 attempts: ${String(res.data.error).slice(0, 120)}`,
         });
         continue;
       }
@@ -429,6 +464,20 @@ async function runDiagnose(span: Span): Promise<void> {
     say(
       `[diagnose] ${diagnosed.length} incident(s) diagnosed in ${((Date.now() - started) / 1000).toFixed(1)}s`,
     );
+    /**
+     * A crashed investigation must never read as a clean sweep.
+     *
+     * `skipped` holds two very different things: a window that was looked at and not escalated, and
+     * a window that could not be looked at. Both used to land in the same quiet list, so a failed
+     * investigation appeared only as a line in report.json that nobody opens — and on this window
+     * that hid a real -$31.68/day technical break. Said out loud, before the digest.
+     */
+    const failed = skipped.filter((x) => x.reason.startsWith("investigation failed"));
+    if (failed.length) {
+      say(`[diagnose] !! ${failed.length} investigation(s) FAILED — NOT in the digest below:`);
+      for (const f of failed) say(`[diagnose]    ${f.metric} ${f.from}..${f.to} — ${f.reason}`);
+      say("");
+    }
     for (const d of diagnosed) {
       const cause = d.leadSegment
         ? `${d.leadSegment.dimension}='${d.leadSegment.value}'`
