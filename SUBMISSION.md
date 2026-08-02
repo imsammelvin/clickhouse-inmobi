@@ -13,7 +13,10 @@ only narrates.
 
 ## Team Members
 
-- «FILL» Name (@sam-m-anarix)
+- Sam Melvin M ([@imsammelvin](https://github.com/imsammelvin))
+- Loges S ([@LogesS25](https://github.com/LogesS25))
+- Samarth Dhawan ([@samarth8765](https://github.com/samarth8765))
+- Mohansundar K ([@Mohansundark](https://github.com/Mohansundark))
 
 ## What it does
 
@@ -40,8 +43,14 @@ looking shows up on the Alerts tab with a full diagnosis attached.
 
 ## Hosted Demo
 
-«FILL» — Mission Control at `http://<host>:4500` (Chat · Anomalies · Alerts · LLM Cost · System
-Health), with LibreChat wired to the MCP server for follow-up questions.
+**http://161.97.122.198:4500/**
+
+Mission Control — five tabs: **Chat** (LibreChat against the MCP server, for follow-up questions),
+**Anomalies** (a live sweep from the investigation engine, with a date range), **Alerts** (what the
+watchman found unattended, each with a full diagnosis and an "Ask in chat" button), **LLM Cost**
+(Langfuse token attribution) and **System Health** (per-stage p50/p95 from ClickStack traces).
+
+Nothing on it is a mock — every number is read back out of ClickHouse on request.
 
 ## Demo Video
 
@@ -280,14 +289,16 @@ Stated rather than hidden, because the rubric rewards trustworthiness.
 - **`ch:verify` needs `duckdb`** installed to cross-check ClickHouse against the source parquet. It
   skips cleanly without it.
 
-## Before submitting — «FILL» checklist
+## Before submitting
 
-| Item               | Status                                                    |
-| ------------------ | --------------------------------------------------------- |
-| Team name          | «FILL» — the folder name in the submissions fork          |
-| Team members       | «FILL» names + GitHub handles                             |
-| Hosted demo link   | «FILL»                                                    |
-| Demo video (2–3 m) | «FILL» — not recorded yet                                 |
-| `pitch-deck.pdf`   | «FILL» — not built yet                                    |
-| Unseen bundle      | run `bun run diagnose` against the release, commit output |
-| `LICENSE`          | added (MIT)                                               |
+| Item               | Status                                                       |
+| ------------------ | ------------------------------------------------------------ |
+| Team name / folder | ✅ The Boring Team                                           |
+| Hosted demo        | ✅ http://161.97.122.198:4500/                               |
+| `LICENSE`          | ✅ MIT                                                       |
+| Source code        | ✅ this folder                                               |
+| Architecture       | ✅ above, in this README                                     |
+| Team members       | ✅ 4 listed (GitHub handles for 3 still to add)              |
+| Demo video (2–3 m) | ⬜ not recorded                                              |
+| `pitch-deck.pdf`   | ⬜ not built                                                 |
+| Unseen bundle      | ⬜ run `bun run diagnose` against the release, commit output |

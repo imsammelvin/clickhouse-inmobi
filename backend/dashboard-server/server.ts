@@ -83,7 +83,9 @@ async function apiAnomalies(url: URL): Promise<Response> {
      *
      * Memoized in the engine after the first resolve, so this is one cheap query per process.
      */
-    const bounds = await ensureDatasetBounds(<T>(sql: string): Promise<T[]> => select<T>(client, sql));
+    const bounds = await ensureDatasetBounds(<T>(sql: string): Promise<T[]> =>
+      select<T>(client, sql),
+    );
     const defaulted = !window.from && !window.to;
     if (defaulted) {
       window.from = shiftDays(bounds.end, DEFAULT_RANGE_DAYS - 1);
@@ -412,7 +414,18 @@ const handle = async (req: Request): Promise<Response> => {
 function main(): void {
   initObservability();
 
-  const server = Bun.serve({ port: PORT, fetch: handle });
+  /**
+   * `idleTimeout` is set because Bun's default is 10 seconds, and `/api/anomalies` can exceed it.
+   *
+   * Observed on the hosted demo: the sweep took ~12s there and Bun closed the socket before the
+   * handler produced anything. curl reports an empty reply, the browser shows a network error, and
+   * the panel renders "could not load" — a failure that looks like the engine is broken when it is
+   * actually still working and about to answer. The server stays up, so nothing in a log says why.
+   *
+   * 120s is well past any real sweep (locally the full 35-day range returns in under a second off the
+   * rollup) and only exists so a slow one degrades to slow rather than to a dropped connection.
+   */
+  const server = Bun.serve({ port: PORT, fetch: handle, idleTimeout: 120 });
   // Not optional. The batch span processor holds un-exported spans, and a dashboard killed with
   // Ctrl-C mid-demo would otherwise drop exactly the traces someone just asked to see.
   const shutdown = async (): Promise<void> => {
