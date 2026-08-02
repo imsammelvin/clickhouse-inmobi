@@ -55,19 +55,21 @@ function setHtmlPreservingFocus(el, html) {
 // nav
 // ---------------------------------------------------------------------------
 
-const views = ["chat", "anomalies", "rollup", "llm", "health"];
+const views = ["chat", "anomalies", "alerts", "rollup", "llm", "health"];
 const loaded = new Set();
 
+function activateView(v) {
+  document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b.dataset.view === v));
+  views.forEach((name) => $("#view-" + name).classList.toggle("active", name === v));
+  if (v === "alerts") renderAlerts();
+  if (!loaded.has(v)) {
+    loaded.add(v);
+    loadView(v);
+  }
+}
+
 document.querySelectorAll("nav button").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    const v = btn.dataset.view;
-    document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b === btn));
-    views.forEach((name) => $("#view-" + name).classList.toggle("active", name === v));
-    if (!loaded.has(v)) {
-      loaded.add(v);
-      loadView(v);
-    }
-  });
+  btn.addEventListener("click", () => activateView(btn.dataset.view));
 });
 
 function loadView(v) {
@@ -85,6 +87,7 @@ function loadView(v) {
 async function loadChat() {
   try {
     const cfg = await getJson("/api/config");
+    libreChatUrl = cfg.libreChatUrl;
     $("#chat-frame").src = cfg.libreChatUrl;
   } catch (e) {
     $("#chat-frame").outerHTML =
@@ -102,17 +105,66 @@ let anomaliesData = [];
 let anomaliesSort = { key: "worstSigma", dir: "desc" };
 let anomaliesFilter = { metric: "all", direction: "all", q: "" };
 
+/* The window the user has chosen. Empty means "all time", which is the sweep's own default. */
+let anomaliesRange = { from: "", to: "" };
+
 async function loadAnomalies() {
   const el = $("#anomalies-body");
+  el.className = "loading";
+  el.innerHTML = '<div class="spinner"></div>Loading…';
   try {
-    const data = await getJson("/api/anomalies");
+    const qs = new URLSearchParams();
+    if (anomaliesRange.from) qs.set("from", anomaliesRange.from);
+    if (anomaliesRange.to) qs.set("to", anomaliesRange.to);
+    const data = await getJson("/api/anomalies" + (qs.toString() ? `?${qs}` : ""));
     anomaliesData = data.windows || [];
+
+    /* Clamp the pickers to days that exist. A window outside the loaded data returns nothing, and an
+       empty panel reads as "all clear" rather than "you asked about days we do not have" — which is
+       the most misleading thing this screen could do. */
+    const b = data.dataBounds;
+    if (b) {
+      for (const id of ["#a-from", "#a-to"]) {
+        const input = $(id);
+        if (!input) continue;
+        input.min = b.from;
+        input.max = b.to;
+        if (!input.value) input.value = id === "#a-from" ? b.from : b.to;
+      }
+    }
+    const w = data.appliedWindow;
+    const note = $("#a-range-note");
+    if (note && w) {
+      note.textContent =
+        `${anomaliesData.length} window(s) over ${w.from} → ${w.to}` +
+        (anomaliesRange.from || anomaliesRange.to ? "" : " (all loaded data)");
+    }
     renderAnomalies();
   } catch (e) {
     el.className = "err";
     el.innerHTML = "⚠ Could not load anomalies: " + esc(e.message);
   }
 }
+
+$("#a-apply")?.addEventListener("click", () => {
+  const from = $("#a-from")?.value ?? "";
+  const to = $("#a-to")?.value ?? "";
+  if (from && to && from > to) {
+    $("#a-range-note").textContent = "From is after To — swap them.";
+    return;
+  }
+  anomaliesRange = { from, to };
+  loadAnomalies();
+});
+
+$("#a-reset")?.addEventListener("click", () => {
+  anomaliesRange = { from: "", to: "" };
+  const b = $("#a-from");
+  if (b) b.value = b.min || "";
+  const t = $("#a-to");
+  if (t) t.value = t.max || "";
+  loadAnomalies();
+});
 
 function anomalySeverity(x) {
   return x.worstPct >= 0 ? "rise" : "drop";
@@ -150,7 +202,15 @@ function renderAnomalies() {
   rows = rows.slice().sort((a, b) => {
     const va = key === "window" ? a.from : key === "sigma" ? Math.abs(a.worstSigma) : a[key];
     const vb = key === "window" ? b.from : key === "sigma" ? Math.abs(b.worstSigma) : b[key];
-    const cmp = typeof va === "string" ? va.localeCompare(vb) : va - vb;
+    let cmp = typeof va === "string" ? va.localeCompare(vb) : va - vb;
+
+    /* Ties need a deterministic order or the sort looks broken.
+       Dozens of windows share a start date, so sorting by date alone reshuffles them on every render
+       and it reads as if the click did nothing. Break by end date, then by severity, so equal dates
+       come out in a stable and actually useful order. */
+    if (cmp === 0 && key === "window") cmp = a.to.localeCompare(b.to);
+    if (cmp === 0) cmp = Math.abs(b.worstSigma) - Math.abs(a.worstSigma);
+    if (cmp === 0) cmp = a.metric.localeCompare(b.metric);
     return dir === "asc" ? cmp : -cmp;
   });
 
@@ -625,3 +685,203 @@ function renderHealth() {
     });
   });
 }
+
+
+/* ---------------------------------------------------------------------------------------------
+ * Alerts — the watchman's findings, as a page rather than a banner.
+ *
+ * This began as a strip above the nav and that was the wrong shape: it pushed the entire app down,
+ * occupied permanent vertical space for something read once a day, and had nowhere to grow. A tab
+ * costs nothing when empty and has room for detail when it is not.
+ *
+ * The badge is what keeps it discoverable — it carries the unseen count, so the page still announces
+ * itself without stealing the layout. Opening the tab is what marks them read, which is the natural
+ * gesture; nothing needs dismissing.
+ * ------------------------------------------------------------------------------------------------ */
+const ALERTS_SEEN_KEY = "watchman.seenAt";
+
+/* Set once the config lands; the ask button needs it to rebuild the iframe URL. */
+let libreChatUrl = "";
+
+/**
+ * Hand an alert to the chat and ask it, in one click.
+ *
+ * The chat is a cross-origin iframe, so nothing here can reach into its input. LibreChat reads
+ * `prompt` and `submit` from its own URL, which is the supported way in.
+ *
+ * It pre-fills and stops there. `submit=true` is supported and was tried, and it reads badly: the tab
+ * changes and an answer is already generating before the reader has seen the question, so the moment
+ * of arriving somewhere new is spent watching something they did not visibly ask for. Landing with the
+ * question sitting in the box, ready to send, is calmer and costs one keystroke.
+ */
+function askInChat(question) {
+  if (!libreChatUrl) return;
+  /* /c/new, not / — LibreChat's root route is `<Navigate to="/c/new" replace>`, and React Router's
+     Navigate drops the query string, so `/?prompt=…` arrived as a bare reload with the question gone.
+     Going straight to the destination route skips the redirect and the parameter survives. */
+  const url = new URL("/c/new", libreChatUrl);
+  url.searchParams.set("prompt", question);
+  const frame = $("#chat-frame");
+  if (frame) frame.src = url.toString();
+  activateView("chat");
+}
+
+/* The question an alert should open with: metric, segment and day, so the engine can scope it
+   without a follow-up. Built from the alert's own fields rather than the diagnosis, so it still
+   works when the investigation did not complete. */
+function alertQuestion(n) {
+  const dir = n.pct < 0 ? "drop" : "rise";
+  return `Why did ${n.metric} ${dir} on ${n.day} for ${n.where}? Walk me through the cause and what was ruled out.`;
+}
+
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-ask]");
+  if (btn) askInChat(btn.getAttribute("data-ask"));
+});
+
+let alertItems = [];
+
+/* The log accumulates across watch lifetimes, so re-creating a watch replays incidents it already
+   reported — the same fill_rate drop appeared twice in the panel. One row per (metric, segment, day):
+   a recurrence on a NEW day is news, the same day arriving twice is bookkeeping. */
+function dedupeAlerts(items) {
+  const seen = new Set();
+  return items.filter((n) => {
+    const key = `${n.metric}|${n.where}|${n.day}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function unseenCount() {
+  const seenAt = localStorage.getItem(ALERTS_SEEN_KEY) ?? "";
+  return alertItems.filter((n) => n.at > seenAt).length;
+}
+
+function renderAlertsBadge() {
+  const badge = $("#alerts-badge");
+  if (!badge) return;
+  const n = unseenCount();
+  badge.textContent = String(n);
+  badge.hidden = n === 0;
+}
+
+function renderAlerts() {
+  const el = $("#alerts-body");
+  if (!el) return;
+  el.classList.remove("loading", "err");
+
+  if (alertItems.length === 0) {
+    el.innerHTML =
+      '<div class="card empty">Nothing yet. Ask in chat about an incident and say yes when it ' +
+      "offers to watch it — anything it catches later shows up here.</div>";
+    return;
+  }
+
+  const seenAt = localStorage.getItem(ALERTS_SEEN_KEY) ?? "";
+  /* Cards rather than table rows. The numbers alone ("fill_rate -45%") only restate what fired; a
+     reader needs the verdict, whether it is still happening, and what was ruled out before any of the
+     figures mean anything. Everything below already exists in the investigation — none of it is
+     recomputed here, and none of it is invented. */
+  el.innerHTML = alertItems
+    .map((n) => {
+      const fresh = n.at > seenAt;
+      const dir = n.pct < 0 ? "drop" : "rise";
+      const d = n.diagnosis;
+      const usd = (v) => `${v < 0 ? "-" : ""}$${Math.abs(v).toFixed(2)}`;
+      const live = d && d.status === "ongoing";
+
+      const facts = [];
+      if (d && d.sharePct !== null)
+        facts.push(`<span><b>${d.sharePct.toFixed(1)}%</b> of traffic</span>`);
+      if (d && d.deltaPp !== null)
+        facts.push(`<span><b>${d.deltaPp >= 0 ? "+" : ""}${d.deltaPp.toFixed(1)}</b> points</span>`);
+      if (d && d.sigma !== null)
+        facts.push(`<span><b>${Math.abs(d.sigma).toFixed(0)}σ</b> from normal</span>`);
+      if (d && d.impactUsdPerDay !== null)
+        facts.push(`<span><b>${usd(d.impactUsdPerDay)}</b>/day</span>`);
+      if (d && d.daysRunning !== null)
+        facts.push(`<span>ran <b>${d.daysRunning}</b> day${d.daysRunning === 1 ? "" : "s"}</span>`);
+      if (d && d.lostSoFarUsd !== null)
+        facts.push(`<span><b>${usd(d.lostSoFarUsd)}</b> total</span>`);
+
+      return (
+        `<div class="card alert${fresh ? " fresh" : ""}">` +
+        `<div class="alert-top">` +
+        `<span class="alert-what"><b>${esc(n.metric)}</b> ${dir === "drop" ? "fell" : "rose"} ` +
+        `<span class="${dir}">${Math.abs(n.pct).toFixed(0)}%</span> on <b>${esc(n.where)}</b></span>` +
+        `<span class="alert-tags">` +
+        (d ? `<em class="pri ${esc(d.priority)}">${esc(d.priority.replace(/_/g, " "))}</em>` : "") +
+        (fresh ? '<em class="new">new</em>' : "") +
+        `</span></div>` +
+
+        `<div class="alert-meta">${esc(n.day)} &middot; ~${Number(n.requestsPerDay).toLocaleString()} requests/day` +
+        ` &middot; caught ${esc(new Date(n.at).toLocaleString())}</div>` +
+
+        (d
+          ? `<div class="alert-verdict ${live ? "live" : ""}">` +
+              `${live ? "🔴" : "🟠"} <b>${esc(d.channelLabel ?? d.channel)}</b> — ${esc(d.owner)}</div>` +
+
+            (facts.length ? `<div class="alert-facts">${facts.join("")}</div>` : "") +
+
+            `<div class="alert-because">${esc(d.because)}</div>` +
+
+            `<div class="alert-status"><b>${live ? "Still happening." : "Recovered."}</b> ` +
+              `${esc(d.statusDetail)}</div>` +
+
+            (d.clearedCount > 0
+              ? `<div class="alert-cleared">✅ <b>${d.clearedCount}</b> other slice(s) looked implicated and were checked and cleared` +
+                (d.clearedExamples && d.clearedExamples.length
+                  ? ` — ${d.clearedExamples.map(esc).join(", ")}${d.clearedCount > d.clearedExamples.length ? ", and more" : ""}`
+                  : "") +
+                `. They only moved because the real cause sits inside them.</div>`
+              : "") +
+
+            (d.nextQuestion
+              ? `<div class="alert-next">Next: <code>${esc(d.nextQuestion)}</code></div>`
+              : "") +
+            `<div class="alert-actions">` +
+              `<button type="button" class="ask" data-ask="${esc(alertQuestion(n))}">💬 Ask in chat</button>` +
+            `</div>`
+          : `<div class="alert-because">Detected by the sweep; the full investigation did not complete, so no cause is stated here.</div>` +
+            `<div class="alert-actions"><button type="button" class="ask" data-ask="${esc(alertQuestion(n))}">💬 Ask in chat</button></div>`) +
+        `</div>`
+      );
+    })
+    .join("");
+
+  // Opening the tab is the read receipt. Marked AFTER rendering so the "new" markers are visible on
+  // the visit that earned them, and gone on the next.
+  const newest = alertItems.map((n) => n.at).sort().pop();
+  if (newest) localStorage.setItem(ALERTS_SEEN_KEY, newest);
+  renderAlertsBadge();
+}
+
+let alertsFirstLoad = true;
+
+async function loadAlerts() {
+  try {
+    const data = await getJson("/api/watch");
+    alertItems = dedupeAlerts(data.notifications ?? []);
+  } catch {
+    alertItems = [];
+  }
+
+  /* Open on Alerts when something is waiting, otherwise leave Chat as it was.
+     ONLY on the first load. Switching tabs on a later poll would yank someone out of a chat mid
+     sentence because a cron fired — an alert earns the badge, it does not earn the screen. */
+  if (alertsFirstLoad) {
+    alertsFirstLoad = false;
+    if (unseenCount() > 0) {
+      activateView("alerts");
+      return; // activateView renders and marks read
+    }
+  }
+
+  if ($("#view-alerts")?.classList.contains("active")) renderAlerts();
+  else renderAlertsBadge();
+}
+
+loadAlerts();
+setInterval(loadAlerts, 60_000);

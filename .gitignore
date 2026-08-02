@@ -39,3 +39,6 @@ backend/clickhouse/.chunks/
 # An exhibit worth keeping is copied into pitch/example-report/ and committed there deliberately.
 backend/mcp/traces/
 backend/mcp/reports/
+
+# Watch subscriptions and the notification log — runtime state, per install.
+backend/mcp/watches/

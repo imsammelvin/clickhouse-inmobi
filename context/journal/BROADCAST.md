@@ -776,6 +776,30 @@ Langfuse env vars already set, same as everything else).
 
 **Commits:** none yet (working tree only). Not pushed (loges' own rule: only loges pushes their own).
 
+### 2026-08-02 — sam — watchman email: added `nodemailer`, reusing LibreChat's EMAIL_* vars
+
+**Lockfile touched, announcing as § 2 requires.** `bun add nodemailer @types/nodemailer` — one
+dependency, for `bun run watch` to actually mail a notification. It is what LibreChat itself uses
+(`api/package.json` has nodemailer ^9), so it is not a new class of thing in this stack.
+
+**No new configuration.** Delivery reads the SAME variables LibreChat already defines — `EMAIL_HOST`,
+`EMAIL_PORT`, `EMAIL_USERNAME`, `EMAIL_PASSWORD`, `EMAIL_FROM`, `EMAIL_ENCRYPTION`. Configure SMTP once
+and both the chat app and the watchman use it. A second set of names would eventually disagree.
+
+**Degrades rather than fails.** `nodemailer` is imported dynamically and the config is checked first,
+so with SMTP unset the watchman still runs and appends to
+`backend/mcp/watches/notifications.jsonl` — and the runner PRINTS which sink it used. A cron that
+silently stops mailing is indistinguishable from a quiet week, which would defeat the point of the
+feature. A send failure is caught too: the finding is already logged, and a cron exiting non-zero on a
+transient SMTP error is a cron someone mutes.
+
+**Verify without waiting for an incident:** `bun run watch -- --test-email you@example.com`.
+
+**What is tested and what is not.** Tested: the unconfigured path, and that a configured-but-wrong host
+reaches a real connection error (`getaddrinfo ENOTFOUND`) rather than a config error — so detection,
+transport construction and the send attempt all work. NOT tested: a successful delivery, because
+`EMAIL_HOST`/`USERNAME`/`PASSWORD` are empty in this environment. Whoever fills them in should run
+`--test-email` before trusting it.
 ### 2026-08-02 05:55 — mohan — full OpenTelemetry span coverage, and a real `bun run build`
 
 **Crosses lanes: `backend/` (Lane A, loges) and `backend/mcp/` + `backend/clickhouse/` (Lane B,

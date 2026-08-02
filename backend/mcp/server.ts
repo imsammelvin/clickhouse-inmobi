@@ -181,6 +181,12 @@ function runHttp(port: number): void {
       }
 
       const { session, id } = sessionFor(req.headers.get("mcp-session-id"));
+      // Re-read per request: LibreChat re-resolves these headers before each tool call, so a session
+      // that outlives a turn still attributes each call to whoever actually made it.
+      const hUser = req.headers.get("x-user-id");
+      const hMail = req.headers.get("x-user-email");
+      if (hUser) session.userId = hUser;
+      if (hMail) session.userEmail = hMail;
 
       // The propagator and context manager are already wired up in initObservability() for exactly
       // this -- but nothing extracted an inbound `traceparent` until now, so every mcp.tool.* span

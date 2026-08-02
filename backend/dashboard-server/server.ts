@@ -18,6 +18,8 @@ import { makeClient, makeTelemetryClient, select } from "../clickhouse/client";
 import { Session } from "../mcp/trace";
 import { callTool } from "../mcp/tools";
 import { DEFAULT_METRICS } from "../engine/scan";
+import { readFileSync, existsSync } from "node:fs";
+import { channelLabel, listWatches, renderNotification, type Notification } from "../mcp/watch";
 import {
   initObservability,
   log,
@@ -42,16 +44,28 @@ const errorJson = (error: unknown, status = 500): Response =>
 // /api/anomalies -- what the engine actually found, live off find_incidents.
 // -------------------------------------------------------------------------------------------------
 
-async function apiAnomalies(): Promise<Response> {
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+async function apiAnomalies(url: URL): Promise<Response> {
   const client = makeClient();
   try {
     const session = new Session(client, `dash${Date.now() % 100000}`);
+    // Validated here rather than passed through: `find_incidents` rejects a bad window with an error,
+    // and a date typo should narrow the sweep, not blank the panel.
+    const from = url.searchParams.get("from");
+    const to = url.searchParams.get("to");
+    const window: Record<string, string> = {};
+    if (from && ISO_DATE.test(from)) window.from = from;
+    if (to && ISO_DATE.test(to)) window.to = to;
+
     const { isError, text } = await callTool(session, "find_incidents", {
       metrics: DEFAULT_METRICS,
       limit: 50,
+      ...window,
     });
     if (isError) throw new Error(text);
     const payload = JSON.parse(text) as {
+      reportedWindow?: { from: string; to: string };
       windows: Array<{
         metric: string;
         from: string;
@@ -63,7 +77,15 @@ async function apiAnomalies(): Promise<Response> {
         correlatedSegments: number;
       }>;
     };
-    return json({ measuredAt: new Date().toISOString(), windows: payload.windows });
+    // The dataset bounds come back so the picker can clamp itself to days that exist — asking for a
+    // window outside the loaded data is the one way to get an empty panel that looks like "all clear".
+    const bounds = (payload as { reportedWindow?: { from: string; to: string } }).reportedWindow;
+    return json({
+      measuredAt: new Date().toISOString(),
+      appliedWindow: { from: window.from ?? bounds?.from ?? null, to: window.to ?? bounds?.to ?? null },
+      dataBounds: bounds ?? null,
+      windows: payload.windows,
+    });
   } catch (error) {
     return errorJson(error);
   } finally {
@@ -201,6 +223,57 @@ async function apiSystemHealth(): Promise<Response> {
 }
 
 // -------------------------------------------------------------------------------------------------
+// /api/watch -- what the watchman found while nobody was looking.
+//
+// The point of the watchman is that it runs when you are not here, so its output has to survive until
+// you come back. The cron appends every firing to a JSONL log; this reads it. `since` lets the browser
+// ask only for what it has not shown yet, which is what makes "while you were away" mean anything
+// rather than replaying the same three incidents on every page load.
+// -------------------------------------------------------------------------------------------------
+
+const WATCH_LOG = join(import.meta.dir, "../mcp/watches/notifications.jsonl");
+
+function apiWatch(url: URL): Response {
+  const since = url.searchParams.get("since");
+  if (!existsSync(WATCH_LOG)) {
+    return json({ notifications: [], watching: listWatches().length, log: false });
+  }
+
+  const events = readFileSync(WATCH_LOG, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .flatMap((line) => {
+      try {
+        return [JSON.parse(line) as Notification & { at: string }];
+      } catch {
+        // A half-written final line is normal when the cron is mid-append; skip it rather than 500.
+        return [];
+      }
+    })
+    .filter((e) => !since || e.at > since)
+    .reverse()
+    .slice(0, 25);
+
+  return json({
+    watching: listWatches().length,
+    log: true,
+    notifications: events.map((e) => ({
+      at: e.at,
+      day: e.day,
+      metric: e.watch.metric,
+      where: e.watch.dimension ? `${e.watch.dimension} = '${e.watch.value}'` : "platform-wide",
+      pct: e.pct,
+      requestsPerDay: e.requestsPerDay,
+      // The same words the email would have carried, so the two channels cannot drift apart.
+      text: renderNotification(e),
+      diagnosis: e.diagnosis
+        ? { ...e.diagnosis, channelLabel: channelLabel(e.diagnosis.channel) }
+        : null,
+    })),
+  });
+}
+
+// -------------------------------------------------------------------------------------------------
 
 async function serveStatic(pathname: string): Promise<Response | null> {
   const rel = pathname === "/" ? "/index.html" : pathname;
@@ -235,11 +308,18 @@ const API_ROUTES = new Set([
 const routeLabel = (pathname: string): string =>
   API_ROUTES.has(pathname) ? pathname : "/static/*";
 
-async function dispatch(pathname: string): Promise<Response> {
-  if (pathname === "/api/anomalies") return apiAnomalies();
+/**
+ * Takes the whole URL, not just the pathname: `/api/anomalies` reads a from/to date range and
+ * `/api/watch` reads a `since` watermark, and neither can be expressed by a path. The span label is
+ * still built from the pathname alone so query strings never become high-cardinality span names.
+ */
+async function dispatch(url: URL): Promise<Response> {
+  const pathname = url.pathname;
+  if (pathname === "/api/anomalies") return apiAnomalies(url);
   if (pathname === "/api/rollup-comparison") return apiRollupComparison();
   if (pathname === "/api/llm-cost") return apiLlmCost();
   if (pathname === "/api/system-health") return apiSystemHealth();
+  if (pathname === "/api/watch") return apiWatch(url);
   if (pathname === "/api/config") return json({ libreChatUrl: LIBRECHAT_URL });
 
   const staticRes = await serveStatic(pathname);
@@ -270,7 +350,7 @@ const handle = async (req: Request): Promise<Response> => {
         "user_agent.original": req.headers.get("user-agent") ?? "",
       },
       async (span) => {
-        const response = await dispatch(url.pathname);
+        const response = await dispatch(url);
         span.setAttribute("http.response.status_code", response.status);
         // 4xx is the caller asking for something that isn't there; only 5xx is our failure.
         if (response.status >= 500) {
@@ -297,7 +377,6 @@ function main(): void {
   initObservability();
 
   const server = Bun.serve({ port: PORT, fetch: handle });
-
   // Not optional. The batch span processor holds un-exported spans, and a dashboard killed with
   // Ctrl-C mid-demo would otherwise drop exactly the traces someone just asked to see.
   const shutdown = async (): Promise<void> => {

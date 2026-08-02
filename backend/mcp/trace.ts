@@ -78,6 +78,17 @@ export class Session {
   /** Memoized `describe_data` result — see `getOverview()`. */
   private overview?: Promise<unknown>;
 
+  /**
+   * Who is asking, when LibreChat is configured to say.
+   *
+   * It substitutes `{{LIBRECHAT_USER_ID}}` / `{{LIBRECHAT_USER_EMAIL}}` into MCP request headers and
+   * re-resolves them before every tool call, so identity arrives per request rather than per process.
+   * Defaults to "anonymous" so everything still works when the headers are not configured — a watch
+   * simply is not tied to an account, and the tool says so rather than pretending it is.
+   */
+  userId = "anonymous";
+  userEmail: string | undefined;
+
   constructor(client?: ClickHouseClient, runId?: string) {
     this.client = client ?? makeClient();
     this.runId = runId ?? randomUUID().slice(0, 8);
