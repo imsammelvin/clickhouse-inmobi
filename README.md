@@ -56,7 +56,7 @@ Nothing on it is a mock — every number is read back out of ClickHouse or Langf
 
 ## Demo Video
 
-«FILL» — 2–3 minutes.
+Link: https://drive.google.com/drive/folders/1T0uHlCDiszv5Iy5FFigzzhwIhb5eEvSm?usp=sharing
 
 ## Architecture
 
@@ -315,17 +315,3 @@ mcpServers:
 
 Try: _"Why did fill rate drop between 23 and 25 June?"_ · _"Was the revenue dip a volume problem or a
 price problem?"_ · _"Did anything break in the second half of June?"_
-
-## Before submitting
-
-| Item                | Status                                                             |
-| ------------------- | ------------------------------------------------------------------- |
-| Team name / folder  | ✅ The Boring Team                                                  |
-| Hosted demo         | ✅ http://161.97.122.198:4500/ (verified reachable)                 |
-| `LICENSE`           | ✅ MIT                                                              |
-| Source code         | ✅ this folder                                                      |
-| Architecture        | ✅ above, in this README, with a diagram                            |
-| Team members        | ✅ 4 listed, all with GitHub handles                                |
-| Demo video (2–3 m)  | ⬜ recording in progress                                            |
-| `pitch-deck.pdf`    | ⬜ building now                                                     |
-| Unseen bundle       | ⬜ run `bun run diagnose` against the release once it drops, commit output |
