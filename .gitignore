@@ -42,3 +42,11 @@ backend/mcp/reports/
 
 # Watch subscriptions and the notification log — runtime state, per install.
 backend/mcp/watches/
+
+# LibreChat itself is a standard install of the upstream project (see
+# frontend/LibreChat/README.md there for setup), not something we authored — vendoring its full
+# source (3,700+ files) bloated every diff and PR against this repo. What we actually wrote is the
+# wiring: librechat.yaml (custom endpoint + MCP server config) and the .env values, both kept.
+frontend/LibreChat/*
+!frontend/LibreChat/librechat.yaml
+!frontend/LibreChat/.env.example
