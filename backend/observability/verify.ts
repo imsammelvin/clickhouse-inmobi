@@ -47,6 +47,16 @@ const check = (name: string, ok: boolean, detail: string): void => {
   if (!ok) failures++;
 };
 
+/**
+ * Deliberately uninstrumented, unlike every other entry point in this repo.
+ *
+ * This script's job is to read `otel_traces` and assert things about what the *application* wrote —
+ * including "the latest trace has exactly one root". Calling `initObservability()` here would make
+ * this process write spans into the very table it is inspecting, under the same service name, so the
+ * latest trace would be the verifier's own and the check would be grading itself. An observability
+ * check that observes itself is not a check. `log` still prints to the console; with no provider
+ * registered the OTLP half is a no-op, which is the intent.
+ */
 const main = async (): Promise<void> => {
   const client = makeTelemetryClient();
 
