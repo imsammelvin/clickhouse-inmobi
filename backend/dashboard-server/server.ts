@@ -18,6 +18,7 @@ import { makeClient, makeTelemetryClient, select } from "../clickhouse/client";
 import { Session } from "../mcp/trace";
 import { callTool } from "../mcp/tools";
 import { DEFAULT_METRICS } from "../engine/scan";
+import { ensureDatasetBounds } from "../engine/baseline";
 import { readFileSync, existsSync } from "node:fs";
 import { channelLabel, listWatches, renderNotification, type Notification } from "../mcp/watch";
 import {
@@ -46,6 +47,16 @@ const errorJson = (error: unknown, status = 500): Response =>
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
+/** How many days the panel shows when the caller does not ask for a window. */
+const DEFAULT_RANGE_DAYS = 7;
+
+/** `date` shifted back `days`, in ISO. Plain UTC arithmetic — these are calendar days, not instants. */
+function shiftDays(date: string, days: number): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
 async function apiAnomalies(url: URL): Promise<Response> {
   const client = makeClient();
   try {
@@ -57,6 +68,27 @@ async function apiAnomalies(url: URL): Promise<Response> {
     const window: Record<string, string> = {};
     if (from && ISO_DATE.test(from)) window.from = from;
     if (to && ISO_DATE.test(to)) window.to = to;
+
+    /**
+     * True dataset bounds, read before the sweep rather than inferred from it.
+     *
+     * They are needed for two separate things and only one of them used to work. `find_incidents`
+     * reports back the window it swept, so when a window was requested the old code handed that
+     * straight to the picker as its min/max — narrowing the control to the range already selected
+     * and leaving no way to widen it again without a reload.
+     *
+     * They also supply the default window. "Last 7 days" has to mean the last 7 days OF THE DATA:
+     * this dataset ends well before today, so anchoring to the wall clock would open the page on an
+     * empty range and read as "nothing wrong" — the exact failure the clamp below exists to prevent.
+     *
+     * Memoized in the engine after the first resolve, so this is one cheap query per process.
+     */
+    const bounds = await ensureDatasetBounds(<T>(sql: string): Promise<T[]> => select<T>(client, sql));
+    const defaulted = !window.from && !window.to;
+    if (defaulted) {
+      window.from = shiftDays(bounds.end, DEFAULT_RANGE_DAYS - 1);
+      window.to = bounds.end;
+    }
 
     const { isError, text } = await callTool(session, "find_incidents", {
       metrics: DEFAULT_METRICS,
@@ -77,13 +109,16 @@ async function apiAnomalies(url: URL): Promise<Response> {
         correlatedSegments: number;
       }>;
     };
-    // The dataset bounds come back so the picker can clamp itself to days that exist — asking for a
-    // window outside the loaded data is the one way to get an empty panel that looks like "all clear".
-    const bounds = (payload as { reportedWindow?: { from: string; to: string } }).reportedWindow;
+    // `dataBounds` is what the picker clamps to, so it is the full dataset — never `reportedWindow`,
+    // which is only the slice just swept. Asking for a window outside the loaded data is the one way
+    // to get an empty panel that looks like "all clear".
     return json({
       measuredAt: new Date().toISOString(),
-      appliedWindow: { from: window.from ?? bounds?.from ?? null, to: window.to ?? bounds?.to ?? null },
-      dataBounds: bounds ?? null,
+      appliedWindow: { from: window.from ?? null, to: window.to ?? null },
+      dataBounds: { from: bounds.start, to: bounds.end },
+      // Lets the client say "showing the last 7 days" instead of implying the user chose it.
+      windowIsDefault: defaulted,
+      defaultRangeDays: DEFAULT_RANGE_DAYS,
       windows: payload.windows,
     });
   } catch (error) {
