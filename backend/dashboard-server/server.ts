@@ -14,7 +14,6 @@
  */
 import { join } from "node:path";
 import { SpanKind, SpanStatusCode, context, propagation } from "@opentelemetry/api";
-import { Ledger } from "../engine/ledger";
 import { makeClient, makeTelemetryClient, select } from "../clickhouse/client";
 import { Session } from "../mcp/trace";
 import { callTool } from "../mcp/tools";
