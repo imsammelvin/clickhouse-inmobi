@@ -157,9 +157,13 @@ All three, and none of them decoratively.
   access.
 - **LibreChat** — the chat client, talking to the MCP server over streamable HTTP. Identity flows
   through as `{{LIBRECHAT_USER_ID}}` / `{{LIBRECHAT_USER_EMAIL}}` headers, so a watch belongs to a
-  person. The Alerts tab deep-links into a pre-filled chat for follow-ups. Config committed at
-  [`frontend/LibreChat/librechat.yaml`](frontend/LibreChat/librechat.yaml) (keys are environment
-  variable references, nothing literal to redact).
+  person. The Alerts tab deep-links into a pre-filled chat for follow-ups. LibreChat itself is a
+  standard install of the upstream project, not something we wrote — what we authored is the wiring,
+  committed at [`frontend/LibreChat/librechat.yaml`](frontend/LibreChat/librechat.yaml) (keys are
+  environment variable references, nothing literal to redact). The rest of LibreChat's own source is
+  intentionally not vendored into this repo (see `.gitignore`) — it's the same public project anyone
+  can `git clone`, and shipping its ~3,700 files here just bloated every diff without adding anything
+  ours.
 
 ### LLM provider
 
