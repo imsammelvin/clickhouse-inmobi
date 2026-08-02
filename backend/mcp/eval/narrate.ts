@@ -25,7 +25,12 @@ import { investigate } from "../../engine/orchestrate";
 import { checkGrounding } from "../../engine/grounding";
 import { INSTRUCTIONS } from "../protocol";
 import type { Investigation } from "../../engine/types";
-import { initObservability, shutdownObservability } from "../../../shared/utils/telemetryUtils";
+import { SpanKind, type Span } from "@opentelemetry/api";
+import {
+  initObservability,
+  shutdownObservability,
+  withSpan,
+} from "../../../shared/utils/telemetryUtils";
 
 const say = (s = ""): void => {
   process.stdout.write(`${s}\n`);
@@ -118,25 +123,59 @@ interface Narration {
   ms: number;
 }
 
+/**
+ * The one genuine LLM call in this repo, and the only span carrying `gen_ai.*` attributes.
+ *
+ * The naming is not cosmetic: `utils/telemetryUtils.ts` forwards every span to Langfuse with
+ * `shouldExportSpan: () => true` precisely because nothing here looked GenAI-shaped. This one does,
+ * so it lands in Langfuse as a generation with its model and token counts rather than as an
+ * anonymous span, which is what makes the cost panel on the dashboard add up to something.
+ */
 async function narrate(system: string, user: string): Promise<Narration> {
-  const started = Date.now();
-  const res = await fetch(`${BASE_URL}/chat/completions`, {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${KEY}` },
-    body: JSON.stringify({
-      model: MODEL,
-      temperature: 0,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-    }),
-  });
-  if (!res.ok) {
-    throw new Error(`${MODEL} returned ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  }
-  const body = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-  return { text: body.choices?.[0]?.message?.content ?? "", ms: Date.now() - started };
+  return withSpan(
+    `chat ${MODEL}`,
+    {
+      "gen_ai.operation.name": "chat",
+      "gen_ai.request.model": MODEL,
+      "gen_ai.request.temperature": 0,
+      "server.address": new URL(BASE_URL).host,
+    },
+    async (span) => {
+      const started = Date.now();
+      const res = await fetch(`${BASE_URL}/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${KEY}` },
+        body: JSON.stringify({
+          model: MODEL,
+          temperature: 0,
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: user },
+          ],
+        }),
+      });
+      span.setAttribute("http.response.status_code", res.status);
+      if (!res.ok) {
+        throw new Error(`${MODEL} returned ${res.status}: ${(await res.text()).slice(0, 200)}`);
+      }
+      const body = (await res.json()) as {
+        choices?: Array<{ message?: { content?: string } }>;
+        model?: string;
+        usage?: { prompt_tokens?: number; completion_tokens?: number };
+      };
+      // The served model can differ from the requested one (aliases, provider routing), and cost is
+      // computed off what actually ran.
+      if (body.model) span.setAttribute("gen_ai.response.model", body.model);
+      if (body.usage?.prompt_tokens !== undefined) {
+        span.setAttribute("gen_ai.usage.input_tokens", body.usage.prompt_tokens);
+      }
+      if (body.usage?.completion_tokens !== undefined) {
+        span.setAttribute("gen_ai.usage.output_tokens", body.usage.completion_tokens);
+      }
+      return { text: body.choices?.[0]?.message?.content ?? "", ms: Date.now() - started };
+    },
+    SpanKind.CLIENT,
+  );
 }
 
 /**
@@ -178,11 +217,30 @@ async function main(): Promise<void> {
   }
 
   initObservability();
+  try {
+    const failures = await withSpan(
+      "narrate.run",
+      { "gen_ai.request.model": MODEL, "app.cases": CASES.length },
+      runNarrate,
+    );
+    await shutdownObservability();
+    process.exit(failures === 0 ? 0 : 1);
+  } catch (error) {
+    await shutdownObservability();
+    throw error;
+  }
+}
+
+/** Returns the failure count; `main` owns the exit so the span can end and flush first. */
+async function runNarrate(span: Span): Promise<number> {
   let failures = 0;
   say(`\nNARRATE — ${MODEL} via ${BASE_URL}, reading the same contract the MCP server serves`);
   say(`  every numeral in its prose must resolve to a recorded evidence row\n`);
 
   for (const c of CASES) {
+    // No per-case span: `investigate` already opens `investigation` and `narrate` opens
+    // `chat <model>`, both under this run's root, and both already carry enough attributes to tell
+    // the cases apart. A wrapper span here would only add a level.
     const ledger = new Ledger();
     let inv: Investigation;
     try {
@@ -271,8 +329,8 @@ async function main(): Promise<void> {
           `gate and not a review.`,
   );
   say(``);
-  await shutdownObservability();
-  process.exit(failures === 0 ? 0 : 1);
+  span.setAttribute("app.failures", failures);
+  return failures;
 }
 
 if (import.meta.main) {

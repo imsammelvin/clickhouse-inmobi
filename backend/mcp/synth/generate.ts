@@ -24,6 +24,12 @@ import { ROLLUP_TABLES, rollupStatements } from "../../clickhouse/rollup";
 import { splitStatements } from "../../../shared/utils/sql.utils";
 import { DIMS, PLANTED, SHAPE, dateOf, specFingerprint } from "./spec";
 import { resolveTargetDatabase, scratchClient, serverClient } from "./target";
+import type { Span } from "@opentelemetry/api";
+import {
+  initObservability,
+  shutdownObservability,
+  withSpan,
+} from "../../../shared/utils/telemetryUtils";
 
 const flag = (name: string): boolean => process.argv.includes(`--${name}`);
 const arg = (name: string): string | undefined => {
@@ -260,9 +266,27 @@ FROM (
 }
 
 async function main(): Promise<void> {
+  initObservability();
+  try {
+    await withSpan(
+      "synth.generate",
+      {
+        "app.synth.days": SHAPE.days,
+        "app.synth.seed": SHAPE.seed,
+        "app.synth.planted": PLANTED.length,
+      },
+      runGenerate,
+    );
+  } finally {
+    await shutdownObservability();
+  }
+}
+
+async function runGenerate(span: Span): Promise<void> {
   const db = resolveTargetDatabase();
   const dryRun = flag("dry-run");
   const reset = flag("reset");
+  span.setAttributes({ "app.database": db, "app.dry_run": dryRun, "app.reset": reset });
 
   /**
    * schema.sql plus the generated rollup DDL, in that order — the same pair `bun run ch:schema`

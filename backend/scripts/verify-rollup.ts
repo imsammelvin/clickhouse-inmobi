@@ -45,7 +45,13 @@ import { scanSegmentsRollup } from "../mcp/sweep";
 import { scanSegments } from "../engine/segments";
 import { DEFAULT_METRICS } from "../engine/scan";
 import { fmt, runScript, secondsSince } from "../../shared/utils/common.utils";
-import { initObservability, log, shutdownObservability } from "../../shared/utils/telemetryUtils";
+import type { Span } from "@opentelemetry/api";
+import {
+  initObservability,
+  log,
+  shutdownObservability,
+  withSpan,
+} from "../../shared/utils/telemetryUtils";
 
 /** A comparable, provenance-free extract of a tool result. */
 interface Snapshot {
@@ -552,6 +558,14 @@ const compare = (probe: string, raw: Snapshot, roll: Snapshot): Failure[] => {
 
 const main = async (): Promise<void> => {
   initObservability();
+  try {
+    await withSpan("verify_rollup.run", {}, runVerifyRollup);
+  } finally {
+    await shutdownObservability();
+  }
+};
+
+const runVerifyRollup = async (span: Span): Promise<void> => {
   const client = makeClient();
   const startedAt = performance.now();
   const failures: Failure[] = [];
@@ -640,6 +654,12 @@ const main = async (): Promise<void> => {
         `${health2?.dailyRows ?? 0} daily rollup rows\n`,
     );
 
+    span.setAttributes({
+      "app.probes": probes.length,
+      "app.probes.rollup_served": servedByRollup,
+      "app.failures": failures.length,
+    });
+
     if (failures.length > 0) {
       for (const f of failures.slice(0, 60)) log.info(`  FAIL ${f.probe}  ${f.detail}`);
       if (failures.length > 60) log.info(`  ... ${failures.length - 60} more`);
@@ -652,7 +672,6 @@ const main = async (): Promise<void> => {
     log.info(`PASS — rollup and raw agree on every probe. ${secondsSince(startedAt)}`);
   } finally {
     await client.close();
-    await shutdownObservability();
   }
 };
 

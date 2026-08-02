@@ -30,7 +30,12 @@ import { investigate } from "../../engine/orchestrate";
 import { disableRollup, resetRollupReady, rollupHealth } from "../../clickhouse/rollup";
 import { ensureRollupReady } from "../../clickhouse/rollup";
 import type { Evidence, Investigation } from "../../engine/types";
-import { initObservability, shutdownObservability } from "../../../shared/utils/telemetryUtils";
+import type { Span } from "@opentelemetry/api";
+import {
+  initObservability,
+  shutdownObservability,
+  withSpan,
+} from "../../../shared/utils/telemetryUtils";
 
 const say = (s = ""): void => {
   process.stdout.write(`${s}\n`);
@@ -77,6 +82,18 @@ const byLabel = (evidence: Evidence[]): Map<string, number | null> => {
 
 async function main(): Promise<void> {
   initObservability();
+  try {
+    const code = await withSpan("parity.run", { "app.scenarios": SCENARIOS.length }, runParity);
+    await shutdownObservability();
+    process.exit(code);
+  } catch (error) {
+    await shutdownObservability();
+    throw error;
+  }
+}
+
+/** Returns the exit code; `main` owns the exit so the root span ends and flushes first. */
+async function runParity(span: Span): Promise<number> {
   let failures = 0;
   let vacuous = 0;
 
@@ -98,8 +115,8 @@ async function main(): Promise<void> {
       `  Nothing to compare: with the rollup unavailable both passes read the raw view, so a pass`,
     );
     say(`  here would be vacuous. Run \`bun run ch:rollup\` first.`);
-    await shutdownObservability();
-    process.exit(2);
+    span.setAttribute("app.parity.outcome", "no_rollup");
+    return 2;
   }
 
   for (const s of SCENARIOS) {
@@ -205,8 +222,13 @@ async function main(): Promise<void> {
     );
   }
   say(``);
-  await shutdownObservability();
-  process.exit(failures === 0 ? 0 : 1);
+  span.setAttributes({
+    "app.parity.failures": failures,
+    "app.parity.vacuous": vacuous,
+    "app.parity.outcome":
+      failures > 0 ? "differ" : vacuous === SCENARIOS.length ? "vacuous" : "identical",
+  });
+  return failures === 0 ? 0 : 1;
 }
 
 if (import.meta.main) {

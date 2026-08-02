@@ -13,15 +13,33 @@
  * of a script without failing a clean machine.
  */
 import { resolveTargetDatabase, serverClient } from "./target";
+import type { Span } from "@opentelemetry/api";
+import {
+  initObservability,
+  shutdownObservability,
+  withSpan,
+} from "../../../shared/utils/telemetryUtils";
 
 const say = (s = ""): void => {
   process.stderr.write(`${s}\n`);
 };
 
 async function main(): Promise<void> {
+  initObservability();
+  try {
+    await withSpan("synth.destroy", {}, runDestroy);
+  } finally {
+    await shutdownObservability();
+  }
+}
+
+async function runDestroy(span: Span): Promise<void> {
   const db = resolveTargetDatabase();
   const confirmed = process.argv.includes("--yes");
   const client = serverClient();
+  // A destructive command is exactly the one you want a record of afterwards: what database, and
+  // whether this run was the preview or the one that actually dropped it.
+  span.setAttributes({ "app.database": db, "app.confirmed": confirmed });
 
   try {
     const exists = await client.query({
@@ -32,6 +50,7 @@ async function main(): Promise<void> {
     const [row] = (await exists.json()) as Array<{ n: string | number }>;
     if (Number(row?.n ?? 0) === 0) {
       say(`[synth] "${db}" does not exist — nothing to destroy.`);
+      span.setAttribute("app.outcome", "absent");
       return;
     }
 
@@ -67,10 +86,13 @@ async function main(): Promise<void> {
       );
     }
 
+    span.setAttributes({ "app.tables": parts.length, "app.rows": totalRows });
+
     if (!confirmed) {
       say(``);
       say(`[synth] preview only — nothing was dropped.`);
       say(`[synth] to actually remove it:  bun run synth:destroy -- --yes`);
+      span.setAttribute("app.outcome", "preview");
       return;
     }
 
@@ -83,6 +105,7 @@ async function main(): Promise<void> {
     say(
       `[synth] gone. Rebuild any time with \`bun run synth:build\` — seed-fixed, so it comes back identical.`,
     );
+    span.setAttribute("app.outcome", "dropped");
   } finally {
     await client.close();
   }

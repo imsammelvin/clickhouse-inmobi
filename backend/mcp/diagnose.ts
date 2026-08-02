@@ -41,7 +41,12 @@ import {
   renderHtml,
   renderMarkdown,
 } from "./report";
-import { initObservability, shutdownObservability } from "../../shared/utils/telemetryUtils";
+import type { Span } from "@opentelemetry/api";
+import {
+  initObservability,
+  shutdownObservability,
+  withSpan,
+} from "../../shared/utils/telemetryUtils";
 
 /**
  * How many incidents to investigate. A cap for readability, not a detection threshold: a digest a
@@ -193,8 +198,7 @@ async function call(
   }
 }
 
-async function main(): Promise<void> {
-  initObservability();
+async function runDiagnose(span: Span): Promise<void> {
   const started = Date.now();
 
   const top = Number(arg("top") ?? DEFAULT_TOP);
@@ -208,6 +212,14 @@ async function main(): Promise<void> {
 
   const session = new Session();
   say(`[diagnose] run ${session.runId} — sweeping, nothing supplied by a human`);
+
+  span.setAttributes({
+    "app.run_id": session.runId,
+    "app.top": top,
+    ...(metrics ? { "app.metrics": metrics.join(",") } : {}),
+    ...(from ? { "app.window.from": from } : {}),
+    ...(to ? { "app.window.to": to } : {}),
+  });
 
   try {
     // ---- 1. what have we got --------------------------------------------------------------
@@ -412,6 +424,13 @@ async function main(): Promise<void> {
 
     // A diagnosis whose text is not fully grounded is not a diagnosis we can submit.
     const ungrounded = diagnosed.filter((d) => !d.grounding.ok);
+    span.setAttributes({
+      "app.incidents.found": windowsFound,
+      "app.incidents.diagnosed": diagnosed.length,
+      "app.incidents.skipped": skipped.length,
+      "app.incidents.ungrounded": ungrounded.length,
+      "app.queries": session.snapshot().totals.queries,
+    });
     if (ungrounded.length) {
       say("");
       say(`[diagnose] FAILED: ${ungrounded.length} report(s) contain an ungrounded number.`);
@@ -419,6 +438,23 @@ async function main(): Promise<void> {
     }
   } finally {
     await session.close();
+  }
+}
+
+/**
+ * Root span for the whole sweep.
+ *
+ * `initObservability` runs before the span and `shutdownObservability` after it, in that order and
+ * not the other way round: a span opened before the provider exists gets the no-op tracer, and a
+ * span still open when the batch processor is torn down is never exported. Between them, every
+ * `mcp.tool.*` call this run makes hangs off one trace, so a `bun run diagnose` is a single thing to
+ * open in ClickStack rather than a dozen unconnected roots.
+ */
+async function main(): Promise<void> {
+  initObservability();
+  try {
+    await withSpan("diagnose.run", {}, runDiagnose);
+  } finally {
     await shutdownObservability();
   }
 }
