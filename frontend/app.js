@@ -55,7 +55,7 @@ function setHtmlPreservingFocus(el, html) {
 // nav
 // ---------------------------------------------------------------------------
 
-const views = ["chat", "anomalies", "rollup", "llm", "health"];
+const views = ["chat", "anomalies", "alerts", "rollup", "llm", "health"];
 const loaded = new Set();
 
 document.querySelectorAll("nav button").forEach((btn) => {
@@ -63,6 +63,7 @@ document.querySelectorAll("nav button").forEach((btn) => {
     const v = btn.dataset.view;
     document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b === btn));
     views.forEach((name) => $("#view-" + name).classList.toggle("active", name === v));
+    if (v === "alerts") renderAlerts();
     if (!loaded.has(v)) {
       loaded.add(v);
       loadView(v);
@@ -685,94 +686,93 @@ function renderHealth() {
 
 
 /* ---------------------------------------------------------------------------------------------
- * While you were away.
+ * Alerts — the watchman's findings, as a page rather than a banner.
  *
- * The feed STAYS UP for the day. The watchman runs when nobody is here, so its findings are the first
- * thing you should see on return and the last thing that should disappear because you clicked
- * something. An earlier version watermarked on dismiss and hid everything permanently — which meant a
- * real incident could be one stray click away from never being read again.
+ * This began as a strip above the nav and that was the wrong shape: it pushed the entire app down,
+ * occupied permanent vertical space for something read once a day, and had nowhere to grow. A tab
+ * costs nothing when empty and has room for detail when it is not.
  *
- * So dismiss only collapses it, and the watermark is the newest item ALREADY SHOWN rather than the
- * current time. Anything the cron writes afterwards is newer than that mark, so the panel re-opens by
- * itself. Polling closes the last gap: "stays up until there is a new feed" has to survive a tab left
- * open all afternoon, not just a page load.
+ * The badge is what keeps it discoverable — it carries the unseen count, so the page still announces
+ * itself without stealing the layout. Opening the tab is what marks them read, which is the natural
+ * gesture; nothing needs dismissing.
  * ------------------------------------------------------------------------------------------------ */
-const AWAY_SEEN_KEY = "watchman.seenAt";
-const AWAY_COLLAPSED_KEY = "watchman.collapsed";
-const AWAY_POLL_MS = 60_000;
+const ALERTS_SEEN_KEY = "watchman.seenAt";
 
-let awayItems = [];
+let alertItems = [];
 
-function isToday(iso) {
-  const d = new Date(iso);
-  const now = new Date();
-  return d.toDateString() === now.toDateString();
+/* The log accumulates across watch lifetimes, so re-creating a watch replays incidents it already
+   reported — the same fill_rate drop appeared twice in the panel. One row per (metric, segment, day):
+   a recurrence on a NEW day is news, the same day arriving twice is bookkeeping. */
+function dedupeAlerts(items) {
+  const seen = new Set();
+  return items.filter((n) => {
+    const key = `${n.metric}|${n.where}|${n.day}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
-function renderAway() {
-  const el = document.querySelector("#away");
-  if (!el) return;
+function unseenCount() {
+  const seenAt = localStorage.getItem(ALERTS_SEEN_KEY) ?? "";
+  return alertItems.filter((n) => n.at > seenAt).length;
+}
 
-  // The day's feed, not "everything since you last looked" — that is what keeps it up.
-  const today = awayItems.filter((n) => isToday(n.at));
-  if (today.length === 0) {
-    el.hidden = true;
+function renderAlertsBadge() {
+  const badge = $("#alerts-badge");
+  if (!badge) return;
+  const n = unseenCount();
+  badge.textContent = String(n);
+  badge.hidden = n === 0;
+}
+
+function renderAlerts() {
+  const el = $("#alerts-body");
+  if (!el) return;
+  el.classList.remove("loading", "err");
+
+  if (alertItems.length === 0) {
+    el.innerHTML =
+      '<div class="card empty">Nothing yet. Ask in chat about an incident and say yes when it ' +
+      "offers to watch it — anything it catches later shows up here.</div>";
     return;
   }
 
-  const seenAt = localStorage.getItem(AWAY_SEEN_KEY) ?? "";
-  const unseen = today.filter((n) => n.at > seenAt);
-  // Collapsed only counts while nothing new has arrived; a new item overrides the user's dismissal.
-  const collapsed = localStorage.getItem(AWAY_COLLAPSED_KEY) === "1" && unseen.length === 0;
+  const seenAt = localStorage.getItem(ALERTS_SEEN_KEY) ?? "";
+  el.innerHTML =
+    '<table><thead><tr><th>When</th><th>Metric</th><th>Where</th><th>Day</th><th>Move</th><th>Req/day</th></tr></thead><tbody>' +
+    alertItems
+      .map((n) => {
+        const fresh = n.at > seenAt;
+        const dir = n.pct < 0 ? "drop" : "rise";
+        return (
+          `<tr class="${fresh ? "fresh" : ""}">` +
+          `<td>${esc(new Date(n.at).toLocaleString())}${fresh ? ' <em class="new">new</em>' : ""}</td>` +
+          `<td>${esc(n.metric)}</td><td>${esc(n.where)}</td><td>${esc(n.day)}</td>` +
+          `<td class="${dir}">${n.pct >= 0 ? "+" : ""}${n.pct.toFixed(0)}%</td>` +
+          `<td>${Number(n.requestsPerDay).toLocaleString()}</td></tr>`
+        );
+      })
+      .join("") +
+    "</tbody></table>";
 
-  document.querySelector("#away-title").textContent = collapsed
-    ? `While you were away — ${today.length} today`
-    : `While you were away — ${today.length} thing${today.length > 1 ? "s" : ""} you asked to be told about` +
-      (unseen.length && unseen.length < today.length ? ` (${unseen.length} new)` : "");
-
-  document.querySelector("#away-dismiss").textContent = collapsed ? "Show" : "Hide";
-
-  const list = document.querySelector("#away-list");
-  list.hidden = collapsed;
-  list.innerHTML = today
-    .map((n) => {
-      const dir = n.pct < 0 ? "down" : "up";
-      const isNew = n.at > seenAt;
-      return `<li${isNew ? ' class="fresh"' : ""}><b>${n.metric}</b> ${dir} ${Math.abs(n.pct).toFixed(0)}%
-        on <b>${n.where}</b> &middot; ${n.day}
-        &middot; ~${Number(n.requestsPerDay).toLocaleString()} requests/day${isNew ? " &middot; <em>new</em>" : ""}</li>`;
-    })
-    .join("");
-
-  el.hidden = false;
+  // Opening the tab is the read receipt. Marked AFTER rendering so the "new" markers are visible on
+  // the visit that earned them, and gone on the next.
+  const newest = alertItems.map((n) => n.at).sort().pop();
+  if (newest) localStorage.setItem(ALERTS_SEEN_KEY, newest);
+  renderAlertsBadge();
 }
 
-async function loadAway() {
+async function loadAlerts() {
   try {
-    // No `since` filter: the panel owns the day's feed and decides what is new, so a reload cannot
-    // lose an item the server would otherwise have filtered out of the response.
     const data = await getJson("/api/watch");
-    awayItems = data.notifications ?? [];
-    renderAway();
+    alertItems = dedupeAlerts(data.notifications ?? []);
   } catch {
-    // The dashboard is useful without this panel; never let it take the page down.
+    alertItems = [];
   }
+  if ($("#view-alerts")?.classList.contains("active")) renderAlerts();
+  else renderAlertsBadge();
 }
 
-document.querySelector("#away-dismiss")?.addEventListener("click", () => {
-  const today = awayItems.filter((n) => isToday(n.at));
-  const collapsed = localStorage.getItem(AWAY_COLLAPSED_KEY) === "1";
-  if (collapsed) {
-    localStorage.setItem(AWAY_COLLAPSED_KEY, "0");
-  } else {
-    localStorage.setItem(AWAY_COLLAPSED_KEY, "1");
-    // Mark the newest item SHOWN, not the current time: anything written after this is genuinely
-    // unseen and must be able to re-open the panel.
-    const newest = today.map((n) => n.at).sort().pop();
-    if (newest) localStorage.setItem(AWAY_SEEN_KEY, newest);
-  }
-  renderAway();
-});
-
-loadAway();
-setInterval(loadAway, AWAY_POLL_MS);
+loadAlerts();
+setInterval(loadAlerts, 60_000);

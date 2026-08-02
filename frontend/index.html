@@ -7,17 +7,6 @@
     <link rel="stylesheet" href="style.css?v=3" />
   </head>
   <body>
-    <!--
-      While you were away. Hidden until the watchman has something unseen to report — an empty strip
-      that is always there teaches people to stop looking at it.
-    -->
-    <div id="away" hidden>
-      <div class="away-head">
-        <strong id="away-title"></strong>
-        <button id="away-dismiss" type="button">Dismiss</button>
-      </div>
-      <ul id="away-list"></ul>
-    </div>
     <nav>
       <div class="brand">
         <span class="dot" aria-hidden="true"></span>Mission <span class="grad">Control</span>
@@ -25,7 +14,9 @@
       <div class="tabs">
         <button data-view="chat" class="active"><span class="ic">💬</span>Chat</button>
         <button data-view="anomalies"><span class="ic">🚨</span>Anomalies</button>
-        <button data-view="rollup"><span class="ic">📦</span>Rollup vs Raw</button>
+        <button data-view="alerts"><span class="ic">🔔</span>Alerts<span id="alerts-badge" hidden></span></button>
+        <!-- Rollup vs Raw: hidden for now. The view and its API are intact; restore the button to bring it back. -->
+        <button data-view="rollup" hidden><span class="ic">📦</span>Rollup vs Raw</button>
         <button data-view="llm"><span class="ic">🧠</span>LLM Cost</button>
         <button data-view="health"><span class="ic">💓</span>System Health</button>
       </div>
@@ -51,6 +42,20 @@
             <span id="a-range-note"></span>
           </div>
           <div id="anomalies-body" class="loading">
+            <div class="spinner"></div>
+            Loading…
+          </div>
+        </div>
+      </div>
+
+      <div class="view" id="view-alerts">
+        <div class="pad">
+          <h1>🔔 Alerts</h1>
+          <div class="sub">
+            What the watchman found while nobody was watching. These are incidents you asked to be
+            told about, caught by the scheduled sweep rather than by someone opening this page.
+          </div>
+          <div id="alerts-body" class="loading">
             <div class="spinner"></div>
             Loading…
           </div>
