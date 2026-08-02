@@ -1,0 +1,191 @@
+import { EventEmitter } from 'events';
+import { logger } from '@librechat/data-schemas';
+import type { IEventTransport } from '../interfaces/IJobStore';
+
+interface StreamState {
+  emitter: EventEmitter;
+  allSubscribersLeftCallback?: () => void;
+}
+
+/**
+ * In-memory event transport using Node.js EventEmitter.
+ * For horizontal scaling, replace with RedisEventTransport.
+ */
+export class InMemoryEventTransport implements IEventTransport {
+  private streams = new Map<string, StreamState>();
+
+  private getOrCreateStream(streamId: string): StreamState {
+    let state = this.streams.get(streamId);
+    if (!state) {
+      const emitter = new EventEmitter();
+      emitter.setMaxListeners(100);
+      state = { emitter };
+      this.streams.set(streamId, state);
+    }
+    return state;
+  }
+
+  subscribe(
+    streamId: string,
+    handlers: {
+      onChunk: (event: unknown, generationId?: number) => void;
+      onDone?: (event: unknown, generationId?: number) => void;
+      onError?: (error: string, generationId?: number) => void;
+    },
+  ): { unsubscribe: () => void; ready?: Promise<void> } {
+    const state = this.getOrCreateStream(streamId);
+
+    const chunkHandler = (event: unknown, generationId?: number) => {
+      if (generationId == null) {
+        handlers.onChunk(event);
+        return;
+      }
+      handlers.onChunk(event, generationId);
+    };
+    const doneHandler = (event: unknown, generationId?: number) => {
+      if (generationId == null) {
+        handlers.onDone?.(event);
+        return;
+      }
+      handlers.onDone?.(event, generationId);
+    };
+    const errorHandler = (error: string, generationId?: number) => {
+      if (generationId == null) {
+        handlers.onError?.(error);
+        return;
+      }
+      handlers.onError?.(error, generationId);
+    };
+
+    state.emitter.on('chunk', chunkHandler);
+    state.emitter.on('done', doneHandler);
+    state.emitter.on('error', errorHandler);
+
+    logger.debug(
+      `[InMemoryEventTransport] subscribe ${streamId}: listeners=${state.emitter.listenerCount('chunk')}`,
+    );
+
+    return {
+      unsubscribe: () => {
+        const currentState = this.streams.get(streamId);
+        if (currentState) {
+          if (!currentState.emitter.listeners('chunk').includes(chunkHandler)) {
+            return;
+          }
+
+          currentState.emitter.off('chunk', chunkHandler);
+          currentState.emitter.off('done', doneHandler);
+          currentState.emitter.off('error', errorHandler);
+
+          // Check if all subscribers left - cleanup and notify
+          if (currentState.emitter.listenerCount('chunk') === 0) {
+            currentState.allSubscribersLeftCallback?.();
+            /* Remove all EventEmitter listeners but preserve stream state
+             * (including allSubscribersLeftCallback) for reconnection.
+             * State is fully cleaned up by cleanup() when the job completes.
+             */
+            currentState.emitter.removeAllListeners();
+          }
+        }
+      },
+    };
+  }
+
+  emitChunk(streamId: string, event: unknown, generationId?: number): void {
+    const state = this.streams.get(streamId);
+    state?.emitter.emit('chunk', event, generationId);
+  }
+
+  emitDone(streamId: string, event: unknown, generationId?: number): void {
+    const state = this.streams.get(streamId);
+    state?.emitter.emit('done', event, generationId);
+  }
+
+  emitError(streamId: string, error: string, generationId?: number): void {
+    const state = this.streams.get(streamId);
+    // Only emit if there are listeners - Node.js throws on unhandled 'error' events
+    // This is intentional for the race condition where error occurs before client connects
+    if (state?.emitter.listenerCount('error') ?? 0 > 0) {
+      state?.emitter.emit('error', error, generationId);
+    }
+  }
+
+  getSubscriberCount(streamId: string): number {
+    const state = this.streams.get(streamId);
+    return state?.emitter.listenerCount('chunk') ?? 0;
+  }
+
+  onAllSubscribersLeft(streamId: string, callback: () => void): void {
+    const state = this.getOrCreateStream(streamId);
+    state.allSubscribersLeftCallback = callback;
+  }
+
+  /**
+   * Check if this is the first subscriber (for ready signaling)
+   */
+  isFirstSubscriber(streamId: string): boolean {
+    const state = this.streams.get(streamId);
+    const count = state?.emitter.listenerCount('chunk') ?? 0;
+    logger.debug(`[InMemoryEventTransport] isFirstSubscriber ${streamId}: count=${count}`);
+    return count === 1;
+  }
+
+  closeLocalSubscribers(streamId: string, error: string): void {
+    const state = this.streams.get(streamId);
+    if (!state) {
+      return;
+    }
+
+    const errorListeners = state.emitter.listeners('error');
+    for (const listener of errorListeners) {
+      try {
+        listener(error);
+      } catch (err) {
+        logger.error(
+          `[InMemoryEventTransport] Failed to close local subscriber for ${streamId}:`,
+          err,
+        );
+      }
+    }
+
+    if (state.emitter.listenerCount('chunk') === 0) {
+      return;
+    }
+
+    state.emitter.removeAllListeners();
+    state.allSubscribersLeftCallback?.();
+  }
+
+  /**
+   * Cleanup a stream's event emitter
+   */
+  cleanup(streamId: string): void {
+    const state = this.streams.get(streamId);
+    if (state) {
+      state.emitter.removeAllListeners();
+      this.streams.delete(streamId);
+    }
+  }
+
+  /**
+   * Get count of tracked streams (for monitoring)
+   */
+  getStreamCount(): number {
+    return this.streams.size;
+  }
+
+  /**
+   * Get all tracked stream IDs (for orphan cleanup)
+   */
+  getTrackedStreamIds(): string[] {
+    return Array.from(this.streams.keys());
+  }
+
+  destroy(): void {
+    for (const state of this.streams.values()) {
+      state.emitter.removeAllListeners();
+    }
+    this.streams.clear();
+    logger.debug('[InMemoryEventTransport] Destroyed');
+  }
+}
