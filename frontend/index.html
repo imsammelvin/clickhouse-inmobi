@@ -14,7 +14,9 @@
       <div class="tabs">
         <button data-view="chat" class="active"><span class="ic">💬</span>Chat</button>
         <button data-view="anomalies"><span class="ic">🚨</span>Anomalies</button>
-        <button data-view="alerts"><span class="ic">🔔</span>Alerts<span id="alerts-badge" hidden></span></button>
+        <button data-view="alerts">
+          <span class="ic">🔔</span>Alerts<span id="alerts-badge" hidden></span>
+        </button>
         <!-- Rollup vs Raw: hidden for now. The view and its API are intact; restore the button to bring it back. -->
         <button data-view="rollup" hidden><span class="ic">📦</span>Rollup vs Raw</button>
         <button data-view="llm"><span class="ic">🧠</span>LLM Cost</button>
@@ -35,8 +37,8 @@
             Live sweep from the investigation engine — what it actually found, not a mock.
           </div>
           <div class="range">
-            <label>From <input type="date" id="a-from"></label>
-            <label>To <input type="date" id="a-to"></label>
+            <label>From <input type="date" id="a-from" /></label>
+            <label>To <input type="date" id="a-to" /></label>
             <button id="a-apply" type="button">Apply</button>
             <button id="a-reset" type="button" class="ghost">All time</button>
             <span id="a-range-note"></span>

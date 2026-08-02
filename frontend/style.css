@@ -588,58 +588,183 @@ tr.sev-rise td:first-child {
   user-select: none;
 }
 
-
-
 /* A new item since you last collapsed the panel — the reason it re-opened. */
 
 /* Alerts tab badge — keeps the page discoverable without a banner stealing the layout. */
 #alerts-badge {
-  display: inline-block; margin-left: 6px; min-width: 18px; padding: 1px 6px;
-  border-radius: 9px; background: var(--bad); color: #fff;
-  font-size: 10px; font-weight: 700; line-height: 16px; text-align: center;
+  display: inline-block;
+  margin-left: 6px;
+  min-width: 18px;
+  padding: 1px 6px;
+  border-radius: 9px;
+  background: var(--bad);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
 }
-tr.fresh td { color: var(--text); }
-em.new { color: var(--bad); font-style: normal; font-weight: 700; font-size: 10px; text-transform: uppercase; }
-td.drop { color: var(--bad); font-variant-numeric: tabular-nums; }
-td.rise { color: var(--good); font-variant-numeric: tabular-nums; }
+tr.fresh td {
+  color: var(--text);
+}
+em.new {
+  color: var(--bad);
+  font-style: normal;
+  font-weight: 700;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+td.drop {
+  color: var(--bad);
+  font-variant-numeric: tabular-nums;
+}
+td.rise {
+  color: var(--good);
+  font-variant-numeric: tabular-nums;
+}
 
 /* Alert cards. The verdict leads; the numbers are supporting detail, because "what broke and who
    owns it" is the thing a reader needs before anything else. */
-.card.alert { padding: 14px 16px; margin-bottom: 10px; }
-.card.alert.fresh { border-left: 3px solid var(--bad); }
-.alert-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.alert-what { font-size: 14px; color: var(--text); }
-.alert-what .drop { color: var(--bad); font-weight: 700; }
-.alert-what .rise { color: var(--good); font-weight: 700; }
-.alert-meta { font-size: 11px; color: var(--muted); margin-top: 4px; }
-.alert-verdict { font-size: 13px; color: var(--text); margin-top: 10px; font-weight: 600; }
-.alert-because { font-size: 13px; color: var(--muted); margin-top: 4px; line-height: 1.55; }
-.alert-cleared { font-size: 12px; color: var(--muted); margin-top: 6px; }
+.card.alert {
+  padding: 14px 16px;
+  margin-bottom: 10px;
+}
+.card.alert.fresh {
+  border-left: 3px solid var(--bad);
+}
+.alert-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.alert-what {
+  font-size: 14px;
+  color: var(--text);
+}
+.alert-what .drop {
+  color: var(--bad);
+  font-weight: 700;
+}
+.alert-what .rise {
+  color: var(--good);
+  font-weight: 700;
+}
+.alert-meta {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.alert-verdict {
+  font-size: 13px;
+  color: var(--text);
+  margin-top: 10px;
+  font-weight: 600;
+}
+.alert-because {
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 4px;
+  line-height: 1.55;
+}
+.alert-cleared {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 6px;
+}
 
 /* Alert card detail. Ordered by what a reader needs first: verdict, then size, then why, then
    whether it is still going, then what was ruled out. */
-.alert-tags { display: flex; gap: 6px; align-items: center; flex: none; }
-.alert-tags em { font-style: normal; font-size: 10px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: .04em; padding: 2px 7px; border-radius: 9px; }
-em.pri { background: var(--border); color: var(--muted); }
-em.pri.act_now { background: var(--bad); color: #fff; }
-em.new { background: var(--accent); color: #0b0b0c; }
-.alert-verdict.live { color: var(--bad); }
-.alert-facts { display: flex; flex-wrap: wrap; gap: 6px 8px; margin-top: 8px; }
-.alert-facts span { font-size: 11px; color: var(--muted); background: var(--panel-solid);
-  border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; }
-.alert-facts b { color: var(--text); font-variant-numeric: tabular-nums; }
-.alert-status { font-size: 12px; color: var(--muted); margin-top: 8px; line-height: 1.5; }
-.alert-status b { color: var(--text); }
-.alert-next { font-size: 12px; color: var(--muted); margin-top: 8px; }
-.alert-next code { background: var(--panel-solid); border: 1px solid var(--border);
-  border-radius: 5px; padding: 2px 6px; font-size: 11px; }
+.alert-tags {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex: none;
+}
+.alert-tags em {
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border-radius: 9px;
+}
+em.pri {
+  background: var(--border);
+  color: var(--muted);
+}
+em.pri.act_now {
+  background: var(--bad);
+  color: #fff;
+}
+em.new {
+  background: var(--accent);
+  color: #0b0b0c;
+}
+.alert-verdict.live {
+  color: var(--bad);
+}
+.alert-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  margin-top: 8px;
+}
+.alert-facts span {
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--panel-solid);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 8px;
+}
+.alert-facts b {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.alert-status {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 8px;
+  line-height: 1.5;
+}
+.alert-status b {
+  color: var(--text);
+}
+.alert-next {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 8px;
+}
+.alert-next code {
+  background: var(--panel-solid);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 2px 6px;
+  font-size: 11px;
+}
 
 /* Hand-off to chat, bottom-right: the last thing read and the natural place to act from. */
-.alert-actions { display: flex; justify-content: flex-end; margin-top: 14px; }
-button.ask {
-  background: var(--accent); color: #0b0b0c; border: none; border-radius: 7px;
-  padding: 6px 14px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit;
+.alert-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
 }
-button.ask:hover { filter: brightness(1.1); }
-.alert-actions .alert-next { margin-top: 0; }
+button.ask {
+  background: var(--accent);
+  color: #0b0b0c;
+  border: none;
+  border-radius: 7px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+button.ask:hover {
+  filter: brightness(1.1);
+}
+.alert-actions .alert-next {
+  margin-top: 0;
+}

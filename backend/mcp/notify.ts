@@ -69,7 +69,11 @@ async function sendResend(to: string, subject: string, text: string): Promise<De
     });
     return res.ok
       ? { sent: true, via: "resend" }
-      : { sent: false, via: "log", reason: `resend returned ${res.status}: ${(await res.text()).slice(0, 120)}` };
+      : {
+          sent: false,
+          via: "log",
+          reason: `resend returned ${res.status}: ${(await res.text()).slice(0, 120)}`,
+        };
   } catch (error) {
     return { sent: false, via: "log", reason: `resend failed: ${(error as Error).message}` };
   }
@@ -108,7 +112,11 @@ export function smtpConfig(): SmtpConfig | { missing: string[] } {
 async function sendSmtp(to: string, subject: string, text: string): Promise<Delivery> {
   const cfg = smtpConfig();
   if ("missing" in cfg) {
-    return { sent: false, via: "log", reason: `SMTP not configured (missing ${cfg.missing.join(", ")})` };
+    return {
+      sent: false,
+      via: "log",
+      reason: `SMTP not configured (missing ${cfg.missing.join(", ")})`,
+    };
   }
   if (!to || !to.includes("@")) {
     return { sent: false, via: "log", reason: `no email address for this watch ("${to}")` };
@@ -118,7 +126,11 @@ async function sendSmtp(to: string, subject: string, text: string): Promise<Deli
   try {
     nodemailer = await import("nodemailer");
   } catch {
-    return { sent: false, via: "log", reason: "nodemailer is not installed — run: bun add nodemailer" };
+    return {
+      sent: false,
+      via: "log",
+      reason: "nodemailer is not installed — run: bun add nodemailer",
+    };
   }
 
   try {
@@ -134,12 +146,20 @@ async function sendSmtp(to: string, subject: string, text: string): Promise<Deli
   } catch (error) {
     // Never let a mail failure take the run down: the finding is already in the log, and a cron that
     // exits non-zero on a transient SMTP error will be muted by whoever is on call.
-    return { sent: false, via: "log", reason: `SMTP send failed: ${(error as Error).message.split("\n")[0]}` };
+    return {
+      sent: false,
+      via: "log",
+      reason: `SMTP send failed: ${(error as Error).message.split("\n")[0]}`,
+    };
   }
 }
 
 /** Try each sink in order of setup cost; the first configured one wins. */
-export async function sendNotification(to: string, subject: string, text: string): Promise<Delivery> {
+export async function sendNotification(
+  to: string,
+  subject: string,
+  text: string,
+): Promise<Delivery> {
   return (
     (await sendWebhook(subject, text)) ??
     (await sendResend(to, subject, text)) ??
@@ -149,7 +169,8 @@ export async function sendNotification(to: string, subject: string, text: string
 
 /** One-line description of where a notification would go, printed on every run. */
 export function deliveryStatus(): string {
-  if (process.env.WATCH_WEBHOOK_URL) return `webhook (${new URL(process.env.WATCH_WEBHOOK_URL).host})`;
+  if (process.env.WATCH_WEBHOOK_URL)
+    return `webhook (${new URL(process.env.WATCH_WEBHOOK_URL).host})`;
   if (process.env.RESEND_API_KEY) return "email via Resend";
   const cfg = smtpConfig();
   return "missing" in cfg

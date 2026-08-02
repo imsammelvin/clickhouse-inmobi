@@ -59,7 +59,9 @@ const views = ["chat", "anomalies", "alerts", "rollup", "llm", "health"];
 const loaded = new Set();
 
 function activateView(v) {
-  document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b.dataset.view === v));
+  document
+    .querySelectorAll("nav button")
+    .forEach((b) => b.classList.toggle("active", b.dataset.view === v));
   views.forEach((name) => $("#view-" + name).classList.toggle("active", name === v));
   if (v === "alerts") renderAlerts();
   if (!loaded.has(v)) {
@@ -134,7 +136,8 @@ async function loadAnomalies() {
         input.min = b.from;
         input.max = b.to;
         const applied = id === "#a-from" ? w && w.from : w && w.to;
-        if (!input.value || data.windowIsDefault) input.value = applied || (id === "#a-from" ? b.from : b.to);
+        if (!input.value || data.windowIsDefault)
+          input.value = applied || (id === "#a-from" ? b.from : b.to);
       }
     }
     const note = $("#a-range-note");
@@ -700,7 +703,6 @@ function renderHealth() {
   });
 }
 
-
 /* ---------------------------------------------------------------------------------------------
  * Alerts — the watchman's findings, as a page rather than a banner.
  *
@@ -810,7 +812,9 @@ function renderAlerts() {
       if (d && d.sharePct !== null)
         facts.push(`<span><b>${d.sharePct.toFixed(1)}%</b> of traffic</span>`);
       if (d && d.deltaPp !== null)
-        facts.push(`<span><b>${d.deltaPp >= 0 ? "+" : ""}${d.deltaPp.toFixed(1)}</b> points</span>`);
+        facts.push(
+          `<span><b>${d.deltaPp >= 0 ? "+" : ""}${d.deltaPp.toFixed(1)}</b> points</span>`,
+        );
       if (d && d.sigma !== null)
         facts.push(`<span><b>${Math.abs(d.sigma).toFixed(0)}σ</b> from normal</span>`);
       if (d && d.impactUsdPerDay !== null)
@@ -829,21 +833,15 @@ function renderAlerts() {
         (d ? `<em class="pri ${esc(d.priority)}">${esc(d.priority.replace(/_/g, " "))}</em>` : "") +
         (fresh ? '<em class="new">new</em>' : "") +
         `</span></div>` +
-
         `<div class="alert-meta">${esc(n.day)} &middot; ~${Number(n.requestsPerDay).toLocaleString()} requests/day` +
         ` &middot; caught ${esc(new Date(n.at).toLocaleString())}</div>` +
-
         (d
           ? `<div class="alert-verdict ${live ? "live" : ""}">` +
-              `${live ? "🔴" : "🟠"} <b>${esc(d.channelLabel ?? d.channel)}</b> — ${esc(d.owner)}</div>` +
-
+            `${live ? "🔴" : "🟠"} <b>${esc(d.channelLabel ?? d.channel)}</b> — ${esc(d.owner)}</div>` +
             (facts.length ? `<div class="alert-facts">${facts.join("")}</div>` : "") +
-
             `<div class="alert-because">${esc(d.because)}</div>` +
-
             `<div class="alert-status"><b>${live ? "Still happening." : "Recovered."}</b> ` +
-              `${esc(d.statusDetail)}</div>` +
-
+            `${esc(d.statusDetail)}</div>` +
             (d.clearedCount > 0
               ? `<div class="alert-cleared">✅ <b>${d.clearedCount}</b> other slice(s) looked implicated and were checked and cleared` +
                 (d.clearedExamples && d.clearedExamples.length
@@ -851,12 +849,11 @@ function renderAlerts() {
                   : "") +
                 `. They only moved because the real cause sits inside them.</div>`
               : "") +
-
             (d.nextQuestion
               ? `<div class="alert-next">Next: <code>${esc(d.nextQuestion)}</code></div>`
               : "") +
             `<div class="alert-actions">` +
-              `<button type="button" class="ask" data-ask="${esc(alertQuestion(n))}">💬 Ask in chat</button>` +
+            `<button type="button" class="ask" data-ask="${esc(alertQuestion(n))}">💬 Ask in chat</button>` +
             `</div>`
           : `<div class="alert-because">Detected by the sweep; the full investigation did not complete, so no cause is stated here.</div>` +
             `<div class="alert-actions"><button type="button" class="ask" data-ask="${esc(alertQuestion(n))}">💬 Ask in chat</button></div>`) +
@@ -867,7 +864,10 @@ function renderAlerts() {
 
   // Opening the tab is the read receipt. Marked AFTER rendering so the "new" markers are visible on
   // the visit that earned them, and gone on the next.
-  const newest = alertItems.map((n) => n.at).sort().pop();
+  const newest = alertItems
+    .map((n) => n.at)
+    .sort()
+    .pop();
   if (newest) localStorage.setItem(ALERTS_SEEN_KEY, newest);
   renderAlertsBadge();
 }

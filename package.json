@@ -32,6 +32,7 @@
     "narrate": "bun run backend/mcp/eval/narrate.ts",
     "parity": "bun run backend/mcp/eval/parity.ts",
     "verify": "bun run backend/mcp/verify-all.ts",
+    "sanity": "OTEL_SERVICE_NAME=clickhouse-inmobi-sanity bun run backend/mcp/sanity.ts",
     "typecheck": "tsc --noEmit",
     "criteria": "bun run backend/engine/criteria.ts",
     "scan": "bun run backend/engine/scan.ts",

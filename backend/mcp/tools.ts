@@ -843,7 +843,8 @@ const watchThis: ToolDef = {
           `Mission Control, most recent ${fired[fired.length - 1]!.day}. Tell them it is waiting there now.`
         : "Nothing firing right now, so the Alerts tab is empty until it recurs. Say so -- silence is the good case.";
     } catch {
-      firstSweep = "The first check could not be run. The watch is saved and the scheduled sweep still covers it.";
+      firstSweep =
+        "The first check could not be run. The watch is saved and the scheduled sweep still covers it.";
     }
 
     return {
