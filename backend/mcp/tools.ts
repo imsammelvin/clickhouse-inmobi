@@ -48,7 +48,7 @@ import {
   weeklyGrowthFor,
 } from "./query";
 import { recommendAction } from "./action";
-import { addWatch, listWatches, removeWatch } from "./watch";
+import { addWatch, listWatches, removeWatch, runOnce } from "./watch";
 import type { Session, ToolOutcome } from "./trace";
 
 export interface ToolDef {
@@ -799,10 +799,34 @@ const watchThis: ToolDef = {
       note: typeof args.note === "string" ? args.note : "",
     });
     const where = w.dimension ? `${w.dimension} = '${w.value}'` : "the platform";
+
+    /**
+     * Sweep this one watch immediately, so the Alerts tab is not empty when they go and look.
+     *
+     * Waiting for the next scheduled pass to say anything makes the feature look broken at exactly
+     * the moment it was asked for. Scoped to this watch by id -- a full sweep here would make an
+     * interactive tool call pay for every other watch on the box.
+     *
+     * Never fatal. The watch is saved before this runs, so a failed sweep costs a first alert, not
+     * the subscription: reporting failure here would tell the user their watch did not take, which
+     * is worse than being wrong about how quickly they will hear back.
+     */
+    let firstSweep: string;
+    try {
+      const fired = await runOnce({ only: w.id });
+      firstSweep = fired.length
+        ? `Already firing: ${fired.length} alert${fired.length > 1 ? "s" : ""} on the Alerts tab of ` +
+          `Mission Control, most recent ${fired[fired.length - 1]!.day}. Tell them it is waiting there now.`
+        : "Nothing firing right now, so the Alerts tab is empty until it recurs. Say so -- silence is the good case.";
+    } catch {
+      firstSweep = "The first check could not be run. The watch is saved and the scheduled sweep still covers it.";
+    }
+
     return {
       summary: `watching ${def.name} on ${where}`,
       payload: {
         watching: { id: w.id, metric: w.metric, where, since: w.createdAt },
+        firstSweep,
         howItWorks:
           "A sweep runs out of band on a schedule and checks whether this fires again. You are told " +
           "once per occurrence, not once per run, and nothing is sent while it stays normal.",
